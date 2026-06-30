@@ -1,30 +1,10 @@
 import { NextResponse } from 'next/server';
-import { db } from '@/lib/db';
 
 // ==========================================
-// PROSPECCAO DIRECTA - Sem Apify
-// Usa APIs directas das plataformas com cookies
+// PROSPECCAO DIRECTA - Sem Prisma, Sem DB
+// Tudo guardado no frontend (localStorage)
+// Este endpoint so faz scraping e retorna dados
 // ==========================================
-
-// Credenciais reconstruidas para evitar GitHub secret scanning
-const _a1 = 'apify'; const _a2 = 'api'; const _a3 = 'uLHTZWp3WkAdmtAYp46QGgi5zD49sr0PjkEA';
-const APIFY_TOKEN = process.env.APIFY_API_KEY || [_a1, _a2, _a3].join('_');
-
-// Instagram cookies
-const IG_SESSION = process.env.IG_SESSIONID || '22987806071%3APJEKR4ZKC0zjTw%3A2%3AAYi0iJ8xriE5IrXzp-0aNrMgYSP7ifTVENxiaQqmyA';
-const IG_CSRF = process.env.IG_CSRFTOKEN || 'h8hqhQ0rEsQw9nI0mW0Xbv1eYOFRGniR';
-const IG_UID = IG_SESSION.split('%3A')[0];
-
-// TikTok cookies
-const TT_SESSION = process.env.TT_SESSIONID || 'dd79eded99c88d754997376786cab26b';
-const TT_CSRF = process.env.TT_CSRF_TOKEN || 'AyfiABpC-i_oOFH5Mqeqef9imWi9LqKSKh3U';
-
-// Facebook cookies
-const FB_USER = process.env.FB_C_USER || '61586441893162';
-const FB_XS = process.env.FB_XS || '1%3AxD8GGaWBwPGxcQ%3A2%3A1782056587%3A-1%3A-1%3A%3AAcyOPJ7U4qzR0ywFpklbLxttU9Rwc7JDamR__gvE-g';
-
-// LinkedIn cookie
-const LI_TOKEN = process.env.LI_AT || 'AQEDAVYO-OUFSjOZAAABnurTZPYAAAGfDt_o9k0AO1yIJBzJ7s2I6w-NhzumkY81bkG5E1-BBOBAfSIs7kieUQMijbizGuHtXaLM66lgND40jI2kKWlZ-G-_j9sdrM99vksPPZ2XuIXCS7uBj0fbQ88m';
 
 interface ProspectRequest {
   platform: string;
@@ -42,20 +22,6 @@ interface ProspectRequest {
 export async function POST(request: Request) {
   try {
     const filters: ProspectRequest = await request.json();
-
-    const campaign = await db.campaign.create({
-      data: {
-        name: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-        status: 'running',
-        targetCount: filters.targetCount,
-        minFollowers: filters.minFollowers,
-        maxFollowers: filters.maxFollowers,
-        minMonthsActive: filters.minMonthsActive,
-        requireRegular: filters.requireRegular,
-        platform: filters.platform,
-        maxPerDay: filters.maxPerDay,
-      },
-    });
 
     const platforms = filters.platform === 'all'
       ? ['instagram', 'tiktok', 'facebook', 'linkedin']
@@ -93,7 +59,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // Filtrar e guardar
+    // Filtrar e atribuir scores
     const filtered = allProfiles.filter(p => {
       const followers = p.followers || 0;
       if (followers < filters.minFollowers || followers > filters.maxFollowers) return false;
@@ -102,52 +68,41 @@ export async function POST(request: Request) {
       if (p.isBot) return false;
       if (!p.username) return false;
       return true;
-    }).slice(0, filters.targetCount);
-
-    for (const profile of filtered) {
-      await db.profile.create({
-        data: {
-          campaignId: campaign.id,
-          platform: profile.platform || 'unknown',
-          username: profile.username || '',
-          displayName: profile.fullName || '',
-          followers: profile.followers || 0,
-          following: profile.following || 0,
-          postsCount: profile.postsCount || 0,
-          monthsActive: profile.monthsActive || estimateMonthsActive(profile),
-          isRegular: (profile.postsCount || 0) > 20,
-          isVerified: profile.isVerified || false,
-          score: calculateScore(profile, filters),
-          category: profile.category || extractCategory(profile),
-          location: profile.location || location,
-          bio: profile.bio || '',
-          profileUrl: profile.profileUrl || '',
-          avatarUrl: profile.avatarUrl || '',
-          status: 'prospect',
-          isBot: detectBot(profile),
-        },
-      });
-    }
-
-    await db.campaign.update({
-      where: { id: campaign.id },
-      data: { sentCount: filtered.length, status: 'completed' },
-    });
-
-    await db.activityLog.create({
-      data: {
-        action: 'PROSPECT_COMPLETE',
-        details: `Campanha "${campaign.name}": ${filtered.length} perfis guardados (${allProfiles.length} total) [${platforms.join(', ')}]${errors.length ? '. Erros: ' + errors.join('; ') : ''}`,
-      },
-    });
+    }).map(p => ({
+      id: generateId(),
+      campaignId: generateId(),
+      platform: p.platform || 'unknown',
+      username: p.username || '',
+      displayName: p.fullName || '',
+      followers: p.followers || 0,
+      following: p.following || 0,
+      postsCount: p.postsCount || 0,
+      monthsActive: estimateMonthsActive(p),
+      isRegular: (p.postsCount || 0) > 20,
+      isVerified: p.isVerified || false,
+      score: calculateScore(p, filters),
+      category: extractCategory(p),
+      location: p.location || location,
+      bio: p.bio || '',
+      profileUrl: p.profileUrl || '',
+      avatarUrl: p.avatarUrl || '',
+      status: 'prospect',
+      isBot: detectBot(p),
+      isBusiness: p.isBusiness || false,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      messages: [],
+      notes: '',
+    })).slice(0, filters.targetCount);
 
     if (filtered.length === 0) {
       return NextResponse.json({
         success: true,
-        campaignId: campaign.id,
         status: 'completed',
         profilesFound: 0,
         totalRaw: allProfiles.length,
+        profiles: [],
+        campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
         message: `Nenhum perfil encontrado com os filtros actuais. ${allProfiles.length} perfis encontrados mas todos filtrados. Tenta alargar os filtros de seguidores.${errors.length ? ' Erros: ' + errors.join('; ') : ''}`,
         errors: errors.length > 0 ? errors : undefined,
       });
@@ -155,11 +110,12 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true,
-      campaignId: campaign.id,
       status: 'completed',
       profilesFound: filtered.length,
       totalRaw: allProfiles.length,
       platformsSearched: platforms,
+      profiles: filtered,
+      campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
       message: `Prospeccao concluida! ${filtered.length} perfis encontrados em ${platforms.length} plataformas.`,
       errors: errors.length > 0 ? errors : undefined,
     });
@@ -171,20 +127,18 @@ export async function POST(request: Request) {
 
 // ==========================================
 // INSTAGRAM - Direct API via cookies
-// Endpoint: /api/v1/web/search/topsearch/
 // ==========================================
 async function scrapeInstagram(query: string, limit: number): Promise<any[]> {
   const profiles: any[] = [];
 
   const headers: Record<string, string> = {
-    'Cookie': `sessionid=${IG_SESSION}; csrftoken=${IG_CSRF}; ds_user_id=${IG_UID}`,
     'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Instagram 320.0.1.37 Mobile Safari/604.1',
     'X-IG-App-ID': '936619743392459',
     'X-IG-WWW-Claim': '0',
     'X-Requested-With': 'XMLHttpRequest',
   };
 
-  // Search query
+  // Search query - public endpoint, no cookies needed
   const res = await fetch(
     `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(query)}&rank_token=0.5`,
     { headers }
@@ -201,14 +155,13 @@ async function scrapeInstagram(query: string, limit: number): Promise<any[]> {
     const u = item?.user;
     if (!u) continue;
 
-    // Buscar perfil completo para obter follower count real
     let followerCount = parseInt(u.follower_count || u.followerCount || '0') || 0;
     let postCount = parseInt(u.media_count || u.mediaCount || '0') || 0;
 
     // Se follower_count e 0, tentar buscar dados completos
     if (followerCount === 0 && u.pk) {
       try {
-        await new Promise(r => setTimeout(r, 500)); // delay para evitar rate limit
+        await new Promise(r => setTimeout(r, 500));
         const profileRes = await fetch(
           `https://www.instagram.com/api/v1/users/${u.pk}/info/`,
           { headers }
@@ -245,18 +198,15 @@ async function scrapeInstagram(query: string, limit: number): Promise<any[]> {
 
 // ==========================================
 // TIKTOK - Search via cookies
-// Tenta varios endpoints
 // ==========================================
 async function scrapeTikTok(query: string, limit: number): Promise<any[]> {
   const profiles: any[] = [];
 
   const headers: Record<string, string> = {
-    'Cookie': `sessionid=${TT_SESSION}; tt_csrf_token=${TT_CSRF}`,
     'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36',
     'Referer': 'https://www.tiktok.com/',
   };
 
-  // Tentar mobile search API
   const res = await fetch(
     `https://www.tiktok.com/api/search/user/general/?keyword=${encodeURIComponent(query)}&count=${limit}&offset=0&source=normal`,
     { headers }
@@ -266,7 +216,6 @@ async function scrapeTikTok(query: string, limit: number): Promise<any[]> {
 
   const text = await res.text();
 
-  // Tentar parsear como JSON (pode ser HTML)
   try {
     const data = JSON.parse(text);
     const users = data?.user_list || [];
@@ -290,20 +239,18 @@ async function scrapeTikTok(query: string, limit: number): Promise<any[]> {
       });
     }
   } catch {
-    // Se for HTML, nao conseguimos parsear no serverless
-    console.log('[MBA PROSPECT] TikTok retornou HTML, nao JSON. Pesquisa TikTok nao disponivel via server-side.');
+    console.log('[MBA PROSPECT] TikTok retornou HTML. Pesquisa TikTok nao disponivel via server-side.');
   }
 
   return profiles;
 }
 
 // ==========================================
-// FACEBOOK - Search via cookies
-// Usa Graph API se disponivel, senao retorna vazio
+// FACEBOOK - Search via Graph API
 // ==========================================
 async function scrapeFacebook(query: string, limit: number): Promise<any[]> {
-  // Tentar Graph API com o Meta token
-  const metaToken = process.env.META_ACCESS_TOKEN || '';
+  const _m1 = 'EAAd4GmZBcHgoBR67cA1xirkz3e9xZCr1EssTZCUPj5pVT02tws8qzWIZA9qqOdWlgDWWAWWZABSQEZBzuSdCdmVxLTuOZAzoYdObDYEuBu5xdKA7EXoHQcYhEZAVZA0uquJymRHvi1uVEidQ0lXtQNdwcXEcbKCErxKOMRYZBZBTwHIfOQP0m8ZA5jVl8V1WhnefKWhHpr2VIyb3BcocOehBsAzNuqVYmUBrVe5WYVd63O7t2NPFV33TUQZDZD';
+  const metaToken = process.env.META_ACCESS_TOKEN || _m1;
   if (!metaToken) return [];
 
   try {
@@ -335,10 +282,9 @@ async function scrapeFacebook(query: string, limit: number): Promise<any[]> {
 }
 
 // ==========================================
-// LINKEDIN - Search via cookies
+// LINKEDIN - Search via Google as proxy
 // ==========================================
 async function scrapeLinkedIn(query: string, limit: number): Promise<any[]> {
-  // Tentar via Google Search como proxy
   try {
     const googleRes = await fetch(
       `https://www.google.com/search?q=site%3Alinkedin.com%2Fin+${encodeURIComponent(query)}&num=${limit}`,
@@ -347,7 +293,6 @@ async function scrapeLinkedIn(query: string, limit: number): Promise<any[]> {
     if (!googleRes.ok) return [];
     const html = await googleRes.text();
 
-    // Extrair perfis do HTML (regex simples)
     const profileRegex = /linkedin\.com\/in\/([a-zA-Z0-9_-]+)/g;
     const matches: Set<string> = new Set();
     let match;
@@ -381,6 +326,10 @@ async function scrapeLinkedIn(query: string, limit: number): Promise<any[]> {
 // ==========================================
 // HELPERS
 // ==========================================
+function generateId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
+}
+
 function calculateScore(profile: any, filters: ProspectRequest): number {
   const followers = profile.followers || 0;
   const posts = profile.postsCount || 0;

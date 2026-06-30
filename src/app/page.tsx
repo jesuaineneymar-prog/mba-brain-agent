@@ -27,8 +27,30 @@ const TABS = [
   {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},
   {id:'inbox',label:'INBOX'},{id:'agent',label:'AGENTE IA'},
 ];
+
+// ==========================================
+// LOCALSTORAGE DATA MANAGEMENT
+// ==========================================
+const LS_PROFILES = 'mba_profiles';
+const LS_MESSAGES = 'mba_messages';
+const LS_SENT_TODAY = 'mba_sent_today';
+const LS_SENT_DATE = 'mba_sent_date';
+
+const loadProfiles = (): any[] => { try { const d = localStorage.getItem(LS_PROFILES); return d ? JSON.parse(d) : []; } catch { return []; } };
+const saveProfiles = (p: any[]) => { try { localStorage.setItem(LS_PROFILES, JSON.stringify(p)); } catch {} };
+const loadMessages = (): any[] => { try { const d = localStorage.getItem(LS_MESSAGES); return d ? JSON.parse(d) : []; } catch { return []; } };
+const saveMessages = (m: any[]) => { try { localStorage.setItem(LS_MESSAGES, JSON.stringify(m)); } catch {} };
+const getSentToday = (): number => {
+  const today = new Date().toISOString().slice(0, 10);
+  const savedDate = localStorage.getItem(LS_SENT_DATE);
+  if (savedDate !== today) { localStorage.setItem(LS_SENT_DATE, today); localStorage.setItem(LS_SENT_TODAY, '0'); return 0; }
+  return parseInt(localStorage.getItem(LS_SENT_TODAY) || '0');
+};
+const incrementSent = () => { const c = getSentToday() + 1; localStorage.setItem(LS_SENT_TODAY, String(c)); return c; };
+
 const storeGet = (k:string, d:string='') => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const storeSet = (k:string, v:string) => { try { localStorage.setItem(k, v); } catch {} };
+
 const exportCSV = (profiles:any[])=>{if(!profiles.length)return;const h=['Username','Nome','Seguidores','A Seguir','Posts','Score','Estado','Categoria','Localizacao','Plataforma','URL','Verificado','Bot','Bio'];const rows=profiles.map(p=>[p.username||p.handle,p.displayName,p.followers,p.following,p.postsCount,(p.score||0).toFixed(1),p.status,p.category,p.location,p.platform,p.profileUrl,p.isVerified?'Sim':'Nao',p.isBot?'Sim':'Nao',(p.bio||'').substring(0,200).replace(/"/g,"'")]);const csv=[h,...rows].map(r=>r.map(v=>`"${String(v||'').replace(/"/g,"'")}"`).join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`MBA_Prospeccao_${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);};
 const fmtDt = (d:string) => { try { return new Date(d).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); } catch { return d; } };
 const statusColors: Record<string, string> = { prospect: P.textSec, contacted: P.orange, replied: P.blue, accepted: P.green, rejected: '#ff6b6b', blacklisted: '#666' };
@@ -144,7 +166,6 @@ function LoginScreen() {
   return (
     <div style={{ width:'100vw', height:'100vh', background:P.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden', ...gridBg }}>
       <div style={{ position:'absolute', inset:0, background:'radial-gradient(ellipse 70% 50% at 50% 45%, rgba(192,0,28,0.14) 0%, transparent 65%)', pointerEvents:'none' }} />
-      <div style={{ position:'absolute', left:0, right:0, height:1, background:'linear-gradient(transparent,'+P.red+',transparent)', opacity:0.2, animation:'scan 6s linear infinite', pointerEvents:'none' }} />
       <Sphere size={240} />
       <div style={{ position:'absolute', textAlign:'center', animation:'fade-up .6s ease-out' }}>
         <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:42, fontWeight:900, color:P.red, animation:'glitch 4s infinite', letterSpacing:4, marginBottom:6 }}>MBA</div>
@@ -167,29 +188,88 @@ function LoginScreen() {
   );
 }
 
-function DashboardTab({ dashData, onRefresh }: { dashData: any; onRefresh:()=>void }) {
-  if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="Sem dados ainda" sub="Execute uma prospeccao para ver resultados." /></Panel></div>;
+// ==========================================
+// DASHBOARD - calculado a partir de localStorage
+// ==========================================
+function DashboardTab({ onRefresh }: { onRefresh:()=>void }) {
+  const [dashData, setDashData] = useState<any>(null);
+  const computeDash = () => {
+    const profiles = loadProfiles();
+    const messages = loadMessages();
+    const today = new Date().toISOString().slice(0, 10);
+    const contactedToday = profiles.filter(p => p.contactedAt?.slice(0,10) === today).length;
+    const repliedToday = profiles.filter(p => p.repliedAt?.slice(0,10) === today).length;
+    const acceptedToday = profiles.filter(p => p.acceptedAt?.slice(0,10) === today).length;
+    const outboundMessages = messages.filter(m => m.direction === 'outbound').length;
+    const inboundMessages = messages.filter(m => m.direction === 'inbound').length;
+
+    const statusBreakdown: {status:string;count:number}[] = [];
+    const statusMap: Record<string,number> = {};
+    profiles.forEach(p => { statusMap[p.status] = (statusMap[p.status]||0) + 1; });
+    Object.entries(statusMap).forEach(([status,count]) => statusBreakdown.push({status,count}));
+
+    const platformBreakdown: {platform:string;count:number}[] = [];
+    const platMap: Record<string,number> = {};
+    profiles.forEach(p => { platMap[p.platform] = (platMap[p.platform]||0) + 1; });
+    Object.entries(platMap).forEach(([platform,count]) => platformBreakdown.push({platform,count}));
+
+    const topProfiles = [...profiles].sort((a,b) => (b.score||0) - (a.score||0)).slice(0, 10);
+
+    const dailyStats = [];
+    for (let i = 6; i >= 0; i--) {
+      const date = new Date(); date.setDate(date.getDate() - i);
+      const ds = date.toISOString().slice(0, 10);
+      const dayName = date.toLocaleDateString('pt-PT', { weekday: 'short' });
+      dailyStats.push({
+        date: ds, dayName,
+        contacted: profiles.filter(p => p.contactedAt?.slice(0,10) === ds).length,
+        replied: profiles.filter(p => p.repliedAt?.slice(0,10) === ds).length,
+        accepted: profiles.filter(p => p.acceptedAt?.slice(0,10) === ds).length,
+      });
+    }
+
+    setDashData({
+      overview: {
+        totalProfiles: profiles.length, contactedToday, repliedToday, acceptedToday,
+        totalCampaigns: 1, outboundMessages, inboundMessages,
+        responseRate: outboundMessages > 0 ? Math.round((inboundMessages / outboundMessages) * 100) : 0,
+      },
+      statusBreakdown, platformBreakdown, dailyStats, topProfiles,
+    });
+  };
+  useEffect(() => { computeDash(); }, []);
+  useEffect(() => { onRefresh && onRefresh(); }, [onRefresh]);
+
+  if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="A carregar..." sub="" /></Panel></div>;
   const d = dashData;
   const o = d.overview || {};
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Painel Geral</STitle><Btn variant="ghost" size="sm" onClick={onRefresh}>Actualizar</Btn></div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
+        <STitle>Painel Geral</STitle>
+        <Btn variant="ghost" size="sm" onClick={computeDash}>Actualizar</Btn>
+      </div>
       <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
-        <StatCard label="Total de perfis" value={o.totalProfiles||0} sub="na base de dados" />
+        <StatCard label="Total de perfis" value={o.totalProfiles||0} sub="guardados localmente" />
         <StatCard label="Contactados hoje" value={o.contactedToday||0} sub="ultimas 24h" color={P.orange} />
         <StatCard label="Respostas hoje" value={o.repliedToday||0} sub="ultimas 24h" color={P.green} />
         <StatCard label="Taxa de resposta" value={(o.responseRate||0).toFixed(1)+'%'} sub={(o.outboundMessages||0)+' enviadas / '+(o.inboundMessages||0)+' recebidas'} color={P.blue} />
-        <StatCard label="Campanhas" value={o.totalCampaigns||0} sub="total criadas" />
-        <StatCard label="Follow-ups" value={d.pendingFollowUps||0} sub="pendentes" color={P.orange} />
+        <StatCard label="DMs hoje" value={getSentToday()+'/'+LIMIT_DIARIO} sub="limite diario" color={P.orange} />
       </div>
-      <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
         <Panel><STitle>Actividade ultimos 7 dias</STitle>
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{(d.dailyStats || []).map((ds: any, i: number) => {
             const maxC = Math.max(...(d.dailyStats||[]).map((x:any)=>x.contacted),1);
             const maxR = Math.max(...(d.dailyStats||[]).map((x:any)=>x.replied),1);
             return <div key={i}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11 }}>{ds.dayName} {ds.date?ds.date.slice(5):''}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{ds.contacted}c / {ds.replied}r / {ds.accepted}a</span></div>
-              <div style={{ display:'flex', gap:3 }}><div style={{ flex:2 }}><BarComp value={ds.contacted} max={maxC} color={P.orange} h={6} /></div><div style={{ flex:2 }}><BarComp value={ds.replied} max={maxR} color={P.green} h={6} /></div><div style={{ flex:1 }}><BarComp value={ds.accepted} max={Math.max(...(d.dailyStats||[]).map((x:any)=>x.accepted),1)} color={P.blue} h={6} /></div></div>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
+                <span style={{ color:P.textSec, fontSize:11 }}>{ds.dayName} {ds.date?.slice(5)}</span>
+                <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{ds.contacted}c / {ds.replied}r / {ds.accepted}a</span>
+              </div>
+              <div style={{ display:'flex', gap:3 }}>
+                <div style={{ flex:2 }}><BarComp value={ds.contacted} max={maxC} color={P.orange} h={6} /></div>
+                <div style={{ flex:2 }}><BarComp value={ds.replied} max={maxR} color={P.green} h={6} /></div>
+              </div>
             </div>;
           })}</div>
         </Panel>
@@ -197,20 +277,36 @@ function DashboardTab({ dashData, onRefresh }: { dashData: any; onRefresh:()=>vo
           {(d.platformBreakdown || []).length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{d.platformBreakdown.map((p: any, i: number) => {
             const colors = [P.red, P.orange, P.blue, P.green];
             const maxP = Math.max(...d.platformBreakdown.map((x:any)=>x.count),1);
-            return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{p.platform}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span></div><BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} /></div>;
+            return <div key={i}>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
+                <span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{p.platform}</span>
+                <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span>
+              </div>
+              <BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} />
+            </div>;
           })}</div> : <EmptyState icon="\u25CE" title="Sem dados" sub="Aguardando prospeccao" />}
         </Panel>
       </div>
-      <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
         <Panel><STitle>Estado dos Perfis</STitle>
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{(d.statusBreakdown || []).map((s: any, i: number) => (
-            <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><div style={{ width:8, height:8, borderRadius:2, background:statusColors[s.status]||P.textDim }} /><span style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{s.status}</span></div><span style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>{s.count}</span></div>
+            <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <div style={{ width:8, height:8, borderRadius:2, background:statusColors[s.status]||P.textDim }} />
+                <span style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{statusLabels[s.status]||s.status}</span>
+              </div>
+              <span style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>{s.count}</span>
+            </div>
           ))}</div>
         </Panel>
         <Panel><STitle>Top 10 Perfis</STitle>
           {(d.topProfiles || []).length > 0 ? d.topProfiles.map((p: any, i: number) => (
             <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 0', borderBottom:i<9?'1px solid '+P.border:'none' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span>
+                <span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span>
+                <span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span>
+              </div>
               <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{(p.followers||0).toLocaleString('pt-PT')}</span>
             </div>
           )) : <EmptyState icon="\u25CE" title="Sem perfis" sub="Aguardando prospeccao" />}
@@ -220,27 +316,69 @@ function DashboardTab({ dashData, onRefresh }: { dashData: any; onRefresh:()=>vo
   );
 }
 
+// ==========================================
+// PROFILE DETAIL MODAL
+// ==========================================
 function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onClose:()=>void; onUpdate:()=>void }) {
   const [notes, setNotes] = useState(profile?.notes || '');
   const [status, setStatus] = useState(profile?.status || 'prospect');
   const [msg, setMsg] = useState('');
   const [sending, setSending] = useState(false);
+  const [sendResult, setSendResult] = useState('');
   if (!profile) return null;
-  const saveNotes = async () => {
-    await mbaFetch('/api/profiles', { method:'PATCH', body:JSON.stringify({ id:profile.id, notes, status }) });
-    onUpdate();
+
+  const saveNotes = () => {
+    const profiles = loadProfiles();
+    const idx = profiles.findIndex(p => p.id === profile.id);
+    if (idx >= 0) {
+      profiles[idx].notes = notes;
+      profiles[idx].status = status;
+      if (status === 'contacted' && !profiles[idx].contactedAt) profiles[idx].contactedAt = new Date().toISOString();
+      if (status === 'replied' && !profiles[idx].repliedAt) profiles[idx].repliedAt = new Date().toISOString();
+      if (status === 'accepted' && !profiles[idx].acceptedAt) profiles[idx].acceptedAt = new Date().toISOString();
+      saveProfiles(profiles);
+      onUpdate();
+    }
   };
+
   const sendMessage = async () => {
     if (!msg.trim()) return;
-    setSending(true);
-    await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({ profileId:profile.id, message:msg, platform:profile.platform, username:profile.username, campaignId:profile.campaignId }) });
-    setMsg(''); setSending(false); onUpdate();
+    setSending(true); setSendResult('');
+    try {
+      const res = await mbaFetch('/api/send-message', {
+        method:'POST',
+        body: JSON.stringify({ username:profile.username, message:msg, platform:profile.platform, sentToday:getSentToday() }),
+      });
+      const d = await res.json();
+      incrementSent();
+      // Guardar mensagem localmente
+      const allMsgs = loadMessages();
+      allMsgs.push({ id: Date.now().toString(36), profileId:profile.id, username:profile.username, platform:profile.platform, direction:'outbound', content:msg, sentAt:new Date().toISOString(), dmSent:d.dmSent||false });
+      saveMessages(allMsgs);
+      // Actualizar perfil
+      const profiles = loadProfiles();
+      const idx = profiles.findIndex(p => p.id === profile.id);
+      if (idx >= 0) {
+        profiles[idx].status = 'contacted';
+        profiles[idx].contactedAt = new Date().toISOString();
+        saveProfiles(profiles);
+      }
+      setSendResult(d.dmSent ? `DM enviado para @${profile.username}!` : (d.error || 'Mensagem processada'));
+      setMsg(''); onUpdate();
+    } catch { setSendResult('Erro de ligacao'); }
+    setSending(false);
   };
-  const blacklist = async () => {
-    await mbaFetch('/api/blacklist', { method:'POST', body:JSON.stringify({ platform:profile.platform, username:profile.username, reason:'Manual blacklist' }) });
-    await mbaFetch('/api/profiles', { method:'PATCH', body:JSON.stringify({ id:profile.id, status:'blacklisted' }) });
-    onUpdate(); onClose();
+
+  const blacklist = () => {
+    const profiles = loadProfiles();
+    const idx = profiles.findIndex(p => p.id === profile.id);
+    if (idx >= 0) {
+      profiles[idx].status = 'blacklisted';
+      saveProfiles(profiles);
+      onUpdate(); onClose();
+    }
   };
+
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }} onClick={onClose}>
       <div style={{ background:P.surface, border:'1px solid '+P.border, borderRadius:12, padding:20, width:'90%', maxWidth:560, maxHeight:'85vh', overflowY:'auto' }} onClick={e=>e.stopPropagation()}>
@@ -272,6 +410,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
           <Btn variant="danger" onClick={blacklist}>Blacklist</Btn>
           {profile.profileUrl && <a href={profile.profileUrl} target="_blank" rel="noreferrer"><Btn variant="ghost">Abrir perfil</Btn></a>}
         </div>
+        {sendResult && <div style={{ padding:'8px 12px', marginBottom:10, borderRadius:6, border:'1px solid '+(sendResult.includes('enviado')?P.green:P.orange), background:sendResult.includes('enviado')?'rgba(0,192,99,0.08)':'rgba(224,96,0,0.08)', color:sendResult.includes('enviado')?P.green:P.orange, fontSize:12, fontWeight:600 }}>{sendResult}</div>}
         <div style={{ borderTop:'1px solid '+P.border, paddingTop:14 }}>
           <Lbl>Enviar mensagem</Lbl>
           <textarea value={msg} onChange={e=>setMsg(e.target.value)} rows={3} placeholder="Escreva a mensagem..." style={{ ...INP, resize:'vertical', marginBottom:8 }} />
@@ -282,102 +421,117 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   );
 }
 
-function ProspectingTab() {
+// ==========================================
+// PROSPECTING TAB - localStorage
+// ==========================================
+function ProspectingTab({ refreshDash }: { refreshDash:()=>void }) {
   const [form, setForm] = useState({ platform:'instagram', minFollowers:1000, maxFollowers:50000, minMonthsActive:12, requireRegular:true, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
-  const [results, setResults] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterPlat, setFilterPlat] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [search, setSearch] = useState('');
-  const [profiles, setProfiles] = useState<any[]>([]);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
   const [detailProfile, setDetailProfile] = useState<any>(null);
-  const loadProfiles = async () => {
-    const params = new URLSearchParams({ page: String(page), limit: '50' });
-    if (filterPlat !== 'all') params.set('platform', filterPlat);
-    if (filterStatus !== 'all') params.set('status', filterStatus);
-    if (search) params.set('search', search);
-    const res = await mbaFetch('/api/profiles?' + params);
-    if (res.ok) { const d = await res.json(); setProfiles(d.profiles || []); setTotal(d.total || 0); }
+  const [prospectMsg, setProspectMsg] = useState('');
+  const [prospectStatus, setProspectStatus] = useState('');
+  const PER_PAGE = 50;
+
+  // Load profiles from localStorage on mount
+  useEffect(() => {
+    setProfiles(loadProfiles());
+  }, []);
+
+  const reloadProfiles = () => {
+    setProfiles(loadProfiles());
   };
-  useEffect(() => { loadProfiles(); }, [page, filterPlat, filterStatus, search]);
-  const [prospectStatus, setProspectStatus] = useState<string>('');
-  const [prospectMsg, setProspectMsg] = useState<string>('');
-  const [activeCampaignId, setActiveCampaignId] = useState<string>('');
-  const pollRef = useRef<NodeJS.Timeout | null>(null);
+
   const runProspect = async () => {
-    setLoading(true); setResults([]); setProspectStatus('starting'); setProspectMsg('A iniciar prospeccao directa...');
+    setLoading(true); setProspectStatus('starting'); setProspectMsg('A iniciar prospeccao directa...');
     try {
       const res = await mbaFetch('/api/prospect', { method:'POST', body:JSON.stringify(form) });
       const d = await res.json();
-      if (d.success && d.status === 'completed') {
-        setActiveCampaignId(d.campaignId);
+      if (d.success && d.profiles && d.profiles.length > 0) {
+        // Guardar novos perfis no localStorage
+        const existing = loadProfiles();
+        const existingIds = new Set(existing.map(p => p.username + ':' + p.platform));
+        const newProfiles = d.profiles.filter((p: any) => !existingIds.has(p.username + ':' + p.platform));
+        const allProfiles = [...existing, ...newProfiles];
+        saveProfiles(allProfiles);
+        setProfiles(allProfiles);
         setProspectStatus('completed');
-        setProspectMsg(d.message || `${d.profilesFound} perfis encontrados em ${d.platformsSearched?.length || 1} plataformas!`);
-        setLoading(false); loadProfiles(); setPage(1);
+        setProspectMsg(`${d.profilesFound} perfis encontrados! ${newProfiles.length} novos adicionados. Total: ${allProfiles.length}`);
+        setPage(1);
+        refreshDash();
       } else {
         setProspectStatus('error');
-        setProspectMsg(d.message || d.error || 'Erro ao iniciar. Tenta novamente.');
-        setLoading(false);
+        setProspectMsg(d.message || d.error || 'Nenhum perfil encontrado. Tenta alargar os filtros.');
       }
+      setLoading(false);
     } catch { setProspectStatus('error'); setProspectMsg('Erro de ligacao.'); setLoading(false); }
   };
-  const startPolling = (campaignId: string) => {
-    let attempts = 0;
-    const maxAttempts = 120;
-    const poll = async () => {
-      attempts++;
-      try {
-        const res = await mbaFetch('/api/prospect?campaignId=' + campaignId);
-        const d = await res.json();
-        if (d.status === 'completed') {
-          setProspectStatus('completed');
-          setProspectMsg(d.message || (d.profilesFound > 0 ? d.profilesFound + ' perfis reais encontrados via Apify!' : 'Nenhum perfil encontrado com estes filtros.'));
-          setLoading(false); loadProfiles(); setPage(1);
-          if (pollRef.current) clearInterval(pollRef.current);
-        } else if (d.status === 'running') {
-          setProspectMsg(d.message || 'A processar dados reais do Apify...');
-        } else {
-          setProspectStatus('error');
-          setProspectMsg('Erro na prospeccao.');
-          setLoading(false);
-          if (pollRef.current) clearInterval(pollRef.current);
-        }
-      } catch {}
-      if (attempts >= maxAttempts && pollRef.current) { clearInterval(pollRef.current); setLoading(false); setProspectStatus('error'); setProspectMsg('Timeout. Tente novamente.'); }
-    };
-    pollRef.current = setInterval(poll, 5000);
-    poll();
-  };
-  useEffect(() => { return () => { if (pollRef.current) clearInterval(pollRef.current); }; }, []);
+
   const toggleAll = () => {
-    const filtered = profiles.filter(p => (filterPlat==='all' || p.platform===filterPlat) && (filterStatus==='all' || p.status===filterStatus));
-    if (selected.size === filtered.length) setSelected(new Set());
+    const filtered = getFiltered();
+    if (selected.size === filtered.length && filtered.length > 0) setSelected(new Set());
     else setSelected(new Set(filtered.map(p => p.id)));
   };
+
   const bulkMessage = async () => {
     if (!selected.size) return;
-    for (const id of selected) {
-      const p = profiles.find(x => x.id === id);
-      if (p) await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({ profileId:p.id, message:PROPOSTA, platform:p.platform, username:p.username, campaignId:p.campaignId }) });
+    let sent = 0;
+    const profs = profiles.filter(p => selected.has(p.id));
+    for (const p of profs) {
+      if (getSentToday() >= LIMIT_DIARIO) break;
+      try {
+        const res = await mbaFetch('/api/send-message', {
+          method:'POST',
+          body: JSON.stringify({ username:p.username, message:PROPOSTA, platform:p.platform, sentToday:getSentToday() }),
+        });
+        const d = await res.json();
+        incrementSent();
+        const allMsgs = loadMessages();
+        allMsgs.push({ id: Date.now().toString(36)+Math.random().toString(36).slice(2,5), profileId:p.id, username:p.username, platform:p.platform, direction:'outbound', content:PROPOSTA, sentAt:new Date().toISOString(), dmSent:d.dmSent||false });
+        saveMessages(allMsgs);
+        // Update profile status
+        p.status = 'contacted'; p.contactedAt = new Date().toISOString();
+        sent++;
+      } catch {}
+      await new Promise(r => setTimeout(r, 2000)); // 2s entre envios
     }
-    setSelected(new Set()); loadProfiles();
+    saveProfiles(profiles);
+    setSelected(new Set()); reloadProfiles(); refreshDash();
+    alert(`${sent} mensagens enviadas!`);
   };
-  const bulkBlacklist = async () => {
-    for (const id of selected) {
-      const p = profiles.find(x => x.id === id);
-      if (p) { await mbaFetch('/api/blacklist', { method:'POST', body:JSON.stringify({ platform:p.platform, username:p.username }) }); await mbaFetch('/api/profiles', { method:'PATCH', body:JSON.stringify({ id:p.id, status:'blacklisted' }) }); }
-    }
-    setSelected(new Set()); loadProfiles();
+
+  const bulkBlacklist = () => {
+    const profs = loadProfiles();
+    profs.forEach(p => { if (selected.has(p.id)) p.status = 'blacklisted'; });
+    saveProfiles(profs); setSelected(new Set()); reloadProfiles(); refreshDash();
   };
-  const filtered = results.length > 0 ? results : profiles;
+
+  const getFiltered = () => {
+    return profiles.filter(p => {
+      if (filterPlat !== 'all' && p.platform !== filterPlat) return false;
+      if (filterStatus !== 'all' && p.status !== filterStatus) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        if (!(p.username||'').toLowerCase().includes(s) && !(p.displayName||'').toLowerCase().includes(s) && !(p.bio||'').toLowerCase().includes(s)) return false;
+      }
+      return true;
+    });
+  };
+
+  const filtered = getFiltered();
+  const total = filtered.length;
+  const paginated = filtered.slice((page-1)*PER_PAGE, page*PER_PAGE);
+
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <Panel style={{ marginBottom:14 }}>
         <STitle>Nova Prospeccao</STitle>
-        <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
           <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={e=>setForm({...form,platform:e.target.value})} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option><option value="all">Todas</option></select></div>
           <div><Lbl>Nome da campanha</Lbl><input value={form.campaignName} onChange={e=>setForm({...form,campaignName:e.target.value})} placeholder="Ex: Restaurantes Luanda" style={INP} /></div>
           <div><Lbl>Min. Seguidores</Lbl><input type="number" value={form.minFollowers} onChange={e=>setForm({...form,minFollowers:Number(e.target.value)})} style={INP} /></div>
@@ -390,26 +544,31 @@ function ProspectingTab() {
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}><Toggle on={form.requireRegular} onChange={v=>setForm({...form,requireRegular:v})} /><span style={{ color:P.textSec, fontSize:12 }}>Exigir contas regulares</span></div>
         <Btn onClick={runProspect} disabled={loading}>{loading ? 'A prospectar...' : 'Iniciar Prospeccao'}</Btn>
       </Panel>
-      {prospectStatus === 'running' && <Panel style={{ marginBottom:14, borderLeft:'3px solid '+P.orange }}><div style={{ display:'flex', alignItems:'center', gap:10 }}><div style={{ width:16, height:16, border:'3px solid '+P.borderHi, borderTopColor:P.orange, borderRadius:'50%', animation:'spin 1s linear infinite' }} /><div><div style={{ color:P.orange, fontSize:13, fontWeight:600 }}>Prospeccao em curso...</div><div style={{ color:P.textSec, fontSize:12, marginTop:2 }}>{prospectMsg}</div></div></div></Panel>}
       {prospectStatus === 'completed' && <Panel style={{ marginBottom:14, borderLeft:'3px solid '+P.green }}><div style={{ color:P.green, fontSize:13, fontWeight:600 }}>Prospeccao concluida!</div><div style={{ color:P.textSec, fontSize:12, marginTop:2 }}>{prospectMsg}</div></Panel>}
       {prospectStatus === 'error' && <Panel style={{ marginBottom:14, borderLeft:'3px solid #ff6b6b' }}><div style={{ color:'#ff6b6b', fontSize:13, fontWeight:600 }}>Erro</div><div style={{ color:P.textSec, fontSize:12, marginTop:2 }}>{prospectMsg}</div></Panel>}
       <Panel>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}><STitle>Perfis ({total})</STitle>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}>
+          <STitle>Perfis ({total})</STitle>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-            <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Pesquisar..." style={{ ...INP, width:160 }} />
-            <select value={filterPlat} onChange={e=>{setFilterPlat(e.target.value);setPage(1);}} style={{ ...SEL as any, width:110 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option></select>
-            <select value={filterStatus} onChange={e=>{setFilterStatus(e.target.value);setPage(1);}} style={{ ...SEL as any, width:120 }}><option value="all">Todos estados</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option><option value="accepted">Aceite</option></select>
-            <Btn variant="ghost" size="sm" onClick={exportCSV.bind(null, filtered)}>Exportar CSV</Btn>
+            <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Pesquisar..." style={{ ...INP, width:140 }} />
+            <select value={filterPlat} onChange={e=>{setFilterPlat(e.target.value);setPage(1);}} style={{ ...SEL as any, width:100 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option></select>
+            <select value={filterStatus} onChange={e=>{setFilterStatus(e.target.value);setPage(1);}} style={{ ...SEL as any, width:110 }}><option value="all">Todos estados</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option><option value="accepted">Aceite</option></select>
+            <Btn variant="ghost" size="sm" onClick={()=>exportCSV(filtered)}>Exportar CSV</Btn>
           </div>
         </div>
         <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap' }}>
-          <button onClick={toggleAll} style={{ padding:'4px 10px', borderRadius:4, border:'1px solid '+P.border, background:selected.size>0?P.redDim:'transparent', color:selected.size>0?P.redB:P.textSec, fontSize:11, cursor:'pointer' }}>{selected.size===filtered.length?'Desselecionar':'Selecionar todos'}</button>
+          <button onClick={toggleAll} style={{ padding:'4px 10px', borderRadius:4, border:'1px solid '+P.border, background:selected.size>0?P.redDim:'transparent', color:selected.size>0?P.redB:P.textSec, fontSize:11, cursor:'pointer' }}>{selected.size===filtered.length&&filtered.length>0?'Desselecionar':'Selecionar todos'}</button>
           {selected.size > 0 && <><Btn size="sm" onClick={bulkMessage}>Enviar ({selected.size})</Btn><Btn size="sm" variant="danger" onClick={bulkBlacklist}>Blacklist ({selected.size})</Btn></>}
         </div>
         <div style={{ overflowX:'auto' }}>
           <div style={{ minWidth:600 }}>
-            <div style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.border, color:P.textDim, fontSize:10, fontWeight:600, letterSpacing:'.5px' }}><div style={{ width:30 }}><input type="checkbox" checked={selected.size===filtered.length && filtered.length>0} onChange={toggleAll} /></div><div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div><div style={{ width:80, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:60, textAlign:'right' }}>SCORE</div><div style={{ width:90 }}>PLATAFORMA</div><div style={{ width:90 }}>ESTADO</div><div style={{ width:50 }}></div></div>
-            {filtered.map((p: any) => (
+            <div style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.border, color:P.textDim, fontSize:10, fontWeight:600, letterSpacing:'.5px' }}>
+              <div style={{ width:30 }}><input type="checkbox" checked={selected.size===filtered.length && filtered.length>0} onChange={toggleAll} /></div>
+              <div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div>
+              <div style={{ width:80, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:60, textAlign:'right' }}>SCORE</div>
+              <div style={{ width:90 }}>PLATAFORMA</div><div style={{ width:90 }}>ESTADO</div><div style={{ width:50 }}></div>
+            </div>
+            {paginated.map((p: any) => (
               <div key={p.id} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center', background:selected.has(p.id)?P.redDim:'transparent' }}>
                 <div style={{ width:30 }}><input type="checkbox" checked={selected.has(p.id)} onChange={()=>{const s=new Set(selected);s.has(p.id)?s.delete(p.id):s.add(p.id);setSelected(s);}} /></div>
                 <div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{p.username}</div>
@@ -423,123 +582,95 @@ function ProspectingTab() {
             ))}
           </div>
         </div>
-        {total > 50 && <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}><Btn variant="ghost" size="sm" disabled={page<=1} onClick={()=>setPage(page-1)}>Anterior</Btn><span style={{ color:P.textSec, fontSize:12, alignSelf:'center' }}>Pagina {page} de {Math.ceil(total/50)}</span><Btn variant="ghost" size="sm" disabled={page>=Math.ceil(total/50)} onClick={()=>setPage(page+1)}>Proxima</Btn></div>}
+        {total > PER_PAGE && <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}>
+          <Btn variant="ghost" size="sm" disabled={page<=1} onClick={()=>setPage(page-1)}>Anterior</Btn>
+          <span style={{ color:P.textSec, fontSize:12, alignSelf:'center' }}>Pagina {page} de {Math.ceil(total/PER_PAGE)}</span>
+          <Btn variant="ghost" size="sm" disabled={page>=Math.ceil(total/PER_PAGE)} onClick={()=>setPage(page+1)}>Proxima</Btn>
+        </div>}
       </Panel>
-      {detailProfile && <ProfileDetailModal profile={detailProfile} onClose={()=>{setDetailProfile(null);loadProfiles();}} onUpdate={loadProfiles} />}
+      {detailProfile && <ProfileDetailModal profile={detailProfile} onClose={()=>{setDetailProfile(null);reloadProfiles();}} onUpdate={()=>{reloadProfiles();refreshDash();}} />}
     </div>
   );
 }
 
-function MessagesTab() {
-  const [subtab, setSubtab] = useState<'all'|'outbound'|'inbound'>('all');
-  const [messages, setMessages] = useState<any[]>([]);
+// ==========================================
+// MESSAGES TAB - localStorage
+// ==========================================
+function MessagesTab({ refreshDash }: { refreshDash:()=>void }) {
   const [profiles, setProfiles] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   const [selProfile, setSelProfile] = useState('');
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
-  const [scheduled, setScheduled] = useState<any[]>([]);
-  const [abVariants, setAbVariants] = useState<any[]>([]);
-  const [selVariant, setSelVariant] = useState('default');
-  const [schedDate, setSchedDate] = useState('');
-  const [queueInfo, setQueueInfo] = useState<any>({});
-  const [showCreds, setShowCreds] = useState(false);
   const [sendResult, setSendResult] = useState('');
-  const [creds, setCreds] = useState({
-    igSessionId: storeGet('mba_ig_sid', ''),
-    igCsrfToken: storeGet('mba_ig_csrf', ''),
-    igUserId: storeGet('mba_ig_uid', ''),
-    metaAccessToken: storeGet('mba_meta_token', ''),
-    liAt: storeGet('mba_li_at', ''),
-  });
-  const saveCreds = () => { storeSet('mba_ig_sid', creds.igSessionId); storeSet('mba_ig_csrf', creds.igCsrfToken); storeSet('mba_ig_uid', creds.igUserId); storeSet('mba_meta_token', creds.metaAccessToken); storeSet('mba_li_at', creds.liAt); };
-  const loadMessages = async () => {
-    const res = await mbaFetch('/api/profiles?limit=100');
-    let allProfiles: any[] = [];
-    if (res.ok) { const d = await res.json(); allProfiles = d.profiles || []; setProfiles(allProfiles); }
-    const msgs: any[] = [];
-    allProfiles.forEach((p: any) => { if (p.messages) p.messages.forEach((m: any) => msgs.push({...m, _username:p.username, _platform:p.platform})); });
-    setMessages(msgs.sort((a: any, b: any) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
-  };
-  const loadQueue = async () => {
-    const res = await mbaFetch('/api/send-message');
-    if (res.ok) { const d = await res.json(); setQueueInfo(d); setScheduled(d.scheduled || []); }
-  };
-  const loadAB = async () => {
-    const res = await mbaFetch('/api/ab-test');
-    if (res.ok) { const d = await res.json(); setAbVariants(d.variants || []); }
-  };
-  useEffect(() => { loadMessages(); loadQueue(); loadAB(); }, []);
-  const sendMessage = async (sched?: string) => {
+  const [subtab, setSubtab] = useState<'all'|'outbound'|'inbound'>('all');
+
+  useEffect(() => {
+    setProfiles(loadProfiles());
+    setMessages(loadMessages());
+  }, []);
+
+  const sendMessage = async () => {
     if (!selProfile || !msgText.trim()) return;
-    setSending(true);
-    setSendResult('');
-    saveCreds();
-    const prof = profiles.find((p: any) => p.id === selProfile);
-    const res = await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({
-      profileId:selProfile, message:msgText, abTestGroup:selVariant!=='default'?selVariant:undefined,
-      scheduledAt:sched||undefined, platform:prof?.platform, username:prof?.username,
-      credentials: { igSessionId:creds.igSessionId||undefined, igCsrfToken:creds.igCsrfToken||undefined, igUserId:creds.igUserId||undefined, metaAccessToken:creds.metaAccessToken||undefined, liAt:creds.liAt||undefined }
-    })});
-    if (res.ok) { const d = await res.json(); setSendResult(d.dmSent ? `DM enviado com sucesso para @${prof?.username} (${prof?.platform})!` : (d.error || d.message || 'Mensagem guardada.')); }
-    else { const err = await res.json().catch(()=>({})); setSendResult('Erro: ' + (err.error || 'falha ao enviar')); }
-    setSending(false); loadMessages(); loadQueue();
+    setSending(true); setSendResult('');
+    const prof = profiles.find(p => p.id === selProfile);
+    if (!prof) { setSending(false); return; }
+    try {
+      const res = await mbaFetch('/api/send-message', {
+        method:'POST',
+        body: JSON.stringify({ username:prof.username, message:msgText, platform:prof.platform, sentToday:getSentToday() }),
+      });
+      const d = await res.json();
+      incrementSent();
+      const allMsgs = loadMessages();
+      allMsgs.push({ id:Date.now().toString(36), profileId:prof.id, username:prof.username, platform:prof.platform, direction:'outbound', content:msgText, sentAt:new Date().toISOString(), dmSent:d.dmSent||false });
+      saveMessages(allMsgs);
+      // Update profile status
+      const allProfiles = loadProfiles();
+      const idx = allProfiles.findIndex(p => p.id === prof.id);
+      if (idx >= 0) { allProfiles[idx].status = 'contacted'; allProfiles[idx].contactedAt = new Date().toISOString(); saveProfiles(allProfiles); setProfiles(allProfiles); }
+      setMessages(loadMessages());
+      setSendResult(d.dmSent ? `DM enviado com sucesso para @${prof.username} (${prof.platform})!` : (d.error || 'Mensagem processada'));
+    } catch { setSendResult('Erro de ligacao'); }
+    setSending(false); refreshDash();
   };
-  const selMsgText = selVariant !== 'default' ? (abVariants.find(v => v.groupName === selVariant)?.content || msgText) : msgText;
-  const filtered = messages.filter(m => subtab === 'all' || m.direction === subtab);
-  const credStatus = (key: string, label: string) => {
-    const has = !!creds[key as keyof typeof creds];
-    return <span style={{ display:'inline-flex', alignItems:'center', gap:4, fontSize:10, color:has?'#00C063':'#505068' }}>{has ? '\u2713' : '\u25CB'} {label}</span>;
-  };
+
+  const filtered = messages.filter(m => subtab === 'all' || m.direction === subtab).sort((a,b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <div style={{ display:'flex', gap:6, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
         {[['all','Todas'],['outbound','Enviadas'],['inbound','Recebidas']].map(([k,l]) => (
-          <button key={k} onClick={()=>setSubtab(k as any)} style={{ padding:'6px 14px', borderRadius:4, border:'1px solid '+(subtab===k?P.red:P.border), background:subtab===k?P.redDim:'transparent', color:subtab===k?P.redB:P.textSec, fontSize:11, cursor:'pointer', fontWeight:600 }}>{l} ({k==='all'?filtered.length:messages.filter((m:any)=>m.direction===k).length})</button>
+          <button key={k} onClick={()=>setSubtab(k as any)} style={{ padding:'6px 14px', borderRadius:4, border:'1px solid '+(subtab===k?P.red:P.border), background:subtab===k?P.redDim:'transparent', color:subtab===k?P.redB:P.textSec, fontSize:11, cursor:'pointer', fontWeight:600 }}>{l} ({k==='all'?filtered.length:messages.filter(m=>m.direction===k).length})</button>
         ))}
-        <button onClick={()=>{setShowCreds(!showCreds);saveCreds();}} style={{ padding:'6px 14px', borderRadius:4, border:'1px solid '+(showCreds?P.green:P.border), background:showCreds?'rgba(0,192,99,0.08)':'transparent', color:showCreds?P.green:P.textSec, fontSize:11, cursor:'pointer', fontWeight:600, marginLeft:'auto' }}>
-          Credenciais {credStatus('igSessionId','IG')} {credStatus('metaAccessToken','FB')} {credStatus('liAt','LI')}
-        </button>
       </div>
-      {showCreds && <Panel style={{ marginBottom:14, border:'1px solid rgba(0,192,99,0.2)' }}>
-        <STitle style={{ color:P.green }}>Credenciais de Envio DM</STitle>
-        <div style={{ color:P.textSec, fontSize:11, marginBottom:10, lineHeight:1.5 }}>
-          Configure as credenciais para enviar mensagens directamente para as plataformas. Sem credenciais, as mensagens sao guardadas internamente. Para obter: Instagram - abra o browser, inicie sessao no IG, copie os cookies sessionid e csrftoken. Facebook - crie uma app no Facebook Developers e gere um Page Access Token. LinkedIn - inicie sessao no LinkedIn e copie o cookie li_at.
-        </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
-          <div><Lbl>Instagram - sessionid</Lbl><input value={creds.igSessionId} onChange={e=>setCreds({...creds,igSessionId:e.target.value})} placeholder="IG sessionid cookie" style={{...INP, fontSize:11}} /></div>
-          <div><Lbl>Instagram - csrftoken</Lbl><input value={creds.igCsrfToken} onChange={e=>setCreds({...creds,igCsrfToken:e.target.value})} placeholder="IG csrftoken cookie" style={{...INP, fontSize:11}} /></div>
-          <div><Lbl>Instagram - user_id (opcional)</Lbl><input value={creds.igUserId} onChange={e=>setCreds({...creds,igUserId:e.target.value})} placeholder="Seu user ID numerico" style={{...INP, fontSize:11}} /></div>
-          <div><Lbl>Facebook - Page Access Token</Lbl><input value={creds.metaAccessToken} onChange={e=>setCreds({...creds,metaAccessToken:e.target.value})} placeholder="EAAxxxx page token" style={{...INP, fontSize:11}} /></div>
-          <div><Lbl>LinkedIn - li_at cookie</Lbl><input value={creds.liAt} onChange={e=>setCreds({...creds,liAt:e.target.value})} placeholder="AQEDAxo..." style={{...INP, fontSize:11}} /></div>
-          <div><Lbl>TikTok</Lbl><div style={{ ...INP, fontSize:11, color:P.textDim, opacity:0.7, display:'flex', alignItems:'center' }}>Nao suportado - contacte manualmente</div></div>
-        </div>
-        <div style={{ marginTop:10, display:'flex', gap:8, alignItems:'center' }}>
-          <Btn size="sm" onClick={saveCreds} variant="ghost">Guardar credenciais</Btn>
-          <span style={{ color:P.green, fontSize:11 }}>Credenciais guardadas localmente (localStorage)</span>
-        </div>
-      </Panel>}
-      {sendResult && <div style={{ padding:'8px 12px', marginBottom:10, borderRadius:6, border:'1px solid '+(sendResult.includes('sucesso')?P.green:P.orange), background:sendResult.includes('sucesso')?'rgba(0,192,99,0.08)':'rgba(224,96,0,0.08)', color:sendResult.includes('sucesso')?P.green:P.orange, fontSize:12, fontWeight:600 }}>{sendResult}</div>}
+      {sendResult && <div style={{ padding:'8px 12px', marginBottom:10, borderRadius:6, border:'1px solid '+(sendResult.includes('sucesso')||sendResult.includes('enviado')?P.green:P.orange), background:(sendResult.includes('sucesso')||sendResult.includes('enviado'))?'rgba(0,192,99,0.08)':'rgba(224,96,0,0.08)', color:(sendResult.includes('sucesso')||sendResult.includes('enviado'))?P.green:P.orange, fontSize:12, fontWeight:600 }}>{sendResult}</div>}
       <Panel style={{ marginBottom:14 }}>
         <STitle>Enviar Mensagem</STitle>
-        <div style={{ display:'flex', gap:10, marginBottom:10, flexWrap:'wrap' }}>
-          <div style={{ flex:2, minWidth:200 }}><Lbl>Perfil</Lbl><select value={selProfile} onChange={e=>setSelProfile(e.target.value)} style={SEL as any}><option value="">Seleccionar perfil...</option>{profiles.map((p: any) => <option key={p.id} value={p.id}>{p.username} ({p.platform}) {p.followers ? '- ' + p.followers + ' seg' : ''}</option>)}</select></div>
-          <div style={{ flex:1, minWidth:150 }}><Lbl>Variante A/B</Lbl><select value={selVariant} onChange={e=>{setSelVariant(e.target.value);const v=abVariants.find(x=>x.groupName===e.target.value);if(v)setMsgText(v.content);else setMsgText(PROPOSTA);}} style={SEL as any}><option value="default">Padrao</option>{abVariants.map((v: any) => <option key={v.id} value={v.groupName}>{v.name} ({v.sentCount}env / {v.replyCount}resp)</option>)}</select></div>
-          <div style={{ minWidth:160 }}><Lbl>Agendar para</Lbl><input type="datetime-local" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={INP} /></div>
+        <div style={{ marginBottom:10 }}>
+          <Lbl>Perfil</Lbl>
+          <select value={selProfile} onChange={e=>setSelProfile(e.target.value)} style={SEL as any}>
+            <option value="">Seleccionar perfil...</option>
+            {profiles.filter(p=>p.status!=='blacklisted').map((p: any) => <option key={p.id} value={p.id}>{p.username} ({p.platform}) {p.followers ? '- ' + p.followers + ' seg' : ''}</option>)}
+          </select>
         </div>
-        <textarea value={selMsgText} onChange={e=>setMsgText(e.target.value)} rows={4} style={{ ...INP, resize:'vertical', marginBottom:8 }} />
+        <textarea value={msgText} onChange={e=>setMsgText(e.target.value)} rows={4} style={{ ...INP, resize:'vertical', marginBottom:8 }} />
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-          <Btn onClick={()=>sendMessage()} disabled={sending || !selProfile}>{sending ? 'A enviar...' : 'Enviar agora'}</Btn>
-          {schedDate && <Btn variant="ghost" onClick={()=>sendMessage(schedDate)}>Agendar</Btn>}
-          <span style={{ color:P.textDim, fontSize:11 }}>Fila: {queueInfo.remainingToday ?? '?'} restantes hoje</span>
+          <Btn onClick={sendMessage} disabled={sending || !selProfile}>{sending ? 'A enviar...' : 'Enviar agora'}</Btn>
+          <span style={{ color:P.textDim, fontSize:11 }}>Enviados hoje: {getSentToday()}/{LIMIT_DIARIO}</span>
         </div>
       </Panel>
-      {scheduled.length > 0 && <Panel style={{ marginBottom:14 }}><STitle>Mensagens agendadas ({scheduled.length})</STitle>
-        {scheduled.map((m: any, i: number) => <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid '+P.border, alignItems:'center' }}><div><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{m.profiles?.username || '?'}</span><span style={{ color:P.textDim, fontSize:11, marginLeft:8 }}>{fmtDt(m.scheduledAt)}</span></div><StatusBadge status={m.direction} /></div>)}
-      </Panel>}
       <Panel><STitle>Historico ({filtered.length})</STitle>
         {filtered.length > 0 ? filtered.slice(0,100).map((m: any, i: number) => (
           <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:i<99?'1px solid '+P.redDim:'none', alignItems:'center' }}>
-            <div style={{ flex:1, minWidth:0 }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:10, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span><span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{m._username}</span><span style={{ color:P.textDim, fontSize:10 }}>{m._platform}</span>{m.abTestGroup && <span style={{ color:P.blue, fontSize:9, padding:'1px 5px', borderRadius:2, background:P.blue+'18' }}>A/B:{m.abTestGroup}</span>}</div><div style={{ color:P.textSec, fontSize:11, marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.content}</div></div>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                <span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:10, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span>
+                <span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{m.username}</span>
+                <span style={{ color:P.textDim, fontSize:10 }}>{m.platform}</span>
+              </div>
+              <div style={{ color:P.textSec, fontSize:11, marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.content}</div>
+            </div>
             <span style={{ color:P.textDim, fontSize:10, marginLeft:10, flexShrink:0 }}>{fmtDt(m.sentAt)}</span>
           </div>
         )) : <EmptyState icon="\u2709" title="Sem mensagens" sub="As mensagens aparecerao aqui" />}
@@ -548,38 +679,22 @@ function MessagesTab() {
   );
 }
 
-
-
+// ==========================================
+// INBOX TAB - localStorage
+// ==========================================
 function InboxTab() {
   const [messages, setMessages] = useState<any[]>([]);
-  const [conversations, setConversations] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const load = async () => {
-    setLoading(true);
-    const res = await mbaFetch('/api/inbox');
-    if (res.ok) { const d = await res.json(); setMessages(d.messages || []); setConversations(d.metaConversations || []); }
-    setLoading(false);
-  };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { setMessages(loadMessages().filter(m => m.direction === 'inbound').sort((a,b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())); }, []);
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Inbox ({messages.length} mensagens)</STitle><Btn variant="ghost" size="sm" onClick={load} disabled={loading}>{loading ? 'A carregar...' : 'Actualizar'}</Btn></div>
-      {conversations.length > 0 && <Panel style={{ marginBottom:14 }}><STitle>Conversas Meta (Facebook)</STitle>
-        {conversations.map((c: any, i: number) => (
-          <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:i<conversations.length-1?'1px solid '+P.border:'none', alignItems:'center' }}>
-            <div><div style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{c.participant || 'Desconhecido'}</div><div style={{ color:P.textSec, fontSize:11, marginTop:2 }}>{c.snippet}</div></div>
-            <span style={{ color:P.textDim, fontSize:10, flexShrink:0 }}>{c.updatedTime ? fmtDt(c.updatedTime) : ''}</span>
-          </div>
-        ))}
-      </Panel>}
-      <Panel><STitle>Mensagens recebidas</STitle>
+      <STitle>Inbox ({messages.length} mensagens recebidas)</STitle>
+      <Panel>
         {messages.length > 0 ? messages.map((m: any, i: number) => (
-          <div key={m.id || i} style={{ padding:'10px 0', borderBottom:i<messages.length-1?'1px solid '+P.redDim:'none' }}>
+          <div key={i} style={{ padding:'10px 0', borderBottom:i<messages.length-1?'1px solid '+P.redDim:'none' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
               <span style={{ color:P.green, fontSize:10, fontWeight:700 }}>IN</span>
-              <span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{m.profile?.username || 'Desconhecido'}</span>
-              <span style={{ color:P.textDim, fontSize:10 }}>{m.profile?.platform || ''}</span>
-              {!m.isRead && <div style={{ width:6, height:6, borderRadius:'50%', background:P.red }} />}
+              <span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{m.username||'Desconhecido'}</span>
+              <span style={{ color:P.textDim, fontSize:10 }}>{m.platform||''}</span>
             </div>
             <div style={{ color:P.textSec, fontSize:12 }}>{m.content}</div>
             <div style={{ color:P.textDim, fontSize:10, marginTop:4 }}>{fmtDt(m.sentAt)}</div>
@@ -590,13 +705,16 @@ function InboxTab() {
   );
 }
 
+// ==========================================
+// AGENT CHAT
+// ==========================================
 function AgentChat() {
   const [chatHistory, setChatHistory] = useState<{role:string; content:string}[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [profileId, setProfileId] = useState('');
   const chatEnd = useRef<HTMLDivElement>(null);
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior:'smooth' }); }, [chatHistory]);
+
   const send = async () => {
     if (!input.trim() || loading) return;
     const userMsg = input.trim();
@@ -604,7 +722,7 @@ function AgentChat() {
     setChatHistory(h => [...h, { role:'user', content:userMsg }]);
     setLoading(true);
     try {
-      const res = await mbaFetch('/api/respond', { method:'POST', body:JSON.stringify({ profileId: profileId || undefined, message: userMsg, conversationHistory: chatHistory.slice(-10) }) });
+      const res = await mbaFetch('/api/respond', { method:'POST', body:JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10) }) });
       if (res.ok) { const d = await res.json(); setChatHistory(h => [...h, { role:'assistant', content:d.reply }]); }
       else { setChatHistory(h => [...h, { role:'assistant', content:'Erro ao gerar resposta.' }]); }
     } catch { setChatHistory(h => [...h, { role:'assistant', content:'Erro de ligacao.' }]); }
@@ -612,10 +730,7 @@ function AgentChat() {
   };
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <div style={{ padding:'10px 16px', borderBottom:'1px solid '+P.border, display:'flex', gap:10, alignItems:'center' }}>
-        <STitle>Agente IA</STitle>
-        <input value={profileId} onChange={e=>setProfileId(e.target.value)} placeholder="ID do perfil (opcional)" style={{ ...INP, width:200, fontSize:11 }} />
-      </div>
+      <div style={{ padding:'10px 16px', borderBottom:'1px solid '+P.border }}><STitle>Agente IA</STitle></div>
       <div style={{ flex:1, overflowY:'auto', padding:16 }}>
         {chatHistory.length === 0 && <EmptyState icon="\u2609" title="Agente Mwango Brain" sub="Pergunte sobre prospeccao, perfis, ou peca sugestoes de mensagem." />}
         {chatHistory.map((m, i) => (
@@ -637,82 +752,48 @@ function AgentChat() {
   );
 }
 
-
-
-
-
-
+// ==========================================
+// MAIN APP
+// ==========================================
 export default function MBAApp() {
-  const { isAuthenticated, sessionId, activeTab, setActiveTab, setAuthenticated, sessionRestored } = useMBAStore();
-  const [dashData, setDashData] = useState<any>(null);
+  const { isAuthenticated, activeTab, setActiveTab, setAuthenticated } = useMBAStore();
   const [clock, setClock] = useState('');
-  const [notifications, setNotifications] = useState<any[]>([]);
-  const [unreadCount, setUnreadCount] = useState(0);
-  const [showNotifs, setShowNotifs] = useState(false);
-  const loadDash = useCallback(async () => {
-    try { const res = await mbaFetch('/api/dashboard'); if (res.ok) setDashData(await res.json()); } catch {}
-  }, []);
-  const loadNotifs = useCallback(async () => {
-    try { const res = await mbaFetch('/api/notifications'); if (res.ok) { const d = await res.json(); setNotifications(d.messages || []); setUnreadCount(d.unreadCount || 0); } } catch {}
-  }, []);
+  const [dashKey, setDashKey] = useState(0);
+  const refreshDash = () => setDashKey(k => k + 1);
+
   useEffect(() => {
- const sid = storeGet('mba_session');
+    const sid = storeGet('mba_session');
     if (sid) { mbaFetch('/api/auth/check').then(r => { if (r.ok) setAuthenticated(true, sid); else { localStorage.removeItem('mba_session'); } }).catch(() => {}); }
   }, []);
+
   useEffect(() => {
     if (!isAuthenticated) return;
-    loadDash(); loadNotifs();
-    const iv = setInterval(() => { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); loadNotifs(); }, 30000);
     const tick = setInterval(() => setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })), 1000);
-    return () => { clearInterval(iv); clearInterval(tick); };
-  }, [isAuthenticated, loadDash, loadNotifs]);
-  const markNotifsRead = async () => {
-    const ids = notifications.filter(n => !n.isRead).map(n => n.id);
-    if (ids.length > 0) { await mbaFetch('/api/notifications', { method:'PATCH', body:JSON.stringify({ ids }) }); setUnreadCount(0); loadNotifs(); }
-  };
-  const doLogout = () => { localStorage.removeItem('mba_session'); setAuthenticated(false, null); };
+    return () => clearInterval(tick);
+  }, [isAuthenticated]);
+
   if (!isAuthenticated) return <LoginScreen />;
   return (
     <div style={{ width:'100vw', height:'100vh', background:P.bg, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      <div className="mba-header-inner" style={{ height:48, borderBottom:'1px solid '+P.border, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', flexShrink:0, background:P.surface }}>
+      <div style={{ height:48, borderBottom:'1px solid '+P.border, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', flexShrink:0, background:P.surface }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:16, fontWeight:900, color:P.red, letterSpacing:2 }}>MBA</div>
           <div style={{ width:1, height:20, background:P.border }} />
-          <div style={{ color:P.textDim, fontSize:10, letterSpacing:2, textTransform:'uppercase' }} className="mba-hide-mobile">MWANGO BRAIN AGENT</div>
+          <div style={{ color:P.textDim, fontSize:10, letterSpacing:2, textTransform:'uppercase' }}>MWANGO BRAIN AGENT</div>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <div style={{ position:'relative' }}>
-            <button onClick={()=>{setShowNotifs(!showNotifs);if(!showNotifs)markNotifsRead();}} style={{ background:'none', border:'1px solid '+P.border, borderRadius:6, padding:'4px 8px', cursor:'pointer', color:P.textSec, fontSize:14, position:'relative' }}>{unreadCount > 0 && <div style={{ position:'absolute', top:-4, right:-4, width:16, height:16, borderRadius:8, background:P.red, color:'#fff', fontSize:9, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700 }}>{unreadCount > 9 ? '9+' : unreadCount}</div>}☆</button>
-            {showNotifs && <div style={{ position:'absolute', top:36, right:0, width:320, background:P.surface, border:'1px solid '+P.border, borderRadius:8, padding:12, maxHeight:400, overflowY:'auto', zIndex:100 }}>
-              <div style={{ color:P.text, fontSize:12, fontWeight:700, marginBottom:8 }}>Notificacoes</div>
-              {notifications.length > 0 ? notifications.map((n: any, i: number) => (
-                <div key={i} style={{ padding:'6px 0', borderBottom:i<notifications.length-1?'1px solid '+P.redDim:'none' }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:6 }}><span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{n.profile?.username || 'Sistema'}</span>{!n.isRead && <div style={{ width:5, height:5, borderRadius:'50%', background:P.red }} />}</div>
-                  <div style={{ color:P.textSec, fontSize:11, marginTop:2 }}>{n.content}</div>
-                  <div style={{ color:P.textDim, fontSize:9, marginTop:2 }}>{fmtDt(n.sentAt)}</div>
-                </div>
-              )) : <div style={{ color:P.textDim, fontSize:11, textAlign:'center', padding:16 }}>Sem notificacoes</div>}
-            </div>}
-          </div>
-          <div style={{ color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{clock}</div>
-        </div>
+        <div style={{ color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{clock}</div>
       </div>
-      <div className="mba-tabs" style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
+      <div style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
         {TABS.map(t => (
           <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{ padding:'10px 16px', border:'none', borderBottom:activeTab===t.id?'2px solid '+P.red:'2px solid transparent', background:'transparent', color:activeTab===t.id?P.redB:P.textDim, fontSize:11, fontWeight:activeTab===t.id?700:500, cursor:'pointer', whiteSpace:'nowrap', letterSpacing:'.5px', transition:'all .15s' }}>{t.label}</button>
         ))}
       </div>
       <div style={{ flex:1, overflow:'hidden' }}>
-        {activeTab === 'dashboard' && <DashboardTab dashData={dashData} onRefresh={loadDash} />}
-        {activeTab === 'prospecting' && <ProspectingTab />}
-        {activeTab === 'messages' && <MessagesTab />}
-
+        {activeTab === 'dashboard' && <DashboardTab key={dashKey} onRefresh={refreshDash} />}
+        {activeTab === 'prospecting' && <ProspectingTab refreshDash={refreshDash} />}
+        {activeTab === 'messages' && <MessagesTab refreshDash={refreshDash} />}
         {activeTab === 'inbox' && <InboxTab />}
         {activeTab === 'agent' && <AgentChat />}
-
-
-
-
       </div>
     </div>
   );
