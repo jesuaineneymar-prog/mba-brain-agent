@@ -27,3 +27,33 @@ Stage Summary:
   OPENROUTER_API_KEY, APIFY_API_KEY, ACCESS_CODE
   META_ACCESS_TOKEN, IG_SESSIONID, IG_CSRFTOKEN
   FB_C_USER, FB_XS, LI_AT, TT_SESSIONID, TT_CSRF_TOKEN
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Remover Prisma/SQLite - resolver erro "table Campaign does not exist" no Vercel
+
+Work Log:
+- Analisado screenshot: erro "The table 'main.Campaign' does not exist in the current database"
+- Causa raiz: SQLite NAO funciona no Vercel serverless (/tmp/ e efemero)
+- Abordagem: Remover COMPLETAMENTE Prisma/SQLite do fluxo principal
+- Reescrito /api/prospect/route.ts: scraping directo, retorna JSON sem DB
+- Reescrito /api/send-message/route.ts: envia DMs sem guardar em DB
+- Reescrito /api/respond/route.ts: perfil passado no body, sem DB lookup
+- Reescrito /api/dashboard, profiles, inbox, notifications, blacklist, ab-test: sem Prisma
+- Reescrito page.tsx completo: TODOS dados guardados em localStorage
+  - Perfis: mba_profiles
+  - Mensagens: mba_messages
+  - Rate limiting: mba_sent_today / mba_sent_date
+  - Dashboard calculado client-side a partir de localStorage
+  - CSV export funciona a partir de localStorage
+- Build local: OK (0 erros)
+- Push para GitHub: OK
+- Vercel vai fazer deploy automatico
+
+Stage Summary:
+- Removida dependencia total de Prisma/SQLite para o fluxo de prospeccao
+- 10 ficheiros modificados, 523 insercoes, 1031 remocoes
+- Commit: 56ba75f "Removido Prisma/SQLite - tudo guardado em localStorage"
+- Deploy URL: https://mba-brain-agent.vercel.app
+- A prospeccao agora funciona sem base de dados!
