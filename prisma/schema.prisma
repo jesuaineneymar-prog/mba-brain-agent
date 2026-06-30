@@ -1,0 +1,136 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model AccessCode {
+  id        String   @id @default(cuid())
+  code      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  sessions  Session[]
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  accessCodeId String?
+  accessCode   AccessCode? @relation(fields: [accessCodeId], references: [id])
+  ipAddress    String?
+  startedAt    DateTime @default(now())
+  lastActive   DateTime @updatedAt
+}
+
+model Campaign {
+  id              String   @id @default(cuid())
+  name            String
+  status          String   @default("pending")
+  targetCount     Int      @default(200)
+  minFollowers    Int      @default(1000)
+  maxFollowers    Int      @default(50000)
+  minMonthsActive Int      @default(12)
+  requireRegular  Boolean  @default(true)
+  platform        String   @default("all")
+  maxPerDay       Int      @default(50)
+  sentCount       Int      @default(0)
+  repliedCount    Int      @default(0)
+  acceptedCount   Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  profiles        Profile[]
+  messages        Message[]
+}
+
+model Profile {
+  id              String   @id @default(cuid())
+  campaignId      String
+  campaign        Campaign  @relation(fields: [campaignId], references: [id])
+  platform        String
+  username        String
+  displayName     String?
+  followers       Int      @default(0)
+  following       Int      @default(0)
+  postsCount      Int      @default(0)
+  monthsActive    Int      @default(0)
+  isRegular       Boolean  @default(false)
+  isVerified      Boolean  @default(false)
+  score           Float    @default(0)
+  category        String?
+  location        String?
+  bio             String?
+  profileUrl      String?
+  avatarUrl       String?
+  status          String   @default("prospect")
+  contactedAt     DateTime?
+  repliedAt       DateTime?
+  acceptedAt      DateTime?
+  notes           String?
+  isBot           Boolean  @default(false)
+  isBusiness      Boolean  @default(false)
+  externalId      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  messages        Message[]
+  followUps       FollowUp[]
+}
+
+model Message {
+  id           String    @id @default(cuid())
+  profileId    String
+  profile      Profile   @relation(fields: [profileId], references: [id])
+  campaignId   String
+  campaign     Campaign  @relation(fields: [campaignId], references: [id])
+  direction    String
+  content      String
+  sentAt       DateTime  @default(now())
+  scheduledAt  DateTime?
+  isRead       Boolean   @default(false)
+  templateName String?
+  abTestGroup  String?
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  action    String
+  details   String?
+  ipAddress String?
+  createdAt DateTime @default(now())
+}
+
+model Blacklist {
+  id        String   @id @default(cuid())
+  platform  String
+  username  String
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model FollowUp {
+  id         String    @id @default(cuid())
+  profileId  String
+  profile    Profile   @relation(fields: [profileId], references: [id])
+  username   String
+  platform   String
+  scheduledAt DateTime
+  status     String    @default("pending")
+  notes      String?
+  message    String?
+  sentAt     DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+}
+
+model ABTestVariant {
+  id        String   @id @default(cuid())
+  name      String
+  groupName String   @unique
+  content   String
+  isActive  Boolean  @default(true)
+  sentCount Int      @default(0)
+  replyCount Int     @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
