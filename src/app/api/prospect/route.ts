@@ -56,6 +56,7 @@ export async function POST(request: Request) {
 
     // Verificar credenciais antes de comecar
     if (!APIFY_TOKEN) {
+      console.error('[MBA PROSPECT] APIFY_TOKEN is empty! env has key:', !!process.env.APIFY_API_KEY, 'fallback built:', APIFY_TOKEN.length > 0);
       return NextResponse.json({
         success: false,
         error: 'APIFY_API_KEY nao configurada. Va a Settings > Environment Variables no Vercel e adicione a variavel APIFY_API_KEY.',
