@@ -308,18 +308,18 @@ function ProspectingTab() {
   const [activeCampaignId, setActiveCampaignId] = useState<string>('');
   const pollRef = useRef<NodeJS.Timeout | null>(null);
   const runProspect = async () => {
-    setLoading(true); setResults([]); setProspectStatus('starting'); setProspectMsg('A iniciar prospeccao...');
+    setLoading(true); setResults([]); setProspectStatus('starting'); setProspectMsg('A iniciar prospeccao directa...');
     try {
       const res = await mbaFetch('/api/prospect', { method:'POST', body:JSON.stringify(form) });
       const d = await res.json();
-      if (d.success && d.apifyRuns?.length > 0) {
+      if (d.success && d.status === 'completed') {
         setActiveCampaignId(d.campaignId);
-        setProspectStatus('running');
-        setProspectMsg(d.message || 'Runs do Apify iniciados. A processar dados reais...');
-        startPolling(d.campaignId);
+        setProspectStatus('completed');
+        setProspectMsg(d.message || `${d.profilesFound} perfis encontrados em ${d.platformsSearched?.length || 1} plataformas!`);
+        setLoading(false); loadProfiles(); setPage(1);
       } else {
         setProspectStatus('error');
-        setProspectMsg(d.message || 'Erro ao iniciar. Verifique as credenciais Apify.');
+        setProspectMsg(d.message || d.error || 'Erro ao iniciar. Tenta novamente.');
         setLoading(false);
       }
     } catch { setProspectStatus('error'); setProspectMsg('Erro de ligacao.'); setLoading(false); }
