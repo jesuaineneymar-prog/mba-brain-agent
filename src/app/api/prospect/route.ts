@@ -6,6 +6,13 @@ import { NextResponse } from 'next/server';
 // Este endpoint so faz scraping e retorna dados
 // ==========================================
 
+// Credenciais para scraping
+const IG_SESSION = process.env.IG_SESSIONID || '22987806071%3APJEKR4ZKC0zjTw%3A2%3AAYi0iJ8xriE5IrXzp-0aNrMgYSP7ifTVENxiaQqmyA';
+const IG_CSRF = process.env.IG_CSRFTOKEN || 'h8hqhQ0rEsQw9nI0mW0Xbv1eYOFRGniR';
+const TT_SESSION = process.env.TT_SESSIONID || 'dd79eded99c88d754997376786cab26b';
+const TT_CSRF = process.env.TT_CSRF_TOKEN || 'AyfiABpC-i_oOFH5Mqeqef9imWi9LqKSKh3U';
+const META_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAd4GmZBcHgoBR67cA1xirkz3e9xZCr1EssTZCUPj5pVT02tws8qzWIZA9qqOdWlgDWWAWWZABSQEZBzuSdCdmVxLTuOZAzoYdObDYEuBu5xdKA7EXoHQcYhEZAVZA0uquJymRHvi1uVEidQ0lXtQNdwcXEcbKCErxKOMRYZBZBTwHIfOQP0m8ZA5jVl8V1WhnefKWhHpr2VIyb3BcocOehBsAzNuqVYmUBrVe5WYVd63O7t2NPFV33TUQZDZD';
+
 interface ProspectRequest {
   platform: string;
   minFollowers: number;
@@ -131,14 +138,16 @@ export async function POST(request: Request) {
 async function scrapeInstagram(query: string, limit: number): Promise<any[]> {
   const profiles: any[] = [];
 
+  const igUid = IG_SESSION.split('%3A')[0];
   const headers: Record<string, string> = {
+    'Cookie': `sessionid=${IG_SESSION}; csrftoken=${IG_CSRF}; ds_user_id=${igUid}`,
+    'X-CSRFToken': IG_CSRF,
     'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Instagram 320.0.1.37 Mobile Safari/604.1',
     'X-IG-App-ID': '936619743392459',
     'X-IG-WWW-Claim': '0',
     'X-Requested-With': 'XMLHttpRequest',
   };
 
-  // Search query - public endpoint, no cookies needed
   const res = await fetch(
     `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(query)}&rank_token=0.5`,
     { headers }
@@ -249,13 +258,11 @@ async function scrapeTikTok(query: string, limit: number): Promise<any[]> {
 // FACEBOOK - Search via Graph API
 // ==========================================
 async function scrapeFacebook(query: string, limit: number): Promise<any[]> {
-  const _m1 = 'EAAd4GmZBcHgoBR67cA1xirkz3e9xZCr1EssTZCUPj5pVT02tws8qzWIZA9qqOdWlgDWWAWWZABSQEZBzuSdCdmVxLTuOZAzoYdObDYEuBu5xdKA7EXoHQcYhEZAVZA0uquJymRHvi1uVEidQ0lXtQNdwcXEcbKCErxKOMRYZBZBTwHIfOQP0m8ZA5jVl8V1WhnefKWhHpr2VIyb3BcocOehBsAzNuqVYmUBrVe5WYVd63O7t2NPFV33TUQZDZD';
-  const metaToken = process.env.META_ACCESS_TOKEN || _m1;
-  if (!metaToken) return [];
+  if (!META_TOKEN) return [];
 
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/pages/search?q=${encodeURIComponent(query)}&limit=${limit}&access_token=${metaToken}`
+      `https://graph.facebook.com/v19.0/pages/search?q=${encodeURIComponent(query)}&limit=${limit}&access_token=${META_TOKEN}`
     );
     if (!res.ok) return [];
     const data = await res.json();
