@@ -329,26 +329,24 @@ export async function POST(request: Request) {
     if (apifyToken) {
       let queriesToTry = [...baseQueries, ...extraQueries];
       const seenUsers = new Set<string>();
+      let apifyLimitHit = false; // Parar tudo se o limite for atingido
 
       for (const platform of platforms) {
-        if (allProfiles.length >= target) break;
-        // Reset queries para cada plataforma
+        if (allProfiles.length >= target || apifyLimitHit) break;
         queriesToTry = [...baseQueries, ...extraQueries];
 
-        for (let qi = 0; qi < queriesToTry.length && allProfiles.length < target; qi++) {
+        for (let qi = 0; qi < queriesToTry.length && allProfiles.length < target && !apifyLimitHit; qi++) {
           const q = queriesToTry[qi];
           try {
             const remaining = target - allProfiles.length;
             log.push(`${platform}: "${q}" (faltam ${remaining})...`);
             let profiles: any[] = [];
-            const budget = Math.max(12, Math.floor(45 / platforms.length));
             switch (platform) {
               case 'instagram': profiles = await searchInstagram(q, remaining + 10, apifyToken); break;
               case 'tiktok': profiles = await searchTikTok(q, remaining + 10, apifyToken); break;
               case 'facebook': profiles = await searchFacebook(q, remaining + 10, apifyToken); break;
               case 'linkedin': profiles = await searchLinkedIn(q, remaining + 10, apifyToken); break;
             }
-            // Adicionar so perfis nao duplicados
             let added = 0;
             for (const p of profiles) {
               const key = p.username + ':' + p.platform;
@@ -364,9 +362,16 @@ export async function POST(request: Request) {
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
+            // Detectar limite mensal atingido - PARAR IMEDIATAMENTE
+            if (msg.includes('limit exceeded') || msg.includes('hard limit') || msg.includes('USAGE_LIMIT')) {
+              log.push(`LIMITE MENSAL APIFY ATINGIDO - parando todas as buscas`);
+              apifyLimitHit = true;
+              break;
+            }
             log.push(`${platform} erro: ${msg}`);
+            // Se erro na primeira query, saltar para proxima plataforma
+            if (qi === 0) break;
           }
-          // Parar se ja atingiu o alvo ou passou do tempo
           if (Date.now() - startTime > 50000) {
             log.push('Tempo limite atingido (50s)');
             break;
@@ -481,12 +486,16 @@ export async function POST(request: Request) {
     }
 
     if (finalProfiles.length === 0) {
+      const limitHit = log.some(l => l.includes('LIMITE MENSAL'));
+      const msg = limitHit
+        ? 'LIMITE MENSAL DA APIFY ATINGIDO. Cria uma nova conta gratuita em apify.com com outro email e copia a nova API key. O plano gratuito renova a cada mes.'
+        : '0 perfis encontrados. Tenta palavras-chave diferentes ou baixa o minimo de seguidores.';
       return NextResponse.json({
         success: true, status: 'completed',
         profilesFound: 0, totalRaw: allProfiles.length,
         profiles: [],
         campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-        message: `0 perfis encontrados. Tenta palavras-chave diferentes ou baixa o minimo de seguidores.`,
+        message: msg,
         errors: errors.length > 0 ? errors : undefined,
         log,
       });
