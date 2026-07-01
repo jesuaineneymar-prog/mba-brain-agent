@@ -205,14 +205,14 @@ export async function POST(request: Request) {
   var all: any[] = [];
   var seen = new Set<string>();
 
-  // Executar TODAS as plataformas em PARALELO
+  // Executar plataformas em PARALELO - TikTok SEMPRE corre (melhor resultados)
   var promises: Promise<void>[] = [];
+
+  // TikTok sempre como base (resultados reais de Angola)
+  promises.push(fetchTT(loc, target, seen, all, token));
 
   if (platform === 'all' || platform === 'instagram') {
     promises.push(fetchIG(loc, target, seen, all, token));
-  }
-  if (platform === 'all' || platform === 'tiktok') {
-    promises.push(fetchTT(loc, target, seen, all, token));
   }
   if (platform === 'all' || platform === 'facebook') {
     promises.push(fetchFB(loc, target, seen, all, token));
