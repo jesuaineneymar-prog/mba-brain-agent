@@ -300,6 +300,45 @@ function generateAutoReply(inboundMsg: string, profile: any): string {
   return 'Obrigado pela sua resposta, ' + (profile.displayName || profile.username) + '.\n\nGostaria de saber mais sobre a nossa proposta? Estamos disponiveis para esclarecer qualquer duvida.\n\nCumprimentos,\nEquipa Mwango Brain';
 }
 
+async function sendUnsentMessages() {
+  try {
+    var saved: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
+    var todayKey = 'mba_daily_' + new Date().toISOString().slice(0, 10);
+    var dailySent = parseInt(localStorage.getItem(todayKey) || '0');
+    if (dailySent >= 30) return;
+    var sent = 0;
+    var maxBatch = Math.min(5, 30 - dailySent);
+    for (var i = 0; i < saved.length && sent < maxBatch; i++) {
+      var p = saved[i];
+      if (!p.messages) continue;
+      for (var j = 0; j < p.messages.length && sent < maxBatch; j++) {
+        var msg = p.messages[j];
+        if (msg.direction === 'outbound' && !msg.sendAttempted) {
+          msg.sendAttempted = true;
+          try {
+            var sr = await fetch('/api/send-message', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ username: p.username, message: msg.content, platform: p.platform, sentToday: dailySent + sent })
+            });
+            var sd = await sr.json();
+            msg.delivered = sd.dmSent || false;
+            msg.deliveryMsg = sd.message || (sd.error || '');
+          } catch(se) {
+            msg.delivered = false;
+            msg.deliveryMsg = 'Erro de conexao';
+          }
+          sent++;
+        }
+      }
+    }
+    if (sent > 0) {
+      localStorage.setItem('mba_profiles', JSON.stringify(saved));
+      localStorage.setItem(todayKey, String(dailySent + sent));
+    }
+  } catch(e) {}
+}
+
 function checkFollowUpsAndReplies() {
   try {
     var saved: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
@@ -407,6 +446,7 @@ function ProspectingTab() {
         }
         setSelected(new Set());
         refreshDash();
+        setTimeout(function() { sendUnsentMessages(); }, 1500);
       }
     } catch (e) {
       setProspectMsg('Erro de conexao: ' + ((e instanceof Error) ? e.message : String(e)));
@@ -967,8 +1007,9 @@ export default function MBAApp() {
   useEffect(() => {
     if (!isAuthenticated) return;
     checkFollowUpsAndReplies();
+    sendUnsentMessages();
     loadDash(); loadNotifs();
-    var autoInterval = setInterval(function() { checkFollowUpsAndReplies(); }, 60000);
+    var autoInterval = setInterval(function() { checkFollowUpsAndReplies(); sendUnsentMessages(); }, 60000);
     const iv = setInterval(() => { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); loadNotifs(); }, 30000);
     const tick = setInterval(() => setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })), 1000);
     return () => { clearInterval(autoInterval); clearInterval(iv); clearInterval(tick); };
