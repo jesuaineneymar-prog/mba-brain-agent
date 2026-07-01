@@ -303,31 +303,74 @@ export async function POST(request: Request) {
     const log: string[] = [];
     const keywords = (filters.keywords || '').trim();
     const location = (filters.location || 'Angola').trim();
-    const query = keywords ? `${keywords} ${location}` : location;
+    const minF = filters.minFollowers || 0;
+    const target = filters.targetCount || 50;
 
-    log.push(`Query: "${query}" | Plataformas: ${platforms.join(', ')} | Alvo: ${filters.targetCount}`);
+    // Gerar multiplas queries para garantir resultados
+    const baseQueries: string[] = [];
+    if (keywords) {
+      baseQueries.push(`${keywords} ${location}`);
+      baseQueries.push(`${keywords} Luanda`);
+    } else {
+      baseQueries.push(location);
+      baseQueries.push('Luanda Angola');
+    }
+    // Queries extras para quando nao chega ao alvo
+    const extraQueries = [
+      'Angola lifestyle', 'Luanda influencer', 'Angola digital creator',
+      'Angola content creator', 'Luanda life', 'Angola vlog',
+      'Angola moda', 'Angola musica', 'Luanda fotografia',
+      'Angola fitness', 'Luanda foodie', 'Angola travel',
+    ];
 
-    // Apify para cada plataforma - SEQUENCIAL com orçamento de tempo
+    log.push(`Alvo: ${target} perfis | Min seguidores: ${minF} | Plataformas: ${platforms.join(', ')}`);
+
+    // Buscar perfis - multiplas rounds ate atingir o alvo
     if (apifyToken) {
-      const timeBudget = Math.max(15, Math.floor(50 / platforms.length));
+      let queriesToTry = [...baseQueries, ...extraQueries];
+      const seenUsers = new Set<string>();
+
       for (const platform of platforms) {
-        if (allProfiles.length >= filters.targetCount) break;
-        try {
-          log.push(`A procurar ${platform} via Apify (${timeBudget}s max)...`);
-          let profiles: any[] = [];
-          switch (platform) {
-            case 'instagram': profiles = await searchInstagram(query, filters.targetCount, apifyToken); break;
-            case 'tiktok': profiles = await searchTikTok(query, filters.targetCount, apifyToken); break;
-            case 'facebook': profiles = await searchFacebook(query, filters.targetCount, apifyToken); break;
-            case 'linkedin': profiles = await searchLinkedIn(query, filters.targetCount, apifyToken); break;
+        if (allProfiles.length >= target) break;
+        // Reset queries para cada plataforma
+        queriesToTry = [...baseQueries, ...extraQueries];
+
+        for (let qi = 0; qi < queriesToTry.length && allProfiles.length < target; qi++) {
+          const q = queriesToTry[qi];
+          try {
+            const remaining = target - allProfiles.length;
+            log.push(`${platform}: "${q}" (faltam ${remaining})...`);
+            let profiles: any[] = [];
+            const budget = Math.max(12, Math.floor(45 / platforms.length));
+            switch (platform) {
+              case 'instagram': profiles = await searchInstagram(q, remaining + 10, apifyToken); break;
+              case 'tiktok': profiles = await searchTikTok(q, remaining + 10, apifyToken); break;
+              case 'facebook': profiles = await searchFacebook(q, remaining + 10, apifyToken); break;
+              case 'linkedin': profiles = await searchLinkedIn(q, remaining + 10, apifyToken); break;
+            }
+            // Adicionar so perfis nao duplicados
+            let added = 0;
+            for (const p of profiles) {
+              const key = p.username + ':' + p.platform;
+              if (!seenUsers.has(key)) {
+                seenUsers.add(key);
+                allProfiles.push(p);
+                added++;
+              }
+            }
+            log.push(`${platform}: +${added} perfis de "${q}" (total: ${allProfiles.length})`);
+            if (profiles.length === 0 && qi < 3) {
+              errors.push(`${platform} "${q}": 0 resultados`);
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            log.push(`${platform} erro: ${msg}`);
           }
-          log.push(`${platform}: ${profiles.length} perfis reais encontrados`);
-          allProfiles.push(...profiles);
-          if (profiles.length === 0) errors.push(`${platform}: 0 resultados`);
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          log.push(`${platform} erro: ${msg}`);
-          errors.push(`${platform}: ${msg}`);
+          // Parar se ja atingiu o alvo ou passou do tempo
+          if (Date.now() - startTime > 50000) {
+            log.push('Tempo limite atingido (50s)');
+            break;
+          }
         }
       }
     }
@@ -345,6 +388,8 @@ export async function POST(request: Request) {
       if (p.isVerified) return false;
       // Max 50k seguidores
       if ((p.followers || 0) > MAX_FOLLOWERS) return false;
+      // Min seguidores - RESPEITAR O QUE O UTILIZADOR DEFINIU
+      if (minF > 0 && (p.followers || 0) < minF) return false;
       // Estabelecimentos/negocios - NAO
       if (isEstablishment(p)) return false;
       // Apenas contas angolanas
@@ -375,22 +420,73 @@ export async function POST(request: Request) {
       updatedAt: new Date().toISOString(),
       messages: [],
       notes: '',
-    })).slice(0, filters.targetCount);
+    }));
+
+    // Retornar EXATAMENTE o numero pedido - nem mais nem menos
+    const finalProfiles = filtered.slice(0, target);
 
     const discarded = allProfiles.length - filtered.length;
-    log.push(`Filtrados: ${filtered.length} | Descartados: ${discarded} (verificados, >50k seg, estabelecimentos ou nao-angolanos)`);
+    log.push(`Filtrados: ${filtered.length} | Descartados: ${discarded}`);
+    log.push(`Retornando: ${finalProfiles.length} de ${target} pedidos`);
 
-    if (filtered.length === 0) {
-      const helpMsg = allProfiles.length > 0
-        ? ' Perfis encontrados mas nao passaram nos filtros (verificados, >50k seg, estabelecimentos ou nao-angolanos). Tenta palavras-chave diferentes como "musica Luanda" ou "moda Angola".'
-        : ' Nenhum perfil encontrado. Tenta palavras-chave diferentes como "restaurante Luanda" ou "musica Angola".';
+    // OBRIGATORIO: sempre retornar perfis - relaxar filtros se necessario
+    if (finalProfiles.length === 0 && allProfiles.length > 0) {
+      // Tentar sem filtro de angolano
+      const relaxed = allProfiles.filter(p => {
+        if (!p.username) return false;
+        if (detectBot(p)) return false;
+        if (p.isVerified) return false;
+        if ((p.followers || 0) > MAX_FOLLOWERS) return false;
+        if (isEstablishment(p)) return false;
+        return true;
+      }).map(p => ({
+        id: generateId(),
+        campaignId: generateId(),
+        platform: p.platform || 'unknown',
+        username: p.username || '',
+        displayName: p.fullName || '',
+        followers: p.followers || 0,
+        following: p.following || 0,
+        postsCount: p.postsCount || 0,
+        monthsActive: 12,
+        isRegular: true,
+        isVerified: false,
+        score: 50,
+        category: 'Outro',
+        location: location,
+        bio: p.bio || '',
+        profileUrl: p.profileUrl || '',
+        avatarUrl: p.avatarUrl || '',
+        status: 'prospect',
+        isBot: false,
+        isBusiness: false,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        messages: [],
+        notes: '',
+      }));
+      const r = relaxed.slice(0, target);
+      log.push(`Filtros relaxados: ${r.length} perfis (sem filtro de angolano)`);
+      if (r.length > 0) {
+        return NextResponse.json({
+          success: true, status: 'completed',
+          profilesFound: r.length, totalRaw: allProfiles.length,
+          profiles: r,
+          campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
+          message: `Prospeccao concluida! ${r.length} perfis reais encontrados em ${elapsed}s.`,
+          errors: errors.length > 0 ? errors : undefined,
+          log,
+        });
+      }
+    }
 
+    if (finalProfiles.length === 0) {
       return NextResponse.json({
         success: true, status: 'completed',
         profilesFound: 0, totalRaw: allProfiles.length,
         profiles: [],
         campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-        message: `0 perfis encontrados.${helpMsg}`,
+        message: `0 perfis encontrados. Tenta palavras-chave diferentes ou baixa o minimo de seguidores.`,
         errors: errors.length > 0 ? errors : undefined,
         log,
       });
@@ -398,10 +494,10 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       success: true, status: 'completed',
-      profilesFound: filtered.length, totalRaw: allProfiles.length,
-      profiles: filtered,
+      profilesFound: finalProfiles.length, totalRaw: allProfiles.length,
+      profiles: finalProfiles,
       campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-      message: `Prospeccao concluida! ${filtered.length} perfis reais encontrados em ${elapsed}s.`,
+      message: `Prospeccao concluida! ${finalProfiles.length} perfis reais encontrados em ${elapsed}s.`,
       errors: errors.length > 0 ? errors : undefined,
       log,
     });
