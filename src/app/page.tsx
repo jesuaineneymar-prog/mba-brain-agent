@@ -204,7 +204,7 @@ async function sendUnsentMessages() {
         msg.sendAttempted = true;
           var sr = await fetch('/api/send-message', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'x-mba-session': 'active' },
             body: JSON.stringify({ username: p.username, message: msg.content, platform: p.platform, sentToday: dailySent + sent })
           }).catch(function() { return null; });
           if (sr) { var sd = await sr.json().catch(function() { return null; }); }
@@ -419,7 +419,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   const sendMessage = async function() {
     if (!msg.trim()) return;
     setSending(true);
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
+      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
       if (sr) { var sd = await sr.json().catch(function() { return null; }); }
       var saved = getProfiles();
       for (var i = 0; i < saved.length; i++) {
@@ -531,7 +531,7 @@ function ProspectingTab() {
 
   const runProspect = async function() {
     setLoading(true); setResults([]); setProspectMsg('');
-      const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(form) }).catch(function() { return null; });
+      const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body:JSON.stringify(form) }).catch(function() { return null; });
       if (!res) { setProspectMsg('Erro de conexao'); setLoading(false); return; }
       if (!res.ok) {
         const errData = await res.json().catch(function() { return null; });
@@ -662,7 +662,7 @@ function MessagesTab() {
       var targetProfile = null;
       for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
       if (!targetProfile) { setSending(false); return; }
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) }).catch(function() { return null; });
+      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) }).catch(function() { return null; });
       if (sr) { var sd = await sr.json().catch(function() { return null; }); }
       if (!targetProfile.messages) targetProfile.messages = [];
       targetProfile.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: true, deliveryMsg: 'DM enviado' });
@@ -753,7 +753,7 @@ function AgentChat() {
       systemContext += '- DMs: ' + totalSent + ' enviados, ' + totalDelivered + ' entregues, ' + totalFailed + ' falhados\n';
       systemContext += '- Limite diario: 30 DMs\n';
 
-      const res = await fetch('/api/respond', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10), systemContext: systemContext }) }).catch(function() { return null; });
+      const res = await fetch('/api/respond', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10), systemContext: systemContext }) }).catch(function() { return null; });
       if (res && res.ok) {
         const d = await res.json().catch(function() { return null; });
         if (d && d.reply) { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:d.reply }]); }); }
