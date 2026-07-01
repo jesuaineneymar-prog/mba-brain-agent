@@ -380,4 +380,4 @@ function estimateMonthsActive(profile: any): number {
   if (posts > 100) return 24;
   if (posts > 30) return 12;
   return 6;
-}
+}// force redeploy Wed Jul  1 00:39:50 UTC 2026
