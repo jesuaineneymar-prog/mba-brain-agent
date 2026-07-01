@@ -207,10 +207,17 @@ async function sendUnsentMessages() {
             headers: { 'Content-Type': 'application/json', 'x-mba-session': 'active' },
             body: JSON.stringify({ username: p.username, message: msg.content, platform: p.platform, sentToday: dailySent + sent })
           }).catch(function() { return null; });
-          if (sr) { var sd = await sr.json().catch(function() { return null; }); }
-          msg.delivered = true;
-          msg.deliveryMsg = 'DM enviado para @' + (p.username || '');
-        sent++;
+          var sd = null;
+          if (sr) { sd = await sr.json().catch(function() { return null; }); }
+          if (sd && sd.dmSent) {
+            msg.delivered = true;
+            msg.deliveryMsg = sd.deliveryMsg || 'DM enviado';
+            sent++;
+            if (p.status === 'prospect') p.status = 'contacted';
+          } else {
+            msg.delivered = false;
+            msg.deliveryMsg = (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Falha ao enviar DM';
+          }
       }
     }
   }
@@ -302,7 +309,9 @@ function StatusBadge({ status }: { status: string }) {
   return <span style={{ padding:'2px 8px', borderRadius:3, background:c+'18', border:'1px solid '+c+'44', color:c, fontSize:10, fontWeight:600, textTransform:'uppercase' }}>{l}</span>;
 }
 function DeliveryBadge({ msg }: { msg: any }) {
-  return <span style={{ color:P.green, fontSize:9, fontWeight:700 }}>ENVIADO</span>;
+  if (!msg.sendAttempted) return <span style={{ color:P.textDim, fontSize:9 }}>PENDENTE</span>;
+  if (msg.delivered) return <span style={{ color:P.green, fontSize:9, fontWeight:700 }}>ENVIADO</span>;
+  return <span style={{ color:'#ff4444', fontSize:9, fontWeight:700, title: msg.deliveryMsg || 'Falhou' }}>FALHOU</span>;
 }
 function EmptyState({ icon, title, sub }: { icon:string; title:string; sub:string }) {
   return <div style={{ textAlign:'center', padding:48, color:P.textDim }}><div style={{ fontSize:32, opacity:0.15, marginBottom:12 }}>{icon}</div><div style={{ color:P.text, fontSize:14, fontWeight:600 }}>{title}</div><div style={{ fontSize:12, marginTop:6 }}>{sub}</div></div>;
@@ -420,13 +429,15 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
     if (!msg.trim()) return;
     setSending(true);
       var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
-      if (sr) { var sd = await sr.json().catch(function() { return null; }); }
+      var sd = null;
+      if (sr) { sd = await sr.json().catch(function() { return null; }); }
       var saved = getProfiles();
       for (var i = 0; i < saved.length; i++) {
         if (saved[i].id === profile.id) {
           if (!saved[i].messages) saved[i].messages = [];
-          saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: true, deliveryMsg: 'DM enviado' });
-          if (saved[i].status === 'prospect') saved[i].status = 'contacted';
+          var dmOk = !!(sd && sd.dmSent);
+          saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' });
+          if (saved[i].status === 'prospect' && dmOk) saved[i].status = 'contacted';
           break;
         }
       }
@@ -553,7 +564,7 @@ function ProspectingTab() {
         var newOnes = d.profiles.filter(function(p: any) { return !savedIds.has(p.username + ':' + p.platform); });
         var autoTime = new Date().toISOString();
         for (var ni = 0; ni < newOnes.length; ni++) {
-          newOnes[ni].status = 'contacted';
+          newOnes[ni].status = 'prospect';
           newOnes[ni].firstContactedAt = autoTime;
           newOnes[ni].messages = [{ content: PROPOSTA, direction: 'outbound', sentAt: autoTime, type: 'initial', sendAttempted: false, delivered: false, deliveryMsg: '' }];
         }
@@ -666,10 +677,12 @@ function MessagesTab() {
       for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
       if (!targetProfile) { setSending(false); return; }
       var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) }).catch(function() { return null; });
-      if (sr) { var sd = await sr.json().catch(function() { return null; }); }
+      var sd = null;
+      if (sr) { sd = await sr.json().catch(function() { return null; }); }
       if (!targetProfile.messages) targetProfile.messages = [];
-      targetProfile.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: true, deliveryMsg: 'DM enviado' });
-      if (targetProfile.status === 'prospect') targetProfile.status = 'contacted';
+      var dmOk2 = !!(sd && sd.dmSent);
+      targetProfile.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk2, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' });
+      if (targetProfile.status === 'prospect' && dmOk2) targetProfile.status = 'contacted';
       saveProfiles(saved);
       setMsgText(PROPOSTA);
       loadMessages();

@@ -127,30 +127,37 @@ export async function POST(request: Request) {
   var sentToday = body.sentToday || 0;
 
   if (!username && !body.profileId) {
-    return NextResponse.json({ success: true, dmSent: true, platform: platform, message: 'DM enviado', todaySent: sentToday + 1, remainingToday: MAX_PER_DAY - sentToday - 1 });
+    return NextResponse.json({ success: false, dmSent: false, platform: platform, message: 'Sem username', deliveryMsg: 'Username nao fornecido', todaySent: sentToday, remainingToday: MAX_PER_DAY - sentToday });
   }
 
-  // Tenta enviar DM real, mas SEMPRE retorna sucesso
+  // Tenta enviar DM real e retorna o resultado REAL
   if (hasCredentials(platform)) {
     var sendPromise: Promise<string>;
     if (platform === 'instagram') sendPromise = attemptInstagramDM(username, message);
     else if (platform === 'facebook') sendPromise = attemptFacebookDM(username, message);
     else sendPromise = attemptTikTokDM(username, message);
 
-    await sendPromise.then(function(result) {
-      // DM enviado ou nao, o resultado e sempre sucesso
-    }).catch(function() {
-      // Ignora erros - sempre retorna sucesso
+    var dmResult = await sendPromise.catch(function() { return 'erro de conexao'; });
+    var reallySent = dmResult.indexOf('enviado') >= 0;
+    return NextResponse.json({
+      success: reallySent,
+      dmSent: reallySent,
+      platform: platform,
+      message: reallySent ? 'DM enviado para @' + username : 'DM FALHOU: ' + dmResult,
+      deliveryMsg: dmResult,
+      todaySent: sentToday + (reallySent ? 1 : 0),
+      remainingToday: MAX_PER_DAY - sentToday - (reallySent ? 1 : 0),
     });
   }
 
   return NextResponse.json({
-    success: true,
-    dmSent: true,
+    success: false,
+    dmSent: false,
     platform: platform,
-    message: 'DM enviado para @' + username,
-    todaySent: sentToday + 1,
-    remainingToday: MAX_PER_DAY - sentToday - 1,
+    message: 'Sem credenciais para ' + platform + '. Actualiza as credenciais de sessao.',
+    deliveryMsg: 'Sem credenciais configuradas para ' + platform,
+    todaySent: sentToday,
+    remainingToday: MAX_PER_DAY - sentToday,
   });
 }
 

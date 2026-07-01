@@ -43,7 +43,7 @@ async function runActor(actorId: string, input: Record<string, any>, token: stri
     }
   }
 
-  var ir = await fetch('https://api.apify.com/v2/datasets/' + dsId + '/items?token=' + token + '&limit=200').catch(function() { return null; });
+  var ir = await fetch('https://api.apify.com/v2/datasets/' + dsId + '/items?token=' + token + '&limit=1000').catch(function() { return null; });
   if (!ir || !ir.ok) return [];
   return ir.json().catch(function() { return []; });
 }
@@ -94,14 +94,22 @@ async function fetchIG(loc: string, need: number, seen: Set<string>, all: any[],
   var queries = [
     loc + ' lifestyle', loc + ' influencer', loc + ' creator',
     loc + ' pessoas', loc + ' digital', loc + ' content',
-    'Luanda creator', 'Luanda influencer', 'Angola digital',
-    'Angola content creator', 'Angola lifestyle'
+    loc + ' fotografia', loc + ' moda', loc + ' comida',
+    loc + ' viagem', loc + ' fitness', loc + ' musica',
+    loc + ' arte', loc + ' tech', loc + ' entrepreneur',
+    'Luanda creator', 'Luanda influencer', 'Luanda lifestyle',
+    'Luanda digital', 'Luanda fotografia', 'Luanda moda',
+    'Angola digital', 'Angola content creator', 'Angola lifestyle',
+    'Angola influencer', 'Angola creator', 'Angola moda',
+    'Angola fotografia', 'Angola entrepreneur', 'Angola fitness',
+    'Angola viagem', 'Angola musica', 'Angola tech'
   ];
+  var igLimit = Math.max(500, need * 5);
   var items = await runActor(ACTORS.instagram, {
     searchQueries: queries,
     searchType: 'user',
-    resultsLimit: 200
-  }, token, 40).catch(function() { return []; });
+    resultsLimit: igLimit
+  }, token, 45).catch(function() { return []; });
 
   for (var ii = 0; ii < items.length; ii++) {
     var it = items[ii];
@@ -129,11 +137,17 @@ async function fetchIG(loc: string, need: number, seen: Set<string>, all: any[],
 
 // UMA unica chamada Apify para TikTok
 async function fetchTT(loc: string, need: number, seen: Set<string>, all: any[], token: string): Promise<void> {
+  var ttLimit = Math.max(500, need * 5);
   var items = await runActor(ACTORS.tiktok, {
-    searchQueries: [loc + ' creator', loc + ' influencer', loc + ' lifestyle', 'Angola digital', 'Angola content'],
-    resultsPerPage: 200,
+    searchQueries: [loc + ' creator', loc + ' influencer', loc + ' lifestyle',
+      loc + ' fotografia', loc + ' moda', loc + ' fitness', loc + ' musica',
+      loc + ' entrepreneur', loc + ' viagem', loc + ' arte', loc + ' tech',
+      'Angola digital', 'Angola content', 'Angola creator', 'Angola lifestyle',
+      'Angola influencer', 'Angola moda', 'Angola fotografia', 'Angola fitness',
+      'Luanda creator', 'Luanda influencer', 'Luanda digital', 'Luanda lifestyle'],
+    resultsPerPage: ttLimit,
     shouldDownloadVideos: false
-  }, token, 40).catch(function() { return []; });
+  }, token, 45).catch(function() { return []; });
 
   for (var ti = 0; ti < items.length; ti++) {
     var a = items[ti].authorMeta || items[ti].author || {};
@@ -160,11 +174,12 @@ async function fetchTT(loc: string, need: number, seen: Set<string>, all: any[],
 // UMA unica chamada Apify para Facebook
 async function fetchFB(loc: string, need: number, seen: Set<string>, all: any[], token: string): Promise<void> {
   var fbQuery = 'site:facebook.com "' + loc + '" -page -group';
+  var fbLimit = Math.max(200, need * 3);
   var items = await runActor(ACTORS.facebook, {
     queries: fbQuery,
-    maxResults: 100,
+    maxResults: fbLimit,
     csvFriendly: false
-  }, token, 30).catch(function() { return []; });
+  }, token, 35).catch(function() { return []; });
 
   var skipSlugs = /^(www|web|m|search|api|login|watch|groups|people|photos|videos|events|pages|marketplace|gaming|dating|fundraisers|reel|stories|explore|p$|s$|l$|profile|pl|sh|sharer|r\.php|recover|help|policy|terms|about|campaign|ads|business|developers|careers|privacy|cookies)/;
 
