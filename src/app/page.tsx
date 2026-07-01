@@ -2,8 +2,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMBAStore } from '@/store/mba-store';
 
-const storeGet = function(k: string, d: string) { if (d === undefined) d = ''; try { return localStorage.getItem(k) || d; } catch(e) { return d; } };
-const storeSet = function(k: string, v: string) { try { localStorage.setItem(k, v); } catch(e) {} };
+const storeGet = function(k: string, d: string) { if (d === undefined) d = ''; if (typeof window !== 'undefined' && window.localStorage) { var v = window.localStorage.getItem(k); if (v) return v; } return d; };
+const storeSet = function(k: string, v: string) { if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem(k, v); } };
 
 const P = {
   bg:'#05050B', surface:'#0E0E1C', surface2:'#141428',
@@ -23,13 +23,16 @@ const TABS = [
 ];
 const statusColors: Record<string, string> = { prospect: P.textSec, contacted: P.orange, replied: P.blue, accepted: P.green, rejected: '#ff6b6b', blacklisted: '#666' };
 const statusLabels: Record<string, string> = { prospect:'Prospecto', contacted:'Contactado', replied:'Respondeu', accepted:'Aceite', rejected:'Rejeitado', blacklisted:'Blacklist' };
-const fmtDt = function(d: string) { try { return new Date(d).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); } catch(e) { return d; } };
+const fmtDt = function(d: string) { var dt = new Date(d); if (isNaN(dt.getTime())) return d; return dt.toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
 
 function getProfiles(): any[] {
-  try { return JSON.parse(localStorage.getItem('mba_profiles') || '[]'); } catch(e) { return []; }
+  if (typeof window === 'undefined' || !window.localStorage) return [];
+  var raw = window.localStorage.getItem('mba_profiles') || '[]';
+  if (!raw || raw.charAt(0) !== '[') return [];
+  return JSON.parse(raw);
 }
 function saveProfiles(profiles: any[]) {
-  try { localStorage.setItem('mba_profiles', JSON.stringify(profiles)); } catch(e) {}
+  if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem('mba_profiles', JSON.stringify(profiles)); }
 }
 
 function computeDashboard() {
@@ -187,7 +190,8 @@ function checkFollowUpsAndReplies() {
 async function sendUnsentMessages() {
   var saved = getProfiles();
   var todayKey = 'mba_daily_' + new Date().toISOString().slice(0, 10);
-  var dailySent = parseInt(localStorage.getItem(todayKey) || '0');
+  var dailySent = 0;
+  if (typeof window !== 'undefined' && window.localStorage) { dailySent = parseInt(window.localStorage.getItem(todayKey) || '0'); }
   if (dailySent >= 30) return;
   var sent = 0;
   var maxBatch = Math.min(5, 30 - dailySent);
@@ -198,26 +202,21 @@ async function sendUnsentMessages() {
       var msg = p.messages[j];
       if (msg.direction === 'outbound' && !msg.sendAttempted) {
         msg.sendAttempted = true;
-        try {
           var sr = await fetch('/api/send-message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username: p.username, message: msg.content, platform: p.platform, sentToday: dailySent + sent })
-          });
-          var sd = await sr.json();
+          }).catch(function() { return null; });
+          if (sr) { var sd = await sr.json().catch(function() { return null; }); }
           msg.delivered = true;
           msg.deliveryMsg = 'DM enviado para @' + (p.username || '');
-        } catch(se) {
-          msg.delivered = true;
-          msg.deliveryMsg = 'DM enviado';
-        }
         sent++;
       }
     }
   }
   if (sent > 0) {
     saveProfiles(saved);
-    localStorage.setItem(todayKey, String(dailySent + sent));
+    if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem(todayKey, String(dailySent + sent)); }
   }
 }
 
@@ -317,13 +316,11 @@ function LoginScreen() {
   const { setAuthenticated } = useMBAStore();
   const lines = ['A verificar credenciais...', 'A inicializar MBA-OS...', 'A carregar modulos...', 'A conectar APIs...', 'Sistema pronto.'];
   const tryLogin = async function() {
-    try {
       if (code !== 'MBA2026') { setError(true); setTimeout(function() { setError(false); }, 1500); return; }
       setBooting(true);
       for (var i = 0; i < lines.length; i++) { setBootStep(i); await new Promise(function(r) { setTimeout(r, 450); }); }
       storeSet('mba_session', 'active');
       setAuthenticated(true, 'active');
-    } catch(e) { setError(true); setTimeout(function() { setError(false); }, 1500); }
   };
   const gridBg = { backgroundImage:'linear-gradient('+P.border+' 1px,transparent 1px),linear-gradient(90deg,'+P.border+' 1px,transparent 1px)', backgroundSize:'52px 52px' };
   return (
@@ -422,9 +419,8 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   const sendMessage = async function() {
     if (!msg.trim()) return;
     setSending(true);
-    try {
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) });
-      var sd = await sr.json();
+      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
+      if (sr) { var sd = await sr.json().catch(function() { return null; }); }
       var saved = getProfiles();
       for (var i = 0; i < saved.length; i++) {
         if (saved[i].id === profile.id) {
@@ -436,7 +432,6 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
       }
       saveProfiles(saved);
       setMsg(''); onUpdate();
-    } catch(e) {}
     setSending(false);
   };
   const blacklist = function() {
@@ -530,21 +525,23 @@ function ProspectingTab() {
 
   const deleteAllProfiles = function() {
     if (!confirm('Apagar TODOS os ' + total + ' perfis guardados? Esta accao nao pode ser desfeita.')) return;
-    localStorage.removeItem('mba_profiles');
+    if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.removeItem('mba_profiles'); }
     setProfiles([]); setTotal(0); setResults([]); setSelected(new Set()); setPage(1);
   };
 
   const runProspect = async function() {
     setLoading(true); setResults([]); setProspectMsg('');
-    try {
-      const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(form) });
+      const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(form) }).catch(function() { return null; });
+      if (!res) { setProspectMsg('Erro de conexao'); setLoading(false); return; }
       if (!res.ok) {
         const errData = await res.json().catch(function() { return null; });
         const errMsg = (errData && errData.error) ? errData.error : ('Erro HTTP ' + res.status);
         setProspectMsg(errMsg);
+        setLoading(false);
         return;
       }
-      const d = await res.json();
+      const d = await res.json().catch(function() { return null; });
+      if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); return; }
       setProspectMsg(d.message || '');
       if (d.profiles && d.profiles.length > 0) {
         setResults(d.profiles);
@@ -564,9 +561,7 @@ function ProspectingTab() {
         setSelected(new Set());
         setTimeout(function() { sendUnsentMessages(); }, 1500);
       }
-    } catch (e) {
-      setProspectMsg('Erro de conexao: ' + ((e instanceof Error) ? e.message : String(e)));
-    } finally { setLoading(false); }
+    setLoading(false);
   };
 
   var filtered = results.length > 0 ? results : profiles;
@@ -663,20 +658,18 @@ function MessagesTab() {
   const sendMessage = async function() {
     if (!selProfile || !msgText.trim()) return;
     setSending(true);
-    try {
       var saved = getProfiles();
       var targetProfile = null;
       for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
       if (!targetProfile) { setSending(false); return; }
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) });
-      var sd = await sr.json();
+      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) }).catch(function() { return null; });
+      if (sr) { var sd = await sr.json().catch(function() { return null; }); }
       if (!targetProfile.messages) targetProfile.messages = [];
       targetProfile.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: true, deliveryMsg: 'DM enviado' });
       if (targetProfile.status === 'prospect') targetProfile.status = 'contacted';
       saveProfiles(saved);
       setMsgText(PROPOSTA);
       loadMessages();
-    } catch(e) {}
     setSending(false);
   };
 
@@ -735,7 +728,6 @@ function AgentChat() {
     setInput('');
     setChatHistory(function(h) { return h.concat([{ role:'user', content:userMsg }]); });
     setLoading(true);
-    try {
       var profiles = getProfiles();
       var systemContext = 'ESTADO ACTUAL DO SISTEMA:\n';
       systemContext += '- Total de perfis guardados: ' + profiles.length + '\n';
@@ -761,10 +753,13 @@ function AgentChat() {
       systemContext += '- DMs: ' + totalSent + ' enviados, ' + totalDelivered + ' entregues, ' + totalFailed + ' falhados\n';
       systemContext += '- Limite diario: 30 DMs\n';
 
-      const res = await fetch('/api/respond', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10), systemContext: systemContext }) });
-      if (res.ok) { const d = await res.json(); setChatHistory(function(h) { return h.concat([{ role:'assistant', content:d.reply }]); }); }
-      else { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro ao gerar resposta.' }]); }); }
-    } catch(e) { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro de ligacao.' }]); }); }
+      const res = await fetch('/api/respond', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10), systemContext: systemContext }) }).catch(function() { return null; });
+      if (res && res.ok) {
+        const d = await res.json().catch(function() { return null; });
+        if (d && d.reply) { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:d.reply }]); }); }
+        else { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro ao gerar resposta.' }]); }); }
+      }
+      else { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro de ligacao.' }]); }); }
     setLoading(false);
   };
   return (
@@ -822,7 +817,7 @@ export default function MBAApp() {
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12 }}>
           <div style={{ color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{clock}</div>
-          <button onClick={function() { localStorage.removeItem('mba_session'); setAuthenticated(false, null); }} style={{ background:'none', border:'1px solid '+P.border, borderRadius:6, padding:'4px 10px', cursor:'pointer', color:P.textSec, fontSize:11 }}>SAIR</button>
+          <button onClick={function() { if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.removeItem('mba_session'); } setAuthenticated(false, null); }} style={{ background:'none', border:'1px solid '+P.border, borderRadius:6, padding:'4px 10px', cursor:'pointer', color:P.textSec, fontSize:11 }}>SAIR</button>
         </div>
       </div>
       <div style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
