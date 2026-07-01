@@ -11,17 +11,17 @@ const ACTORS: Record<string,string> = {
   facebook: 'nFJndFXA5zjCTuudP',
 };
 
-async function runActor(actorId: string, input: Record<string,any>, token: string, maxWait = 20): Promise<any[]> {
-  const r = await fetch('https://api.apify.com/v2/acts/' + actorId + '/runs', {
+async function runActor(actorId: string, input: Record<string,any>, token: string, maxWait: number): Promise<any[]> {
+  var r = await fetch('https://api.apify.com/v2/acts/' + actorId + '/runs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify(input),
   });
   if (!r.ok) {
-    const e = await r.json().catch(function() { return {}; });
-    throw new Error((e && e.error && e.error.message) ? e.error.message : 'Actor erro ' + r.status);
+    var eData = await r.json().catch(function() { return {}; });
+    throw new Error((eData && eData.error && eData.error.message) ? eData.error.message : 'Actor erro ' + r.status);
   }
-  const d = await r.json();
+  var d = await r.json();
   var runId = (d && d.data && d.data.id) ? d.data.id : '';
   var dsId = (d && d.data && d.data.defaultDatasetId) ? d.data.defaultDatasetId : '';
   if (!runId || !dsId) throw new Error('Sem run ID');
@@ -29,17 +29,17 @@ async function runActor(actorId: string, input: Record<string,any>, token: strin
   var st = 'RUNNING';
   var t0 = Date.now();
   while (st === 'RUNNING' && (Date.now() - t0) < maxWait * 1000) {
-    await new Promise(function(r) { setTimeout(r, 3000); });
-    try {
-      var pr = await fetch('https://api.apify.com/v2/actor-runs/' + runId + '?token=' + token);
-      if (pr.ok) { var pj = await pr.json(); st = (pj && pj.data && pj.data.status) ? pj.data.status : st; }
+    await new Promise(function(res) { setTimeout(res, 3000); });
+    var pr = await fetch('https://api.apify.com/v2/actor-runs/' + runId + '?token=' + token).catch(function() { return null; });
+    if (pr && pr.ok) {
+      var pj = await pr.json().catch(function() { return null; });
+      if (pj && pj.data && pj.data.status) st = pj.data.status;
     }
-    catch(_e) { /* ignore poll errors */ }
   }
 
-  var ir = await fetch('https://api.apify.com/v2/datasets/' + dsId + '/items?token=' + token + '&limit=200');
-  if (!ir.ok) return [];
-  return ir.json();
+  var ir = await fetch('https://api.apify.com/v2/datasets/' + dsId + '/items?token=' + token + '&limit=200').catch(function() { return null; });
+  if (!ir || !ir.ok) return [];
+  return ir.json().catch(function() { return []; });
 }
 
 function gid(): string {
@@ -67,46 +67,131 @@ function isBiz(p: any): boolean {
   return false;
 }
 
-interface PlatResult {
-  items: any[];
-  error: string | null;
-  limitHit: boolean;
+function makeProfile(p: any, loc: string) {
+  return {
+    id: gid(), campaignId: gid(),
+    platform: p.platform, username: p.username,
+    displayName: p.fullName || '', followers: p.followers || 0,
+    following: p.following || 0, postsCount: p.postsCount || 0,
+    monthsActive: 12, isRegular: true, isVerified: p.isVerified || false,
+    score: 50, category: p.category || 'Outro',
+    location: loc, bio: p.bio || '',
+    profileUrl: p.profileUrl || '', avatarUrl: p.avatarUrl || '',
+    status: 'prospect', isBot: false, isBusiness: false,
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    messages: [], notes: '',
+  };
 }
 
-async function fetchPlatform(plat: string, q: string, loc: string, need: number, seen: Set<string>, all: any[], token: string): Promise<PlatResult> {
-  var items: any[] = [];
-  var error: string | null = null;
-  var limitHit = false;
+async function fetchInstagram(q: string, loc: string, need: number, seen: Set<string>, all: any[], token: string): Promise<{count:number; error:string|null; limitHit:boolean}> {
+  var querySets = [
+    [q, loc + ' lifestyle', loc + ' influencer', loc + ' creator', loc + ' pessoas'],
+    [loc + ' digital', loc + ' content', loc + ' social media', loc + ' vida'],
+    ['Luanda creator', 'Luanda influencer', 'Angola digital', 'Angola content creator'],
+  ];
 
-  if (plat === 'instagram') {
-    var igQueries = [q, loc + ' lifestyle', loc + ' influencer', loc + ' creator', loc + ' pessoas'];
-    items = await runActor(ACTORS.instagram, { searchQueries: igQueries, searchType: 'user', resultsLimit: need + 30 }, token, 15);
+  for (var qi = 0; qi < querySets.length && all.length < need; qi++) {
+    var items = await runActor(ACTORS.instagram, {
+      searchQueries: querySets[qi],
+      searchType: 'user',
+      resultsLimit: Math.max(80, (need - all.length) + 50)
+    }, token, 25).catch(function(ex) {
+      return [];
+    });
+
     for (var ii = 0; ii < items.length; ii++) {
-      var it = items[ii]; var un = it.username || '';
+      var it = items[ii];
+      var un = it.username || '';
       if (!un || seen.has(un + ':ig')) continue;
+      var fCount = it.followersCount || it.follower_count || 0;
+      if (fCount < 1) continue;
       seen.add(un + ':ig');
-      all.push({ platform:'instagram', username:un, fullName:it.fullName||it.full_name||'', followers:it.followersCount||it.follower_count||0, following:it.followsCount||it.following_count||0, postsCount:it.postsCount||it.posts||0, bio:it.biography||it.bio||'', profileUrl:'https://instagram.com/'+un, avatarUrl:it.profilePicUrl||it.profilePicture||'', isVerified:it.verified||false, isBusiness:it.isBusinessAccount||false, category:it.categoryName||'' });
-    }
-  } else if (plat === 'tiktok') {
-    items = await runActor(ACTORS.tiktok, { searchQueries:[q], resultsPerPage:need*3, shouldDownloadVideos:false }, token, 12);
-    for (var ti = 0; ti < items.length; ti++) {
-      var a = items[ti].authorMeta || items[ti].author || {}; var uid = a.name || a.uniqueId || '';
-      if (!uid || seen.has(uid+':tt')) continue;
-      seen.add(uid+':tt');
-      all.push({ platform:'tiktok', username:uid, fullName:a.nickName||a.nickname||'', followers:a.fans||a.followerCount||0, following:a.following||a.followingCount||0, postsCount:a.video||a.videoCount||0, bio:a.signature||'', profileUrl:'https://tiktok.com/@'+uid, avatarUrl:a.avatar||a.avatarMedium||'', isVerified:a.verified||false, isBusiness:false, category:'' });
-    }
-  } else if (plat === 'facebook') {
-    items = await runActor(ACTORS.facebook, { queries:'site:facebook.com "'+q+'"', maxResults:need+5, csvFriendly:false }, token, 10);
-    for (var fi = 0; fi < items.length; fi++) {
-      var furl = items[fi].url || ''; var fm = furl.match(/facebook\.com\/([a-zA-Z0-9_.]+)/);
-      if (!fm) continue; var fslug = fm[1];
-      if (/^(www|web|m|search|api|login|watch|groups)/.test(fslug) || seen.has(fslug+':fb')) continue;
-      seen.add(fslug+':fb');
-      all.push({ platform:'facebook', username:fslug, fullName:items[fi].title||fslug, followers:0, following:0, postsCount:0, bio:(items[fi].description||'').substring(0,200), profileUrl:furl, avatarUrl:'', isVerified:false, isBusiness:true, category:'' });
+      all.push({
+        platform: 'instagram', username: un,
+        fullName: it.fullName || it.full_name || '',
+        followers: fCount,
+        following: it.followsCount || it.following_count || 0,
+        postsCount: it.postsCount || it.posts || 0,
+        bio: it.biography || it.bio || '',
+        profileUrl: 'https://instagram.com/' + un,
+        avatarUrl: it.profilePicUrl || it.profilePicture || '',
+        isVerified: it.verified || false,
+        isBusiness: it.isBusinessAccount || false,
+        category: it.categoryName || ''
+      });
+      if (all.length >= need) break;
     }
   }
+  return { count: all.length, error: null, limitHit: false };
+}
 
-  return { items: items, error: error, limitHit: limitHit };
+async function fetchTikTok(q: string, loc: string, need: number, seen: Set<string>, all: any[], token: string): Promise<{count:number; error:string|null; limitHit:boolean}> {
+  var items = await runActor(ACTORS.tiktok, {
+    searchQueries: [q, loc + ' creator', loc + ' influencer'],
+    resultsPerPage: Math.max(60, (need - all.length) * 3),
+    shouldDownloadVideos: false
+  }, token, 15).catch(function() { return []; });
+
+  for (var ti = 0; ti < items.length; ti++) {
+    var a = items[ti].authorMeta || items[ti].author || {};
+    var uid = a.name || a.uniqueId || '';
+    if (!uid || seen.has(uid + ':tt')) continue;
+    seen.add(uid + ':tt');
+    all.push({
+      platform: 'tiktok', username: uid,
+      fullName: a.nickName || a.nickname || '',
+      followers: a.fans || a.followerCount || 0,
+      following: a.following || a.followingCount || 0,
+      postsCount: a.video || a.videoCount || 0,
+      bio: a.signature || '',
+      profileUrl: 'https://tiktok.com/@' + uid,
+      avatarUrl: a.avatar || a.avatarMedium || '',
+      isVerified: a.verified || false,
+      isBusiness: false,
+      category: ''
+    });
+    if (all.length >= need) break;
+  }
+  return { count: all.length, error: null, limitHit: false };
+}
+
+async function fetchFacebook(q: string, loc: string, need: number, seen: Set<string>, all: any[], token: string): Promise<{count:number; error:string|null; limitHit:boolean}> {
+  var fbQueries = [
+    'site:facebook.com "' + q + '"',
+    'site:facebook.com "' + loc + ' influencer"',
+    'site:facebook.com "' + loc + ' creator"',
+    'site:facebook.com "' + loc + '" -page -group',
+  ];
+
+  for (var qi = 0; qi < fbQueries.length && all.length < need; qi++) {
+    var items = await runActor(ACTORS.facebook, {
+      queries: fbQueries[qi],
+      maxResults: Math.max(30, (need - all.length) + 10),
+      csvFriendly: false
+    }, token, 15).catch(function() { return []; });
+
+    for (var fi = 0; fi < items.length; fi++) {
+      var furl = items[fi].url || '';
+      var fm = furl.match(/facebook\.com\/([a-zA-Z0-9_.]+)/);
+      if (!fm) continue;
+      var fslug = fm[1];
+      if (/^(www|web|m|search|api|login|watch|groups|people|photos|videos|events|pages|marketplace|gaming|dating|fundraisers|reel|stories|explore|p$|s$|l$|profile|pl|sh|sharer|r\.php|login|recover|help|policy|terms|about|campaign|ads|business|developers|careers|privacy|cookies)/.test(fslug)) continue;
+      if (seen.has(fslug + ':fb')) continue;
+      var title = items[fi].title || '';
+      var desc = (items[fi].description || '').substring(0, 200);
+      if (!title && !desc) continue;
+      seen.add(fslug + ':fb');
+      all.push({
+        platform: 'facebook', username: fslug,
+        fullName: title || fslug,
+        followers: 0, following: 0, postsCount: 0,
+        bio: desc, profileUrl: furl, avatarUrl: '',
+        isVerified: false, isBusiness: false, category: ''
+      });
+      if (all.length >= need) break;
+    }
+  }
+  return { count: all.length, error: null, limitHit: false };
 }
 
 export async function POST(request: Request) {
@@ -135,27 +220,49 @@ export async function POST(request: Request) {
   for (var pi = 0; pi < platforms.length; pi++) {
     if (all.length >= target || limitHit) break;
     var plat = platforms[pi];
-    var q = query;
     var need = target - all.length;
-    log.push(plat + ': "' + q + '"...');
+    log.push(plat + ': a procurar perfis reais...');
 
-    var res = await fetchPlatform(plat, q, loc, need, seen, all, token).then(function(r) { return r; }).catch(function(ex) {
+    var res = (
+      plat === 'instagram' ? fetchInstagram(query, loc, need, seen, all, token) :
+      plat === 'tiktok' ? fetchTikTok(query, loc, need, seen, all, token) :
+      fetchFacebook(query, loc, need, seen, all, token)
+    ).then(function(r) { return r; }).catch(function(ex) {
       var em = (ex instanceof Error) ? ex.message : String(ex);
       if (em.indexOf('limit exceeded') >= 0 || em.indexOf('hard limit') >= 0) {
-        log.push('LIMITE MENSAL APIFY - parando');
-        return { items: [], error: em, limitHit: true };
+        log.push('LIMITE MENSAL APIFY');
+        return { count: 0, error: em, limitHit: true };
       }
       log.push(plat + ' erro: ' + em);
-      return { items: [], error: em, limitHit: false };
+      return { count: 0, error: em, limitHit: false };
     });
 
-    log.push(plat + ': +' + res.items.length + ' resultados (total: ' + all.length + ')');
+    log.push(plat + ': ' + all.length + ' perfis encontrados');
     if (res.limitHit) { limitHit = true; break; }
+  }
+
+  // CRITICAL: Se ainda 0 resultados, TikTok como fallback garantido
+  if (all.length === 0 && !limitHit) {
+    log.push('A executar TikTok como fallback garantido...');
+    await fetchTikTok(loc, loc, target, seen, all, token).catch(function() {
+      log.push('TikTok fallback falhou');
+    });
+    log.push('Apos fallback: ' + all.length + ' perfis');
+  }
+
+  // Se ainda 0, tentar Instagram como segundo fallback
+  if (all.length === 0 && !limitHit) {
+    log.push('A executar Instagram como segundo fallback...');
+    await fetchInstagram('Luanda', 'Luanda', target, seen, all, token).catch(function() {
+      log.push('Instagram fallback falhou');
+    });
+    log.push('Apos segundo fallback: ' + all.length + ' perfis');
   }
 
   var elapsed = Math.round((Date.now() - t0) / 1000);
   log.push('Total bruto: ' + all.length + ' em ' + elapsed + 's');
 
+  // Filtragem principal
   var filtered = [];
   for (var i = 0; i < all.length; i++) {
     var p = all[i];
@@ -164,44 +271,22 @@ export async function POST(request: Request) {
     if (isBiz(p)) continue;
     var f = p.followers || 0;
     if (f < minF || f > maxF) continue;
-    filtered.push({
-      id: gid(), campaignId: gid(),
-      platform: p.platform, username: p.username,
-      displayName: p.fullName || '', followers: f,
-      following: p.following || 0, postsCount: p.postsCount || 0,
-      monthsActive: 12, isRegular: true, isVerified: p.isVerified || false,
-      score: 50, category: p.category || 'Outro',
-      location: loc, bio: p.bio || '',
-      profileUrl: p.profileUrl || '', avatarUrl: p.avatarUrl || '',
-      status: 'prospect', isBot: false, isBusiness: false,
-      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-      messages: [], notes: '',
-    });
+    filtered.push(makeProfile(p, loc));
     if (filtered.length >= target) break;
   }
 
-  log.push('Filtrados: ' + filtered.length + ' de ' + all.length);
+  log.push('Apos filtros: ' + filtered.length + ' de ' + all.length);
 
+  // Relaxar filtros SO para perfis com seguidores reais (> 0)
   if (filtered.length === 0 && all.length > 0) {
-    log.push('A relaxar filtros para encontrar perfis...');
+    log.push('A relaxar filtros (apenas perfis com seguidores reais)...');
     for (var j = 0; j < all.length; j++) {
       var p2 = all[j];
       if (!p2.username) continue;
       if (isBot(p2)) continue;
       if (isBiz(p2)) continue;
-      filtered.push({
-        id: gid(), campaignId: gid(),
-        platform: p2.platform, username: p2.username,
-        displayName: p2.fullName || '', followers: p2.followers || 0,
-        following: p2.following || 0, postsCount: p2.postsCount || 0,
-        monthsActive: 12, isRegular: true, isVerified: false,
-        score: 50, category: 'Outro', location: loc,
-        bio: p2.bio || '', profileUrl: p2.profileUrl || '',
-        avatarUrl: p2.avatarUrl || '', status: 'prospect',
-        isBot: false, isBusiness: false,
-        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-        messages: [], notes: '',
-      });
+      if ((p2.followers || 0) < 1) continue;
+      filtered.push(makeProfile(p2, loc));
       if (filtered.length >= target) break;
     }
     log.push('Apos relaxar: ' + filtered.length + ' perfis');
@@ -215,7 +300,7 @@ export async function POST(request: Request) {
       success: true, status: 'completed',
       profilesFound: 0, totalRaw: all.length, profiles: [],
       campaignName: body.campaignName || 'Campanha ' + new Date().toLocaleDateString('pt-PT'),
-      message: lh ? 'LIMITE MENSAL APIFY ATINGIDO. Cria nova conta em apify.com.' : '0 perfis. Tenta palavras-chave diferentes.',
+      message: lh ? 'LIMITE MENSAL APIFY ATINGIDO. Cria nova conta em apify.com.' : '0 perfis. Tenta outra localizacao ou plataforma.',
       log: log,
     });
   }
