@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
 
+// Vercel timeout - 60s para Apify completar
+export const maxDuration = 60;
+
 // ==========================================
 // MBA PROSPECCAO - USUARIOS REAIS APENAS
 // Actores Apify testados e confirmados a funcionar
@@ -39,7 +42,7 @@ interface ProspectRequest {
 // ==========================================
 // APIFY - async run com polling
 // ==========================================
-async function runApifyActor(actorId: string, input: any, token: string, maxWaitSec = 90): Promise<any[]> {
+async function runApifyActor(actorId: string, input: any, token: string, maxWaitSec = 25): Promise<any[]> {
   // 1. Iniciar o run
   const startRes = await fetch(`https://api.apify.com/v2/acts/${actorId}/runs`, {
     method: 'POST',
@@ -59,7 +62,7 @@ async function runApifyActor(actorId: string, input: any, token: string, maxWait
   let status = 'RUNNING';
   const start = Date.now();
   while (status === 'RUNNING' && (Date.now() - start) < maxWaitSec * 1000) {
-    await new Promise(r => setTimeout(r, 5000));
+    await new Promise(r => setTimeout(r, 3000));
     try {
       const pollRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
       if (pollRes.ok) {
@@ -83,7 +86,7 @@ async function searchInstagram(query: string, limit: number, token: string): Pro
     searchQueries: [query],
     searchType: 'user',
     resultsLimit: limit,
-  }, token, 90);
+  }, token, 20);
 
   return items.map((item: any) => ({
     platform: 'instagram',
@@ -112,7 +115,7 @@ async function searchTikTok(query: string, limit: number, token: string): Promis
     searchQueries: [query],
     resultsPerPage: limit * 3,
     shouldDownloadVideos: false,
-  }, token, 90);
+  }, token, 20);
 
   const seen = new Set<string>();
   return items.map((item: any) => {
@@ -146,7 +149,7 @@ async function searchFacebook(query: string, limit: number, token: string): Prom
     queries: `site:facebook.com "${query}" pagina`,
     maxResults: limit + 5,
     csvFriendly: false,
-  }, token, 60);
+  }, token, 15);
 
   const seen = new Set<string>();
   return items.map((item: any) => {
@@ -181,7 +184,7 @@ async function searchLinkedIn(query: string, limit: number, token: string): Prom
     queries: `site:linkedin.com/in/ "${query}"`,
     maxResults: limit + 5,
     csvFriendly: false,
-  }, token, 60);
+  }, token, 15);
 
   const seen = new Set<string>();
   return items.map((item: any) => {
@@ -268,32 +271,27 @@ export async function POST(request: Request) {
 
     log.push(`Query: "${query}" | Plataformas: ${platforms.join(', ')} | Alvo: ${filters.targetCount}`);
 
-    // Apify para cada plataforma
+    // Apify para cada plataforma - SEQUENCIAL com orçamento de tempo
     if (apifyToken) {
-      const results = await Promise.allSettled(
-        platforms.map(async (platform) => {
-          try {
-            log.push(`A procurar ${platform} via Apify...`);
-            let profiles: any[] = [];
-            switch (platform) {
-              case 'instagram': profiles = await searchInstagram(query, filters.targetCount, apifyToken); break;
-              case 'tiktok': profiles = await searchTikTok(query, filters.targetCount, apifyToken); break;
-              case 'facebook': profiles = await searchFacebook(query, filters.targetCount, apifyToken); break;
-              case 'linkedin': profiles = awaitLinkedIn(query, filters.targetCount, apifyToken); break;
-            }
-            log.push(`${platform}: ${profiles.length} perfis reais encontrados`);
-            return { platform, profiles, error: profiles.length === 0 ? `${platform}: 0 resultados via Apify` : null };
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            log.push(`${platform} erro: ${msg}`);
-            return { platform, profiles: [], error: `${platform}: ${msg}` };
+      const timeBudget = Math.max(15, Math.floor(50 / platforms.length));
+      for (const platform of platforms) {
+        if (allProfiles.length >= filters.targetCount) break;
+        try {
+          log.push(`A procurar ${platform} via Apify (${timeBudget}s max)...`);
+          let profiles: any[] = [];
+          switch (platform) {
+            case 'instagram': profiles = await searchInstagram(query, filters.targetCount, apifyToken); break;
+            case 'tiktok': profiles = await searchTikTok(query, filters.targetCount, apifyToken); break;
+            case 'facebook': profiles = await searchFacebook(query, filters.targetCount, apifyToken); break;
+            case 'linkedin': profiles = await searchLinkedIn(query, filters.targetCount, apifyToken); break;
           }
-        })
-      );
-      for (const r of results) {
-        if (r.status === 'fulfilled') {
-          allProfiles.push(...r.value.profiles);
-          if (r.value.error) errors.push(r.value.error);
+          log.push(`${platform}: ${profiles.length} perfis reais encontrados`);
+          allProfiles.push(...profiles);
+          if (profiles.length === 0) errors.push(`${platform}: 0 resultados`);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          log.push(`${platform} erro: ${msg}`);
+          errors.push(`${platform}: ${msg}`);
         }
       }
     }
