@@ -292,7 +292,9 @@ export async function POST(request: Request) {
   const startTime = Date.now();
   try {
     const filters: ProspectRequest = await request.json();
-    const apifyToken = filters.apifyToken || APIFY_KEY;
+    // Usar chave do campo so se for valida (min 40 chars), senao usar a embutida
+    const userKey = (filters.apifyToken || '').trim();
+    const apifyToken = (userKey.length >= 40 && userKey.startsWith('apify_api_')) ? userKey : APIFY_KEY;
 
     const platforms = filters.platform === 'all'
       ? ['instagram', 'tiktok', 'facebook', 'linkedin']
