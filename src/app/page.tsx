@@ -281,6 +281,69 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   );
 }
 
+const FOLLOWUP_MSG = 'Ola,\n\nEnviei-lhe uma mensagem ha alguns dias sobre uma proposta da Mwango Brain. Gostaria de saber se teve a oportunidade de a considerar.\n\nCaso tenha interesse, basta responder a esta mensagem.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
+
+function generateAutoReply(inboundMsg: string, profile: any): string {
+  var msg = inboundMsg.toLowerCase();
+  if (msg.indexOf('nao') >= 0 && (msg.indexOf('interesse') >= 0 || msg.indexOf('quero') >= 0 || msg.indexOf('aceito') >= 0)) {
+    return 'Compreendo. Obrigado pelo seu tempo. Se mudar de ideia, estaremos sempre disponiveis.\n\nCumprimentos,\nEquipa Mwango Brain';
+  }
+  if (msg.indexOf('sim') >= 0 || msg.indexOf('interesse') >= 0 || msg.indexOf('quero saber') >= 0 || msg.indexOf('gostaria') >= 0) {
+    return 'Otimo! Ficamos felizes com o seu interesse.\n\nPara avancar, podemos combinar os proximos passos. Qual a melhor forma de contacto?\n\nCumprimentos,\nEquipa Mwango Brain';
+  }
+  if (msg.indexOf('quanto') >= 0 || msg.indexOf('preco') >= 0 || msg.indexOf('valor') >= 0 || msg.indexOf('oferta') >= 0 || msg.indexOf('pagam') >= 0) {
+    return 'O valor da proposta depende de varios factores como o numero de seguidores, taxa de engagement e nicho do perfil.\n\nPodemos discutir os detalhes. Quando lhe seria conveniente?\n\nCumprimentos,\nEquipa Mwango Brain';
+  }
+  if (msg.indexOf('quem') >= 0 || msg.indexOf('empresa') >= 0 || msg.indexOf('o que e') >= 0) {
+    return 'Somos a Mwango Brain, uma agencia criativa sediada em Luanda, Angola. Trabalhamos com criadores de conteudo e oferecemos propostas de aquisicao de contas.\n\nTeria interesse em saber mais?\n\nCumprimentos,\nEquipa Mwango Brain';
+  }
+  return 'Obrigado pela sua resposta, ' + (profile.displayName || profile.username) + '.\n\nGostaria de saber mais sobre a nossa proposta? Estamos disponiveis para esclarecer qualquer duvida.\n\nCumprimentos,\nEquipa Mwango Brain';
+}
+
+function checkFollowUpsAndReplies() {
+  try {
+    var saved: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
+    var now = Date.now();
+    var threeDays = 3 * 24 * 60 * 60 * 1000;
+    var changed = false;
+    for (var i = 0; i < saved.length; i++) {
+      var p = saved[i];
+      if (!p.messages || p.messages.length === 0) continue;
+      for (var j = 0; j < p.messages.length; j++) {
+        var msg = p.messages[j];
+        if (msg.direction === 'inbound' && !msg.autoReplied) {
+          var reply = generateAutoReply(msg.content || '', p);
+          p.messages.push({ content: reply, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto-reply' });
+          msg.autoReplied = true;
+          if (p.status === 'prospect' || p.status === 'contacted') p.status = 'replied';
+          changed = true;
+        }
+      }
+      var lastOutbound = null;
+      for (var k = p.messages.length - 1; k >= 0; k--) {
+        if (p.messages[k].direction === 'outbound') { lastOutbound = p.messages[k]; break; }
+      }
+      if (!lastOutbound) continue;
+      var sentTime = new Date(lastOutbound.sentAt).getTime();
+      var hasReply = false;
+      for (var m = 0; m < p.messages.length; m++) {
+        if (p.messages[m].direction === 'inbound' && new Date(p.messages[m].sentAt).getTime() > sentTime) { hasReply = true; break; }
+      }
+      if (!hasReply && (now - sentTime) > threeDays) {
+        var alreadyFollowed = false;
+        for (var n = 0; n < p.messages.length; n++) {
+          if (p.messages[n].direction === 'outbound' && p.messages[n].type === 'follow-up' && new Date(p.messages[n].sentAt).getTime() > sentTime) { alreadyFollowed = true; break; }
+        }
+        if (!alreadyFollowed) {
+          p.messages.push({ content: FOLLOWUP_MSG, direction: 'outbound', sentAt: new Date().toISOString(), type: 'follow-up' });
+          changed = true;
+        }
+      }
+    }
+    if (changed) localStorage.setItem('mba_profiles', JSON.stringify(saved));
+  } catch(e) {}
+}
+
 function ProspectingTab() {
 
   const [form, setForm] = useState({ platform:'instagram', minFollowers:500, maxFollowers:100000, targetCount:50, location:'Angola' });
@@ -325,10 +388,16 @@ function ProspectingTab() {
       if (d.profiles && d.profiles.length > 0) {
         setResults(d.profiles);
         try {
-          const saved: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
-          const savedIds = new Set(saved.map((s: any) => s.username + ':' + s.platform));
-          const newOnes = d.profiles.filter((p: any) => !savedIds.has(p.username + ':' + p.platform));
-          const merged = [...saved, ...newOnes];
+          var saved: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
+          var savedIds = new Set(saved.map(function(s: any) { return s.username + ':' + s.platform; }));
+          var newOnes = d.profiles.filter(function(p: any) { return !savedIds.has(p.username + ':' + p.platform); });
+          var autoTime = new Date().toISOString();
+          for (var ni = 0; ni < newOnes.length; ni++) {
+            newOnes[ni].status = 'contacted';
+            newOnes[ni].firstContactedAt = autoTime;
+            newOnes[ni].messages = [{ content: PROPOSTA, direction: 'outbound', sentAt: autoTime, type: 'initial' }];
+          }
+          var merged = saved.concat(newOnes);
           localStorage.setItem('mba_profiles', JSON.stringify(merged));
           setProfiles(merged);
           setTotal(merged.length);
@@ -897,10 +966,12 @@ export default function MBAApp() {
   }, []);
   useEffect(() => {
     if (!isAuthenticated) return;
+    checkFollowUpsAndReplies();
     loadDash(); loadNotifs();
+    var autoInterval = setInterval(function() { checkFollowUpsAndReplies(); }, 60000);
     const iv = setInterval(() => { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); loadNotifs(); }, 30000);
     const tick = setInterval(() => setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })), 1000);
-    return () => { clearInterval(iv); clearInterval(tick); };
+    return () => { clearInterval(autoInterval); clearInterval(iv); clearInterval(tick); };
   }, [isAuthenticated, loadDash, loadNotifs]);
   const markNotifsRead = async () => {
     const ids = notifications.filter(n => !n.isRead).map(n => n.id);
