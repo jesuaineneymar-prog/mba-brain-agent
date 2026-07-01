@@ -299,17 +299,14 @@ export async function POST(request: Request) {
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     log.push(`Total bruto: ${allProfiles.length} em ${elapsed}s`);
 
-    // Filtrar - APENAS bots obvios, o resto passa
+    // Filtrar - APENAS bots obvios e estabelecimentos (Facebook)
+    // TUDO o resto passa: verificados, business, qualquer numero de seguidores
     const filtered = allProfiles.filter(p => {
       if (!p.username) return false;
+      // Detectar bots obvios
       if (detectBot(p)) return false;
-      // Apenas filtros de seguidores se o utilizador definiu
-      if (!p.fromGoogle) {
-        const followers = p.followers || 0;
-        if (filters.minFollowers > 0 && followers < filters.minFollowers) return false;
-        if (followers > filters.maxFollowers && filters.maxFollowers < 1000000) return false;
-        if (filters.requireRegular && (p.postsCount || 0) < 10) return false;
-      }
+      // Facebook: excluir estabelecimentos/paginas de negocio
+      if (p.platform === 'facebook' && p.isBusiness) return false;
       return true;
     }).map(p => ({
       id: generateId(),
@@ -342,8 +339,8 @@ export async function POST(request: Request) {
 
     if (filtered.length === 0) {
       const helpMsg = allProfiles.length > 0
-        ? ' Perfis foram encontrados mas nao passaram nos filtros. Tenta: (1) Baixar "Min. Seguidores" para 0, (2) Subir "Max. Seguidores" para 1000000, (3) Desactivar "Exigir contas regulares".'
-        : ' Nenhum perfil encontrado. Tenta palavras-chave diferentes como "restaurante Luanda" ou "hotel Angola".';
+        ? ' Todos os perfis encontrados parecem ser bots. Tenta termos de busca diferentes.'
+        : ' Nenhum perfil encontrado. Tenta palavras-chave diferentes como "restaurante Luanda" ou "musica Angola".';
 
       return NextResponse.json({
         success: true, status: 'completed',

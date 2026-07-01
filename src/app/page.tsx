@@ -316,10 +316,10 @@ function ProspectingTab() {
       setProspectLog(d.log || []);
       setProspectMsg(d.message || '');
       if (d.profiles && d.profiles.length > 0) {
-        const existing = loadProfiles();
-        const existingIds = new Set(existing.map(p => p.username + ':' + p.platform));
+        const existingData = await loadProfiles();
+        const existingIds = new Set(existingData.map(p => p.username + ':' + p.platform));
         const newProfiles = d.profiles.filter((p: any) => !existingIds.has(p.username + ':' + p.platform));
-        const allProfiles = [...existing, ...newProfiles];
+        const allProfiles = [...existingData, ...newProfiles];
         saveProfiles(allProfiles);
         setProfiles(allProfiles);
         setResults(d.profiles);
