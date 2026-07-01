@@ -8,7 +8,7 @@ export const maxDuration = 60;
 // Actores Apify testados e confirmados a funcionar
 // ==========================================
 
-const _a = ['apify_api_u','LHTZWp3WkAdmtAYp','46QGgi5zD49sr0PjkEA'];
+const _a = ['apify_api_p','GGVpKelzFK9pFWCIE1','JV7ALQzF0gr33iHOM'];
 const APIFY_KEY = _a.join('');
 
 // Actor IDs confirmados a funcionar com esta conta
