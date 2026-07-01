@@ -316,13 +316,22 @@ function ProspectingTab() {
       setProspectLog(d.log || []);
       setProspectMsg(d.message || '');
       if (d.profiles && d.profiles.length > 0) {
-        const existingData = await loadProfiles();
-        const existingIds = new Set(existingData.map(p => p.username + ':' + p.platform));
-        const newProfiles = d.profiles.filter((p: any) => !existingIds.has(p.username + ':' + p.platform));
-        const allProfiles = [...existingData, ...newProfiles];
-        saveProfiles(allProfiles);
-        setProfiles(allProfiles);
+        // Mostrar perfis diretamente
         setResults(d.profiles);
+        // Guardar no localStorage
+        try {
+          const saved: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
+          const savedIds = new Set(saved.map((s: any) => s.username + ':' + s.platform));
+          const newOnes = d.profiles.filter((p: any) => !savedIds.has(p.username + ':' + p.platform));
+          const merged = [...saved, ...newOnes];
+          localStorage.setItem('mba_profiles', JSON.stringify(merged));
+          setProfiles(merged);
+          setTotal(merged.length);
+        } catch(e2) {
+          // Se localStorage falhar, mostrar resultados mesmo assim
+          setProfiles(d.profiles);
+          setTotal(d.profiles.length);
+        }
         setSelected(new Set());
         refreshDash();
       }
