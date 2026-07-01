@@ -25,33 +25,12 @@ const LIMIT_DIARIO = 30;
 const PROPOSTA = 'Ola,\nO meu nome e Jesuaine Cristiano e represento a Mwango Brain, uma agencia criativa sediada em Luanda, Angola.\nTenho acompanhado o seu perfil com interesse e gostaria de lhe apresentar uma proposta de aquisicao da sua conta.\n\nEstamos dispostos a fazer uma oferta justa pelo seu perfil. Caso tenha interesse em saber mais detalhes, basta responder a esta mensagem e entraremos em contacto rapidamente.\n\nAguardamos o seu contacto.\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 const TABS = [
   {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},
-  {id:'inbox',label:'INBOX'},{id:'agent',label:'AGENTE IA'},
+  {id:'followups',label:'FOLLOW-UPS'},{id:'inbox',label:'INBOX'},{id:'agent',label:'AGENTE IA'},
+  {id:'campaigns',label:'CAMPANHAS'},{id:'analytics',label:'ANALYTICS'},{id:'activity',label:'ACTIVIDADE'},{id:'config',label:'CONFIGURACAO'},
 ];
-
-// ==========================================
-// LOCALSTORAGE DATA MANAGEMENT
-// ==========================================
-const LS_PROFILES = 'mba_profiles';
-const LS_MESSAGES = 'mba_messages';
-const LS_SENT_TODAY = 'mba_sent_today';
-const LS_SENT_DATE = 'mba_sent_date';
-
-const loadProfiles = (): any[] => { try { const d = localStorage.getItem(LS_PROFILES); return d ? JSON.parse(d) : []; } catch { return []; } };
-const saveProfiles = (p: any[]) => { try { localStorage.setItem(LS_PROFILES, JSON.stringify(p)); } catch {} };
-const loadMessages = (): any[] => { try { const d = localStorage.getItem(LS_MESSAGES); return d ? JSON.parse(d) : []; } catch { return []; } };
-const saveMessages = (m: any[]) => { try { localStorage.setItem(LS_MESSAGES, JSON.stringify(m)); } catch {} };
-const getSentToday = (): number => {
-  const today = new Date().toISOString().slice(0, 10);
-  const savedDate = localStorage.getItem(LS_SENT_DATE);
-  if (savedDate !== today) { localStorage.setItem(LS_SENT_DATE, today); localStorage.setItem(LS_SENT_TODAY, '0'); return 0; }
-  return parseInt(localStorage.getItem(LS_SENT_TODAY) || '0');
-};
-const incrementSent = () => { const c = getSentToday() + 1; localStorage.setItem(LS_SENT_TODAY, String(c)); return c; };
-
 const storeGet = (k:string, d:string='') => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const storeSet = (k:string, v:string) => { try { localStorage.setItem(k, v); } catch {} };
-
-const exportCSV = (profiles:any[])=>{if(!profiles.length)return;const h=['Username','Nome','Seguidores','A Seguir','Posts','Score','Estado','Categoria','Localizacao','Plataforma','URL','Verificado','Bot','Bio'];const rows=profiles.map(p=>[p.username||p.handle,p.displayName,p.followers,p.following,p.postsCount,(p.score||0).toFixed(1),p.status,p.category,p.location,p.platform,p.profileUrl,p.isVerified?'Sim':'Nao',p.isBot?'Sim':'Nao',(p.bio||'').substring(0,200).replace(/"/g,"'")]);const csv=[h,...rows].map(r=>r.map(v=>`"${String(v||'').replace(/"/g,"'")}"`).join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`MBA_Prospeccao_${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);};
+const exportCSV = (profiles:any[])=>{if(!profiles.length)return;const h=['Handle','Nome','Seguidores','Score','Plataforma','URL'];const rows=profiles.map(p=>[p.username||p.handle,p.displayName,p.followers,p.score,p.platform,p.profileUrl]);const csv=[h,...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,"'")}"`).join(',')).join('\n');const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=`MBA_${new Date().toISOString().slice(0,10)}.csv`;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);};
 const fmtDt = (d:string) => { try { return new Date(d).toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); } catch { return d; } };
 const statusColors: Record<string, string> = { prospect: P.textSec, contacted: P.orange, replied: P.blue, accepted: P.green, rejected: '#ff6b6b', blacklisted: '#666' };
 const statusLabels: Record<string, string> = { prospect:'Prospecto', contacted:'Contactado', replied:'Respondeu', accepted:'Aceite', rejected:'Rejeitado', blacklisted:'Blacklist' };
@@ -109,8 +88,8 @@ function Sphere({ size=240, speed=1 }: { size?: number; speed?: number }) {
 function Panel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{ background:P.surface, border:'1px solid '+P.border, borderRadius:10, padding:16, ...style }}>{children}</div>;
 }
-function STitle({ children }: { children: React.ReactNode }) {
-  return <div style={{ color:P.text, fontSize:13, fontWeight:700, marginBottom:14, display:'flex', alignItems:'center', gap:8 }}><div style={{ width:3, height:14, background:P.red, borderRadius:2, flexShrink:0 }} />{children}</div>;
+function STitle({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return <div style={{ color:P.text, fontSize:13, fontWeight:700, marginBottom:14, display:'flex', alignItems:'center', gap:8, ...style }}><div style={{ width:3, height:14, background:P.red, borderRadius:2, flexShrink:0 }} />{children}</div>;
 }
 function Lbl({ children }: { children: React.ReactNode }) {
   return <div style={{ color:P.textSec, fontSize:10, fontWeight:600, letterSpacing:'.6px', textTransform:'uppercase', marginBottom:8 }}>{children}</div>;
@@ -166,6 +145,7 @@ function LoginScreen() {
   return (
     <div style={{ width:'100vw', height:'100vh', background:P.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden', ...gridBg }}>
       <div style={{ position:'absolute', inset:0, background:'radial-gradient(ellipse 70% 50% at 50% 45%, rgba(192,0,28,0.14) 0%, transparent 65%)', pointerEvents:'none' }} />
+      <div style={{ position:'absolute', left:0, right:0, height:1, background:'linear-gradient(transparent,'+P.red+',transparent)', opacity:0.2, animation:'scan 6s linear infinite', pointerEvents:'none' }} />
       <Sphere size={240} />
       <div style={{ position:'absolute', textAlign:'center', animation:'fade-up .6s ease-out' }}>
         <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:42, fontWeight:900, color:P.red, animation:'glitch 4s infinite', letterSpacing:4, marginBottom:6 }}>MBA</div>
@@ -188,88 +168,29 @@ function LoginScreen() {
   );
 }
 
-// ==========================================
-// DASHBOARD - calculado a partir de localStorage
-// ==========================================
-function DashboardTab({ onRefresh }: { onRefresh:()=>void }) {
-  const [dashData, setDashData] = useState<any>(null);
-  const computeDash = () => {
-    const profiles = loadProfiles();
-    const messages = loadMessages();
-    const today = new Date().toISOString().slice(0, 10);
-    const contactedToday = profiles.filter(p => p.contactedAt?.slice(0,10) === today).length;
-    const repliedToday = profiles.filter(p => p.repliedAt?.slice(0,10) === today).length;
-    const acceptedToday = profiles.filter(p => p.acceptedAt?.slice(0,10) === today).length;
-    const outboundMessages = messages.filter(m => m.direction === 'outbound').length;
-    const inboundMessages = messages.filter(m => m.direction === 'inbound').length;
-
-    const statusBreakdown: {status:string;count:number}[] = [];
-    const statusMap: Record<string,number> = {};
-    profiles.forEach(p => { statusMap[p.status] = (statusMap[p.status]||0) + 1; });
-    Object.entries(statusMap).forEach(([status,count]) => statusBreakdown.push({status,count}));
-
-    const platformBreakdown: {platform:string;count:number}[] = [];
-    const platMap: Record<string,number> = {};
-    profiles.forEach(p => { platMap[p.platform] = (platMap[p.platform]||0) + 1; });
-    Object.entries(platMap).forEach(([platform,count]) => platformBreakdown.push({platform,count}));
-
-    const topProfiles = [...profiles].sort((a,b) => (b.score||0) - (a.score||0)).slice(0, 10);
-
-    const dailyStats = [];
-    for (let i = 6; i >= 0; i--) {
-      const date = new Date(); date.setDate(date.getDate() - i);
-      const ds = date.toISOString().slice(0, 10);
-      const dayName = date.toLocaleDateString('pt-PT', { weekday: 'short' });
-      dailyStats.push({
-        date: ds, dayName,
-        contacted: profiles.filter(p => p.contactedAt?.slice(0,10) === ds).length,
-        replied: profiles.filter(p => p.repliedAt?.slice(0,10) === ds).length,
-        accepted: profiles.filter(p => p.acceptedAt?.slice(0,10) === ds).length,
-      });
-    }
-
-    setDashData({
-      overview: {
-        totalProfiles: profiles.length, contactedToday, repliedToday, acceptedToday,
-        totalCampaigns: 1, outboundMessages, inboundMessages,
-        responseRate: outboundMessages > 0 ? Math.round((inboundMessages / outboundMessages) * 100) : 0,
-      },
-      statusBreakdown, platformBreakdown, dailyStats, topProfiles,
-    });
-  };
-  useEffect(() => { computeDash(); }, []);
-  useEffect(() => { onRefresh && onRefresh(); }, [onRefresh]);
-
-  if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="A carregar..." sub="" /></Panel></div>;
+function DashboardTab({ dashData, onRefresh }: { dashData: any; onRefresh:()=>void }) {
+  if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="Sem dados ainda" sub="Execute uma prospeccao para ver resultados." /></Panel></div>;
   const d = dashData;
   const o = d.overview || {};
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}>
-        <STitle>Painel Geral</STitle>
-        <Btn variant="ghost" size="sm" onClick={computeDash}>Actualizar</Btn>
-      </div>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Painel Geral</STitle><Btn variant="ghost" size="sm" onClick={onRefresh}>Actualizar</Btn></div>
       <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
-        <StatCard label="Total de perfis" value={o.totalProfiles||0} sub="guardados localmente" />
+        <StatCard label="Total de perfis" value={o.totalProfiles||0} sub="na base de dados" />
         <StatCard label="Contactados hoje" value={o.contactedToday||0} sub="ultimas 24h" color={P.orange} />
         <StatCard label="Respostas hoje" value={o.repliedToday||0} sub="ultimas 24h" color={P.green} />
         <StatCard label="Taxa de resposta" value={(o.responseRate||0).toFixed(1)+'%'} sub={(o.outboundMessages||0)+' enviadas / '+(o.inboundMessages||0)+' recebidas'} color={P.blue} />
-        <StatCard label="DMs hoje" value={getSentToday()+'/'+LIMIT_DIARIO} sub="limite diario" color={P.orange} />
+        <StatCard label="Campanhas" value={o.totalCampaigns||0} sub="total criadas" />
+        <StatCard label="Follow-ups" value={d.pendingFollowUps||0} sub="pendentes" color={P.orange} />
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+      <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
         <Panel><STitle>Actividade ultimos 7 dias</STitle>
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{(d.dailyStats || []).map((ds: any, i: number) => {
             const maxC = Math.max(...(d.dailyStats||[]).map((x:any)=>x.contacted),1);
             const maxR = Math.max(...(d.dailyStats||[]).map((x:any)=>x.replied),1);
             return <div key={i}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
-                <span style={{ color:P.textSec, fontSize:11 }}>{ds.dayName} {ds.date?.slice(5)}</span>
-                <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{ds.contacted}c / {ds.replied}r / {ds.accepted}a</span>
-              </div>
-              <div style={{ display:'flex', gap:3 }}>
-                <div style={{ flex:2 }}><BarComp value={ds.contacted} max={maxC} color={P.orange} h={6} /></div>
-                <div style={{ flex:2 }}><BarComp value={ds.replied} max={maxR} color={P.green} h={6} /></div>
-              </div>
+              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11 }}>{ds.dayName} {ds.date?ds.date.slice(5):''}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{ds.contacted}c / {ds.replied}r / {ds.accepted}a</span></div>
+              <div style={{ display:'flex', gap:3 }}><div style={{ flex:2 }}><BarComp value={ds.contacted} max={maxC} color={P.orange} h={6} /></div><div style={{ flex:2 }}><BarComp value={ds.replied} max={maxR} color={P.green} h={6} /></div><div style={{ flex:1 }}><BarComp value={ds.accepted} max={Math.max(...(d.dailyStats||[]).map((x:any)=>x.accepted),1)} color={P.blue} h={6} /></div></div>
             </div>;
           })}</div>
         </Panel>
@@ -277,36 +198,20 @@ function DashboardTab({ onRefresh }: { onRefresh:()=>void }) {
           {(d.platformBreakdown || []).length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{d.platformBreakdown.map((p: any, i: number) => {
             const colors = [P.red, P.orange, P.blue, P.green];
             const maxP = Math.max(...d.platformBreakdown.map((x:any)=>x.count),1);
-            return <div key={i}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}>
-                <span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{p.platform}</span>
-                <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span>
-              </div>
-              <BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} />
-            </div>;
+            return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{p.platform}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span></div><BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} /></div>;
           })}</div> : <EmptyState icon="\u25CE" title="Sem dados" sub="Aguardando prospeccao" />}
         </Panel>
       </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+      <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
         <Panel><STitle>Estado dos Perfis</STitle>
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{(d.statusBreakdown || []).map((s: any, i: number) => (
-            <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <div style={{ width:8, height:8, borderRadius:2, background:statusColors[s.status]||P.textDim }} />
-                <span style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{statusLabels[s.status]||s.status}</span>
-              </div>
-              <span style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>{s.count}</span>
-            </div>
+            <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><div style={{ width:8, height:8, borderRadius:2, background:statusColors[s.status]||P.textDim }} /><span style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{s.status}</span></div><span style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>{s.count}</span></div>
           ))}</div>
         </Panel>
         <Panel><STitle>Top 10 Perfis</STitle>
           {(d.topProfiles || []).length > 0 ? d.topProfiles.map((p: any, i: number) => (
             <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 0', borderBottom:i<9?'1px solid '+P.border:'none' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span>
-                <span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span>
-                <span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span>
-              </div>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div>
               <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{(p.followers||0).toLocaleString('pt-PT')}</span>
             </div>
           )) : <EmptyState icon="\u25CE" title="Sem perfis" sub="Aguardando prospeccao" />}
@@ -316,69 +221,27 @@ function DashboardTab({ onRefresh }: { onRefresh:()=>void }) {
   );
 }
 
-// ==========================================
-// PROFILE DETAIL MODAL
-// ==========================================
 function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onClose:()=>void; onUpdate:()=>void }) {
   const [notes, setNotes] = useState(profile?.notes || '');
   const [status, setStatus] = useState(profile?.status || 'prospect');
   const [msg, setMsg] = useState('');
   const [sending, setSending] = useState(false);
-  const [sendResult, setSendResult] = useState('');
   if (!profile) return null;
-
-  const saveNotes = () => {
-    const profiles = loadProfiles();
-    const idx = profiles.findIndex(p => p.id === profile.id);
-    if (idx >= 0) {
-      profiles[idx].notes = notes;
-      profiles[idx].status = status;
-      if (status === 'contacted' && !profiles[idx].contactedAt) profiles[idx].contactedAt = new Date().toISOString();
-      if (status === 'replied' && !profiles[idx].repliedAt) profiles[idx].repliedAt = new Date().toISOString();
-      if (status === 'accepted' && !profiles[idx].acceptedAt) profiles[idx].acceptedAt = new Date().toISOString();
-      saveProfiles(profiles);
-      onUpdate();
-    }
+  const saveNotes = async () => {
+    await mbaFetch('/api/profiles', { method:'PATCH', body:JSON.stringify({ id:profile.id, notes, status }) });
+    onUpdate();
   };
-
   const sendMessage = async () => {
     if (!msg.trim()) return;
-    setSending(true); setSendResult('');
-    try {
-      const res = await mbaFetch('/api/send-message', {
-        method:'POST',
-        body: JSON.stringify({ username:profile.username, message:msg, platform:profile.platform, sentToday:getSentToday() }),
-      });
-      const d = await res.json();
-      incrementSent();
-      // Guardar mensagem localmente
-      const allMsgs = loadMessages();
-      allMsgs.push({ id: Date.now().toString(36), profileId:profile.id, username:profile.username, platform:profile.platform, direction:'outbound', content:msg, sentAt:new Date().toISOString(), dmSent:d.dmSent||false });
-      saveMessages(allMsgs);
-      // Actualizar perfil
-      const profiles = loadProfiles();
-      const idx = profiles.findIndex(p => p.id === profile.id);
-      if (idx >= 0) {
-        profiles[idx].status = 'contacted';
-        profiles[idx].contactedAt = new Date().toISOString();
-        saveProfiles(profiles);
-      }
-      setSendResult(d.dmSent ? `DM enviado para @${profile.username}!` : (d.error || 'Mensagem processada'));
-      setMsg(''); onUpdate();
-    } catch { setSendResult('Erro de ligacao'); }
-    setSending(false);
+    setSending(true);
+    await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({ profileId:profile.id, message:msg, platform:profile.platform, username:profile.username, campaignId:profile.campaignId }) });
+    setMsg(''); setSending(false); onUpdate();
   };
-
-  const blacklist = () => {
-    const profiles = loadProfiles();
-    const idx = profiles.findIndex(p => p.id === profile.id);
-    if (idx >= 0) {
-      profiles[idx].status = 'blacklisted';
-      saveProfiles(profiles);
-      onUpdate(); onClose();
-    }
+  const blacklist = async () => {
+    await mbaFetch('/api/blacklist', { method:'POST', body:JSON.stringify({ platform:profile.platform, username:profile.username, reason:'Manual blacklist' }) });
+    await mbaFetch('/api/profiles', { method:'PATCH', body:JSON.stringify({ id:profile.id, status:'blacklisted' }) });
+    onUpdate(); onClose();
   };
-
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }} onClick={onClose}>
       <div style={{ background:P.surface, border:'1px solid '+P.border, borderRadius:12, padding:20, width:'90%', maxWidth:560, maxHeight:'85vh', overflowY:'auto' }} onClick={e=>e.stopPropagation()}>
@@ -410,7 +273,6 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
           <Btn variant="danger" onClick={blacklist}>Blacklist</Btn>
           {profile.profileUrl && <a href={profile.profileUrl} target="_blank" rel="noreferrer"><Btn variant="ghost">Abrir perfil</Btn></a>}
         </div>
-        {sendResult && <div style={{ padding:'8px 12px', marginBottom:10, borderRadius:6, border:'1px solid '+(sendResult.includes('enviado')?P.green:P.orange), background:sendResult.includes('enviado')?'rgba(0,192,99,0.08)':'rgba(224,96,0,0.08)', color:sendResult.includes('enviado')?P.green:P.orange, fontSize:12, fontWeight:600 }}>{sendResult}</div>}
         <div style={{ borderTop:'1px solid '+P.border, paddingTop:14 }}>
           <Lbl>Enviar mensagem</Lbl>
           <textarea value={msg} onChange={e=>setMsg(e.target.value)} rows={3} placeholder="Escreva a mensagem..." style={{ ...INP, resize:'vertical', marginBottom:8 }} />
@@ -421,117 +283,77 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   );
 }
 
-// ==========================================
-// PROSPECTING TAB - localStorage
-// ==========================================
-function ProspectingTab({ refreshDash }: { refreshDash:()=>void }) {
+function ProspectingTab() {
+  const [apifyKey, setApifyKey] = useState(() => { try { return localStorage.getItem('mba_apify_key') || ''; } catch { return ''; } });
+  const saveApifyKey = (k: string) => { setApifyKey(k); try { localStorage.setItem('mba_apify_key', k); } catch {} };
   const [form, setForm] = useState({ platform:'instagram', minFollowers:1000, maxFollowers:50000, minMonthsActive:12, requireRegular:true, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
-  const [profiles, setProfiles] = useState<any[]>([]);
+  const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterPlat, setFilterPlat] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [search, setSearch] = useState('');
+  const [profiles, setProfiles] = useState<any[]>([]);
   const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
   const [detailProfile, setDetailProfile] = useState<any>(null);
+  const [prospectLog, setProspectLog] = useState<string[]>([]);
   const [prospectMsg, setProspectMsg] = useState('');
-  const [prospectStatus, setProspectStatus] = useState('');
-  const PER_PAGE = 50;
-
-  // Load profiles from localStorage on mount
-  useEffect(() => {
-    setProfiles(loadProfiles());
-  }, []);
-
-  const reloadProfiles = () => {
-    setProfiles(loadProfiles());
+  const loadProfiles = async () => {
+    const params = new URLSearchParams({ page: String(page), limit: '50' });
+    if (filterPlat !== 'all') params.set('platform', filterPlat);
+    if (filterStatus !== 'all') params.set('status', filterStatus);
+    if (search) params.set('search', search);
+    const res = await mbaFetch('/api/profiles?' + params);
+    if (res.ok) { const d = await res.json(); setProfiles(d.profiles || []); setTotal(d.total || 0); }
   };
-
+  useEffect(() => { loadProfiles(); }, [page, filterPlat, filterStatus, search]);
   const runProspect = async () => {
-    setLoading(true); setProspectStatus('starting'); setProspectMsg('A iniciar prospeccao directa...');
+    setLoading(true); setResults([]); setProspectLog([]); setProspectMsg('');
     try {
-      const res = await mbaFetch('/api/prospect', { method:'POST', body:JSON.stringify(form) });
+      const res = await mbaFetch('/api/prospect', { method:'POST', body:JSON.stringify({ ...form, apifyToken: apifyKey }) });
       const d = await res.json();
-      if (d.success && d.profiles && d.profiles.length > 0) {
-        // Guardar novos perfis no localStorage
+      setProspectLog(d.log || []);
+      setProspectMsg(d.message || '');
+      if (d.profiles && d.profiles.length > 0) {
         const existing = loadProfiles();
         const existingIds = new Set(existing.map(p => p.username + ':' + p.platform));
         const newProfiles = d.profiles.filter((p: any) => !existingIds.has(p.username + ':' + p.platform));
         const allProfiles = [...existing, ...newProfiles];
         saveProfiles(allProfiles);
         setProfiles(allProfiles);
-        setProspectStatus('completed');
-        setProspectMsg(`${d.profilesFound} perfis encontrados! ${newProfiles.length} novos adicionados. Total: ${allProfiles.length}`);
-        setPage(1);
+        setResults(d.profiles);
+        setSelected(new Set());
         refreshDash();
-      } else {
-        setProspectStatus('error');
-        setProspectMsg(d.message || d.error || 'Nenhum perfil encontrado. Tenta alargar os filtros.');
       }
-      setLoading(false);
-    } catch { setProspectStatus('error'); setProspectMsg('Erro de ligacao.'); setLoading(false); }
+    } catch (e) { setProspectMsg('Erro de conexao. Tenta novamente.'); } finally { setLoading(false); }
   };
-
   const toggleAll = () => {
-    const filtered = getFiltered();
-    if (selected.size === filtered.length && filtered.length > 0) setSelected(new Set());
+    const filtered = profiles.filter(p => (filterPlat==='all' || p.platform===filterPlat) && (filterStatus==='all' || p.status===filterStatus));
+    if (selected.size === filtered.length) setSelected(new Set());
     else setSelected(new Set(filtered.map(p => p.id)));
   };
-
   const bulkMessage = async () => {
     if (!selected.size) return;
-    let sent = 0;
-    const profs = profiles.filter(p => selected.has(p.id));
-    for (const p of profs) {
-      if (getSentToday() >= LIMIT_DIARIO) break;
-      try {
-        const res = await mbaFetch('/api/send-message', {
-          method:'POST',
-          body: JSON.stringify({ username:p.username, message:PROPOSTA, platform:p.platform, sentToday:getSentToday() }),
-        });
-        const d = await res.json();
-        incrementSent();
-        const allMsgs = loadMessages();
-        allMsgs.push({ id: Date.now().toString(36)+Math.random().toString(36).slice(2,5), profileId:p.id, username:p.username, platform:p.platform, direction:'outbound', content:PROPOSTA, sentAt:new Date().toISOString(), dmSent:d.dmSent||false });
-        saveMessages(allMsgs);
-        // Update profile status
-        p.status = 'contacted'; p.contactedAt = new Date().toISOString();
-        sent++;
-      } catch {}
-      await new Promise(r => setTimeout(r, 2000)); // 2s entre envios
+    for (const id of selected) {
+      const p = profiles.find(x => x.id === id);
+      if (p) await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({ profileId:p.id, message:PROPOSTA, platform:p.platform, username:p.username, campaignId:p.campaignId }) });
     }
-    saveProfiles(profiles);
-    setSelected(new Set()); reloadProfiles(); refreshDash();
-    alert(`${sent} mensagens enviadas!`);
+    setSelected(new Set()); loadProfiles();
   };
-
-  const bulkBlacklist = () => {
-    const profs = loadProfiles();
-    profs.forEach(p => { if (selected.has(p.id)) p.status = 'blacklisted'; });
-    saveProfiles(profs); setSelected(new Set()); reloadProfiles(); refreshDash();
+  const bulkBlacklist = async () => {
+    for (const id of selected) {
+      const p = profiles.find(x => x.id === id);
+      if (p) { await mbaFetch('/api/blacklist', { method:'POST', body:JSON.stringify({ platform:p.platform, username:p.username }) }); await mbaFetch('/api/profiles', { method:'PATCH', body:JSON.stringify({ id:p.id, status:'blacklisted' }) }); }
+    }
+    setSelected(new Set()); loadProfiles();
   };
-
-  const getFiltered = () => {
-    return profiles.filter(p => {
-      if (filterPlat !== 'all' && p.platform !== filterPlat) return false;
-      if (filterStatus !== 'all' && p.status !== filterStatus) return false;
-      if (search) {
-        const s = search.toLowerCase();
-        if (!(p.username||'').toLowerCase().includes(s) && !(p.displayName||'').toLowerCase().includes(s) && !(p.bio||'').toLowerCase().includes(s)) return false;
-      }
-      return true;
-    });
-  };
-
-  const filtered = getFiltered();
-  const total = filtered.length;
-  const paginated = filtered.slice((page-1)*PER_PAGE, page*PER_PAGE);
-
+  const filtered = results.length > 0 ? results : profiles;
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <Panel style={{ marginBottom:14 }}>
         <STitle>Nova Prospeccao</STitle>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
+        <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
           <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={e=>setForm({...form,platform:e.target.value})} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option><option value="all">Todas</option></select></div>
           <div><Lbl>Nome da campanha</Lbl><input value={form.campaignName} onChange={e=>setForm({...form,campaignName:e.target.value})} placeholder="Ex: Restaurantes Luanda" style={INP} /></div>
           <div><Lbl>Min. Seguidores</Lbl><input type="number" value={form.minFollowers} onChange={e=>setForm({...form,minFollowers:Number(e.target.value)})} style={INP} /></div>
@@ -541,34 +363,31 @@ function ProspectingTab({ refreshDash }: { refreshDash:()=>void }) {
           <div><Lbl>Palavras-chave</Lbl><input value={form.keywords} onChange={e=>setForm({...form,keywords:e.target.value})} placeholder="restaurante, hotel, cafe" style={INP} /></div>
           <div><Lbl>Localizacao</Lbl><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} style={INP} /></div>
         </div>
+        <div style={{ marginBottom:8 }}><Lbl>Apify API Key <span style={{ color:P.textDim, fontWeight:400 }}>(gratuita em apify.com)</span></Lbl><div style={{ display:'flex', gap:6 }}><input value={apifyKey} onChange={e=>saveApifyKey(e.target.value)} placeholder="apify_api_xxx..." style={INP} /></div></div>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}><Toggle on={form.requireRegular} onChange={v=>setForm({...form,requireRegular:v})} /><span style={{ color:P.textSec, fontSize:12 }}>Exigir contas regulares</span></div>
-        <Btn onClick={runProspect} disabled={loading}>{loading ? 'A prospectar...' : 'Iniciar Prospeccao'}</Btn>
+        <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar usuarios REAIS...' : 'Iniciar Prospeccao'}</Btn>
+        {prospectMsg && <div style={{ marginTop:10, padding:10, borderRadius:6, background: results.length > 0 ? 'rgba(0,192,99,0.08)' : 'rgba(192,0,28,0.08)', border:'1px solid '+(results.length > 0 ? 'rgba(0,192,99,0.2)' : 'rgba(192,0,28,0.2)'), color: results.length > 0 ? P.green : P.orange, fontSize:11, lineHeight:1.5 }}>{prospectMsg}</div>}
+        {prospectLog.length > 0 && <div style={{ marginTop:8, padding:8, borderRadius:6, background:P.surface2, border:'1px solid '+P.border, fontSize:10, color:P.textDim, fontFamily:"'JetBrains Mono',monospace", lineHeight:1.6, maxHeight:120, overflowY:'auto' }}>{prospectLog.map((l,i)=><div key={i}>{'> '+l}</div>)}</div>}
+        {!apifyKey && <div style={{ marginTop:10, padding:10, borderRadius:6, background:'rgba(59,130,246,0.06)', border:'1px solid rgba(59,130,246,0.15)', color:P.blue, fontSize:11, lineHeight:1.5 }}><div style={{ fontWeight:700, marginBottom:4 }}>Para melhores resultados, adiciona a tua Apify Key:</div><div>1. Abre <a href="https://apify.com" target="_blank" rel="noreferrer" style={{ color:P.redB, textDecoration:'underline' }}>apify.com</a> no teu telefone e cria conta gratuita</div><div>2. Vai a Settings &gt; Integrations &gt; API</div><div>3. Copia a API key e cola no campo acima</div><div style={{ marginTop:4, color:P.textDim }}>O Apify garante acesso real a Instagram, TikTok, Facebook e LinkedIn.</div></div>}
       </Panel>
-      {prospectStatus === 'completed' && <Panel style={{ marginBottom:14, borderLeft:'3px solid '+P.green }}><div style={{ color:P.green, fontSize:13, fontWeight:600 }}>Prospeccao concluida!</div><div style={{ color:P.textSec, fontSize:12, marginTop:2 }}>{prospectMsg}</div></Panel>}
-      {prospectStatus === 'error' && <Panel style={{ marginBottom:14, borderLeft:'3px solid #ff6b6b' }}><div style={{ color:'#ff6b6b', fontSize:13, fontWeight:600 }}>Erro</div><div style={{ color:P.textSec, fontSize:12, marginTop:2 }}>{prospectMsg}</div></Panel>}
+      {results.length > 0 && <Panel style={{ marginBottom:14, border:'1px solid rgba(0,192,99,0.2)' }}><STitle style={{ color:P.green }}>Resultados da prospeccao ({results.length} perfis REAIS)</STitle><div style={{ color:P.textSec, fontSize:12, marginBottom:10 }}>{results.length} perfis reais encontrados e guardados. Todos os perfis foram extraidos de plataformas reais.</div></Panel>}
       <Panel>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}>
-          <STitle>Perfis ({total})</STitle>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}><STitle>Perfis ({total})</STitle>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-            <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Pesquisar..." style={{ ...INP, width:140 }} />
-            <select value={filterPlat} onChange={e=>{setFilterPlat(e.target.value);setPage(1);}} style={{ ...SEL as any, width:100 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option></select>
-            <select value={filterStatus} onChange={e=>{setFilterStatus(e.target.value);setPage(1);}} style={{ ...SEL as any, width:110 }}><option value="all">Todos estados</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option><option value="accepted">Aceite</option></select>
-            <Btn variant="ghost" size="sm" onClick={()=>exportCSV(filtered)}>Exportar CSV</Btn>
+            <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Pesquisar..." style={{ ...INP, width:160 }} />
+            <select value={filterPlat} onChange={e=>{setFilterPlat(e.target.value);setPage(1);}} style={{ ...SEL as any, width:110 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option></select>
+            <select value={filterStatus} onChange={e=>{setFilterStatus(e.target.value);setPage(1);}} style={{ ...SEL as any, width:120 }}><option value="all">Todos estados</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option><option value="accepted">Aceite</option></select>
+            <Btn variant="ghost" size="sm" onClick={exportCSV.bind(null, filtered)}>Exportar CSV</Btn>
           </div>
         </div>
         <div style={{ display:'flex', gap:6, marginBottom:10, flexWrap:'wrap' }}>
-          <button onClick={toggleAll} style={{ padding:'4px 10px', borderRadius:4, border:'1px solid '+P.border, background:selected.size>0?P.redDim:'transparent', color:selected.size>0?P.redB:P.textSec, fontSize:11, cursor:'pointer' }}>{selected.size===filtered.length&&filtered.length>0?'Desselecionar':'Selecionar todos'}</button>
+          <button onClick={toggleAll} style={{ padding:'4px 10px', borderRadius:4, border:'1px solid '+P.border, background:selected.size>0?P.redDim:'transparent', color:selected.size>0?P.redB:P.textSec, fontSize:11, cursor:'pointer' }}>{selected.size===filtered.length?'Desselecionar':'Selecionar todos'}</button>
           {selected.size > 0 && <><Btn size="sm" onClick={bulkMessage}>Enviar ({selected.size})</Btn><Btn size="sm" variant="danger" onClick={bulkBlacklist}>Blacklist ({selected.size})</Btn></>}
         </div>
         <div style={{ overflowX:'auto' }}>
           <div style={{ minWidth:600 }}>
-            <div style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.border, color:P.textDim, fontSize:10, fontWeight:600, letterSpacing:'.5px' }}>
-              <div style={{ width:30 }}><input type="checkbox" checked={selected.size===filtered.length && filtered.length>0} onChange={toggleAll} /></div>
-              <div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div>
-              <div style={{ width:80, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:60, textAlign:'right' }}>SCORE</div>
-              <div style={{ width:90 }}>PLATAFORMA</div><div style={{ width:90 }}>ESTADO</div><div style={{ width:50 }}></div>
-            </div>
-            {paginated.map((p: any) => (
+            <div style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.border, color:P.textDim, fontSize:10, fontWeight:600, letterSpacing:'.5px' }}><div style={{ width:30 }}><input type="checkbox" checked={selected.size===filtered.length && filtered.length>0} onChange={toggleAll} /></div><div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div><div style={{ width:80, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:60, textAlign:'right' }}>SCORE</div><div style={{ width:90 }}>PLATAFORMA</div><div style={{ width:90 }}>ESTADO</div><div style={{ width:50 }}></div></div>
+            {filtered.map((p: any) => (
               <div key={p.id} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center', background:selected.has(p.id)?P.redDim:'transparent' }}>
                 <div style={{ width:30 }}><input type="checkbox" checked={selected.has(p.id)} onChange={()=>{const s=new Set(selected);s.has(p.id)?s.delete(p.id):s.add(p.id);setSelected(s);}} /></div>
                 <div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{p.username}</div>
@@ -582,95 +401,78 @@ function ProspectingTab({ refreshDash }: { refreshDash:()=>void }) {
             ))}
           </div>
         </div>
-        {total > PER_PAGE && <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}>
-          <Btn variant="ghost" size="sm" disabled={page<=1} onClick={()=>setPage(page-1)}>Anterior</Btn>
-          <span style={{ color:P.textSec, fontSize:12, alignSelf:'center' }}>Pagina {page} de {Math.ceil(total/PER_PAGE)}</span>
-          <Btn variant="ghost" size="sm" disabled={page>=Math.ceil(total/PER_PAGE)} onClick={()=>setPage(page+1)}>Proxima</Btn>
-        </div>}
+        {total > 50 && <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}><Btn variant="ghost" size="sm" disabled={page<=1} onClick={()=>setPage(page-1)}>Anterior</Btn><span style={{ color:P.textSec, fontSize:12, alignSelf:'center' }}>Pagina {page} de {Math.ceil(total/50)}</span><Btn variant="ghost" size="sm" disabled={page>=Math.ceil(total/50)} onClick={()=>setPage(page+1)}>Proxima</Btn></div>}
       </Panel>
-      {detailProfile && <ProfileDetailModal profile={detailProfile} onClose={()=>{setDetailProfile(null);reloadProfiles();}} onUpdate={()=>{reloadProfiles();refreshDash();}} />}
+      {detailProfile && <ProfileDetailModal profile={detailProfile} onClose={()=>{setDetailProfile(null);loadProfiles();}} onUpdate={loadProfiles} />}
     </div>
   );
 }
 
-// ==========================================
-// MESSAGES TAB - localStorage
-// ==========================================
-function MessagesTab({ refreshDash }: { refreshDash:()=>void }) {
-  const [profiles, setProfiles] = useState<any[]>([]);
+function MessagesTab() {
+  const [subtab, setSubtab] = useState<'all'|'outbound'|'inbound'>('all');
   const [messages, setMessages] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<any[]>([]);
   const [selProfile, setSelProfile] = useState('');
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
-  const [sendResult, setSendResult] = useState('');
-  const [subtab, setSubtab] = useState<'all'|'outbound'|'inbound'>('all');
-
-  useEffect(() => {
-    setProfiles(loadProfiles());
-    setMessages(loadMessages());
-  }, []);
-
-  const sendMessage = async () => {
-    if (!selProfile || !msgText.trim()) return;
-    setSending(true); setSendResult('');
-    const prof = profiles.find(p => p.id === selProfile);
-    if (!prof) { setSending(false); return; }
-    try {
-      const res = await mbaFetch('/api/send-message', {
-        method:'POST',
-        body: JSON.stringify({ username:prof.username, message:msgText, platform:prof.platform, sentToday:getSentToday() }),
-      });
-      const d = await res.json();
-      incrementSent();
-      const allMsgs = loadMessages();
-      allMsgs.push({ id:Date.now().toString(36), profileId:prof.id, username:prof.username, platform:prof.platform, direction:'outbound', content:msgText, sentAt:new Date().toISOString(), dmSent:d.dmSent||false });
-      saveMessages(allMsgs);
-      // Update profile status
-      const allProfiles = loadProfiles();
-      const idx = allProfiles.findIndex(p => p.id === prof.id);
-      if (idx >= 0) { allProfiles[idx].status = 'contacted'; allProfiles[idx].contactedAt = new Date().toISOString(); saveProfiles(allProfiles); setProfiles(allProfiles); }
-      setMessages(loadMessages());
-      setSendResult(d.dmSent ? `DM enviado com sucesso para @${prof.username} (${prof.platform})!` : (d.error || 'Mensagem processada'));
-    } catch { setSendResult('Erro de ligacao'); }
-    setSending(false); refreshDash();
+  const [scheduled, setScheduled] = useState<any[]>([]);
+  const [abVariants, setAbVariants] = useState<any[]>([]);
+  const [selVariant, setSelVariant] = useState('default');
+  const [schedDate, setSchedDate] = useState('');
+  const [queueInfo, setQueueInfo] = useState<any>({});
+  const loadMessages = async () => {
+    const res = await mbaFetch('/api/profiles?limit=100');
+    let allProfiles: any[] = [];
+    if (res.ok) { const d = await res.json(); allProfiles = d.profiles || []; setProfiles(allProfiles); }
+    const msgs: any[] = [];
+    allProfiles.forEach((p: any) => { if (p.messages) p.messages.forEach((m: any) => msgs.push({...m, _username:p.username, _platform:p.platform})); });
+    setMessages(msgs.sort((a: any, b: any) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
   };
-
-  const filtered = messages.filter(m => subtab === 'all' || m.direction === subtab).sort((a,b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
-
+  const loadQueue = async () => {
+    const res = await mbaFetch('/api/send-message');
+    if (res.ok) { const d = await res.json(); setQueueInfo(d); setScheduled(d.scheduled || []); }
+  };
+  const loadAB = async () => {
+    const res = await mbaFetch('/api/ab-test');
+    if (res.ok) { const d = await res.json(); setAbVariants(d.variants || []); }
+  };
+  useEffect(() => { loadMessages(); loadQueue(); loadAB(); }, []);
+  const sendMessage = async (sched?: string) => {
+    if (!selProfile || !msgText.trim()) return;
+    setSending(true);
+    await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({ profileId:selProfile, message:msgText, abTestGroup:selVariant!=='default'?selVariant:undefined, scheduledAt:sched||undefined }) });
+    setSending(false); loadMessages(); loadQueue();
+  };
+  const selMsgText = selVariant !== 'default' ? (abVariants.find(v => v.groupName === selVariant)?.content || msgText) : msgText;
+  const filtered = messages.filter(m => subtab === 'all' || m.direction === subtab);
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      <div style={{ display:'flex', gap:6, marginBottom:14, flexWrap:'wrap', alignItems:'center' }}>
+      <div style={{ display:'flex', gap:6, marginBottom:14 }}>
         {[['all','Todas'],['outbound','Enviadas'],['inbound','Recebidas']].map(([k,l]) => (
-          <button key={k} onClick={()=>setSubtab(k as any)} style={{ padding:'6px 14px', borderRadius:4, border:'1px solid '+(subtab===k?P.red:P.border), background:subtab===k?P.redDim:'transparent', color:subtab===k?P.redB:P.textSec, fontSize:11, cursor:'pointer', fontWeight:600 }}>{l} ({k==='all'?filtered.length:messages.filter(m=>m.direction===k).length})</button>
+          <button key={k} onClick={()=>setSubtab(k as any)} style={{ padding:'6px 14px', borderRadius:4, border:'1px solid '+(subtab===k?P.red:P.border), background:subtab===k?P.redDim:'transparent', color:subtab===k?P.redB:P.textSec, fontSize:11, cursor:'pointer', fontWeight:600 }}>{l} ({k==='all'?filtered.length:messages.filter((m:any)=>m.direction===k).length})</button>
         ))}
       </div>
-      {sendResult && <div style={{ padding:'8px 12px', marginBottom:10, borderRadius:6, border:'1px solid '+(sendResult.includes('sucesso')||sendResult.includes('enviado')?P.green:P.orange), background:(sendResult.includes('sucesso')||sendResult.includes('enviado'))?'rgba(0,192,99,0.08)':'rgba(224,96,0,0.08)', color:(sendResult.includes('sucesso')||sendResult.includes('enviado'))?P.green:P.orange, fontSize:12, fontWeight:600 }}>{sendResult}</div>}
       <Panel style={{ marginBottom:14 }}>
         <STitle>Enviar Mensagem</STitle>
-        <div style={{ marginBottom:10 }}>
-          <Lbl>Perfil</Lbl>
-          <select value={selProfile} onChange={e=>setSelProfile(e.target.value)} style={SEL as any}>
-            <option value="">Seleccionar perfil...</option>
-            {profiles.filter(p=>p.status!=='blacklisted').map((p: any) => <option key={p.id} value={p.id}>{p.username} ({p.platform}) {p.followers ? '- ' + p.followers + ' seg' : ''}</option>)}
-          </select>
+        <div style={{ display:'flex', gap:10, marginBottom:10, flexWrap:'wrap' }}>
+          <div style={{ flex:2, minWidth:200 }}><Lbl>Perfil</Lbl><select value={selProfile} onChange={e=>setSelProfile(e.target.value)} style={SEL as any}><option value="">Seleccionar perfil...</option>{profiles.map((p: any) => <option key={p.id} value={p.id}>{p.username} ({p.platform})</option>)}</select></div>
+          <div style={{ flex:1, minWidth:150 }}><Lbl>Variante A/B</Lbl><select value={selVariant} onChange={e=>{setSelVariant(e.target.value);const v=abVariants.find(x=>x.groupName===e.target.value);if(v)setMsgText(v.content);else setMsgText(PROPOSTA);}} style={SEL as any}><option value="default">Padrao</option>{abVariants.map((v: any) => <option key={v.id} value={v.groupName}>{v.name} ({v.sentCount}env / {v.replyCount}resp)</option>)}</select></div>
+          <div style={{ minWidth:160 }}><Lbl>Agendar para</Lbl><input type="datetime-local" value={schedDate} onChange={e=>setSchedDate(e.target.value)} style={INP} /></div>
         </div>
-        <textarea value={msgText} onChange={e=>setMsgText(e.target.value)} rows={4} style={{ ...INP, resize:'vertical', marginBottom:8 }} />
+        <textarea value={selMsgText} onChange={e=>setMsgText(e.target.value)} rows={4} style={{ ...INP, resize:'vertical', marginBottom:8 }} />
         <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap' }}>
-          <Btn onClick={sendMessage} disabled={sending || !selProfile}>{sending ? 'A enviar...' : 'Enviar agora'}</Btn>
-          <span style={{ color:P.textDim, fontSize:11 }}>Enviados hoje: {getSentToday()}/{LIMIT_DIARIO}</span>
+          <Btn onClick={()=>sendMessage()} disabled={sending || !selProfile}>{sending ? 'A enviar...' : 'Enviar agora'}</Btn>
+          {schedDate && <Btn variant="ghost" onClick={()=>sendMessage(schedDate)}>Agendar</Btn>}
+          <span style={{ color:P.textDim, fontSize:11 }}>Fila: {queueInfo.remainingToday ?? '?'} restantes hoje</span>
         </div>
       </Panel>
+      {scheduled.length > 0 && <Panel style={{ marginBottom:14 }}><STitle>Mensagens agendadas ({scheduled.length})</STitle>
+        {scheduled.map((m: any, i: number) => <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:'1px solid '+P.border, alignItems:'center' }}><div><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{m.profiles?.username || '?'}</span><span style={{ color:P.textDim, fontSize:11, marginLeft:8 }}>{fmtDt(m.scheduledAt)}</span></div><StatusBadge status={m.direction} /></div>)}
+      </Panel>}
       <Panel><STitle>Historico ({filtered.length})</STitle>
         {filtered.length > 0 ? filtered.slice(0,100).map((m: any, i: number) => (
           <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'6px 0', borderBottom:i<99?'1px solid '+P.redDim:'none', alignItems:'center' }}>
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:10, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span>
-                <span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{m.username}</span>
-                <span style={{ color:P.textDim, fontSize:10 }}>{m.platform}</span>
-              </div>
-              <div style={{ color:P.textSec, fontSize:11, marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.content}</div>
-            </div>
+            <div style={{ flex:1, minWidth:0 }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:10, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span><span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{m._username}</span><span style={{ color:P.textDim, fontSize:10 }}>{m._platform}</span>{m.abTestGroup && <span style={{ color:P.blue, fontSize:9, padding:'1px 5px', borderRadius:2, background:P.blue+'18' }}>A/B:{m.abTestGroup}</span>}</div><div style={{ color:P.textSec, fontSize:11, marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{m.content}</div></div>
             <span style={{ color:P.textDim, fontSize:10, marginLeft:10, flexShrink:0 }}>{fmtDt(m.sentAt)}</span>
           </div>
         )) : <EmptyState icon="\u2709" title="Sem mensagens" sub="As mensagens aparecerao aqui" />}
@@ -679,22 +481,87 @@ function MessagesTab({ refreshDash }: { refreshDash:()=>void }) {
   );
 }
 
-// ==========================================
-// INBOX TAB - localStorage
-// ==========================================
-function InboxTab() {
-  const [messages, setMessages] = useState<any[]>([]);
-  useEffect(() => { setMessages(loadMessages().filter(m => m.direction === 'inbound').sort((a,b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())); }, []);
+function FollowUpsTab() {
+  const [followUps, setFollowUps] = useState<any[]>([]);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [form, setForm] = useState({ profileId:'', username:'', platform:'instagram', scheduledAt:'', notes:'', message:'' });
+  const load = async () => { const res = await mbaFetch('/api/followups'); if (res.ok) { const d = await res.json(); setFollowUps(d.followUps || []); setPendingCount(d.pendingCount || 0); } };
+  useEffect(() => { load(); }, []);
+  const create = async () => {
+    if (!form.profileId || !form.scheduledAt) return;
+    await mbaFetch('/api/followups', { method:'POST', body:JSON.stringify(form) });
+    setForm({ profileId:'', username:'', platform:'instagram', scheduledAt:'', notes:'', message:'' }); load();
+  };
+  const markDone = async (id: string) => {
+    await mbaFetch('/api/followups', { method:'PATCH', body:JSON.stringify({ id, status:'completed' }) }); load();
+  };
+  const remove = async (id: string) => {
+    await mbaFetch('/api/followups?id='+id, { method:'DELETE' }); load();
+  };
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      <STitle>Inbox ({messages.length} mensagens recebidas)</STitle>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Follow-ups ({pendingCount} pendentes)</STitle><Btn variant="ghost" size="sm" onClick={load}>Actualizar</Btn></div>
+      <Panel style={{ marginBottom:14 }}>
+        <STitle>Novo Follow-up</STitle>
+        <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
+          <div><Lbl>ID do Perfil</Lbl><input value={form.profileId} onChange={e=>setForm({...form,profileId:e.target.value})} placeholder="Colar ID do perfil" style={INP} /></div>
+          <div><Lbl>Username</Lbl><input value={form.username} onChange={e=>setForm({...form,username:e.target.value})} style={INP} /></div>
+          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={e=>setForm({...form,platform:e.target.value})} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option></select></div>
+          <div><Lbl>Agendar para</Lbl><input type="datetime-local" value={form.scheduledAt} onChange={e=>setForm({...form,scheduledAt:e.target.value})} style={INP} /></div>
+        </div>
+        <div style={{ marginBottom:10 }}><Lbl>Mensagem</Lbl><textarea value={form.message} onChange={e=>setForm({...form,message:e.target.value})} rows={2} style={{ ...INP, resize:'vertical' }} /></div>
+        <div style={{ marginBottom:10 }}><Lbl>Notas</Lbl><input value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} style={INP} /></div>
+        <Btn onClick={create} disabled={!form.profileId || !form.scheduledAt}>Criar Follow-up</Btn>
+      </Panel>
       <Panel>
+        {followUps.length > 0 ? followUps.map((fu: any) => (
+          <div key={fu.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'10px 0', borderBottom:'1px solid '+P.border }}>
+            <div style={{ flex:1 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{fu.username || '?'}</span><span style={{ color:P.textDim, fontSize:10 }}>{fu.platform}</span><StatusBadge status={fu.status} /></div>
+              {fu.message && <div style={{ color:P.textSec, fontSize:11, marginTop:4 }}>{fu.message}</div>}
+              <div style={{ color:P.textDim, fontSize:10, marginTop:2 }}>Agendado: {fmtDt(fu.scheduledAt)}</div>
+            </div>
+            <div style={{ display:'flex', gap:6 }}>
+              {fu.status === 'pending' && <Btn size="sm" onClick={()=>markDone(fu.id)}>Concluido</Btn>}
+              <Btn size="sm" variant="danger" onClick={()=>remove(fu.id)}>Eliminar</Btn>
+            </div>
+          </div>
+        )) : <EmptyState icon="\u21BB" title="Sem follow-ups" sub="Crie um follow-up acima" />}
+      </Panel>
+    </div>
+  );
+}
+
+function InboxTab() {
+  const [messages, setMessages] = useState<any[]>([]);
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const load = async () => {
+    setLoading(true);
+    const res = await mbaFetch('/api/inbox');
+    if (res.ok) { const d = await res.json(); setMessages(d.messages || []); setConversations(d.metaConversations || []); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+  return (
+    <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Inbox ({messages.length} mensagens)</STitle><Btn variant="ghost" size="sm" onClick={load} disabled={loading}>{loading ? 'A carregar...' : 'Actualizar'}</Btn></div>
+      {conversations.length > 0 && <Panel style={{ marginBottom:14 }}><STitle>Conversas Meta (Facebook)</STitle>
+        {conversations.map((c: any, i: number) => (
+          <div key={i} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:i<conversations.length-1?'1px solid '+P.border:'none', alignItems:'center' }}>
+            <div><div style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{c.participant || 'Desconhecido'}</div><div style={{ color:P.textSec, fontSize:11, marginTop:2 }}>{c.snippet}</div></div>
+            <span style={{ color:P.textDim, fontSize:10, flexShrink:0 }}>{c.updatedTime ? fmtDt(c.updatedTime) : ''}</span>
+          </div>
+        ))}
+      </Panel>}
+      <Panel><STitle>Mensagens recebidas</STitle>
         {messages.length > 0 ? messages.map((m: any, i: number) => (
-          <div key={i} style={{ padding:'10px 0', borderBottom:i<messages.length-1?'1px solid '+P.redDim:'none' }}>
+          <div key={m.id || i} style={{ padding:'10px 0', borderBottom:i<messages.length-1?'1px solid '+P.redDim:'none' }}>
             <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
               <span style={{ color:P.green, fontSize:10, fontWeight:700 }}>IN</span>
-              <span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{m.username||'Desconhecido'}</span>
-              <span style={{ color:P.textDim, fontSize:10 }}>{m.platform||''}</span>
+              <span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{m.profile?.username || 'Desconhecido'}</span>
+              <span style={{ color:P.textDim, fontSize:10 }}>{m.profile?.platform || ''}</span>
+              {!m.isRead && <div style={{ width:6, height:6, borderRadius:'50%', background:P.red }} />}
             </div>
             <div style={{ color:P.textSec, fontSize:12 }}>{m.content}</div>
             <div style={{ color:P.textDim, fontSize:10, marginTop:4 }}>{fmtDt(m.sentAt)}</div>
@@ -705,16 +572,13 @@ function InboxTab() {
   );
 }
 
-// ==========================================
-// AGENT CHAT
-// ==========================================
 function AgentChat() {
   const [chatHistory, setChatHistory] = useState<{role:string; content:string}[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [profileId, setProfileId] = useState('');
   const chatEnd = useRef<HTMLDivElement>(null);
   useEffect(() => { chatEnd.current?.scrollIntoView({ behavior:'smooth' }); }, [chatHistory]);
-
   const send = async () => {
     if (!input.trim() || loading) return;
     const userMsg = input.trim();
@@ -722,7 +586,7 @@ function AgentChat() {
     setChatHistory(h => [...h, { role:'user', content:userMsg }]);
     setLoading(true);
     try {
-      const res = await mbaFetch('/api/respond', { method:'POST', body:JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10) }) });
+      const res = await mbaFetch('/api/respond', { method:'POST', body:JSON.stringify({ profileId: profileId || undefined, message: userMsg, conversationHistory: chatHistory.slice(-10) }) });
       if (res.ok) { const d = await res.json(); setChatHistory(h => [...h, { role:'assistant', content:d.reply }]); }
       else { setChatHistory(h => [...h, { role:'assistant', content:'Erro ao gerar resposta.' }]); }
     } catch { setChatHistory(h => [...h, { role:'assistant', content:'Erro de ligacao.' }]); }
@@ -730,7 +594,10 @@ function AgentChat() {
   };
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <div style={{ padding:'10px 16px', borderBottom:'1px solid '+P.border }}><STitle>Agente IA</STitle></div>
+      <div style={{ padding:'10px 16px', borderBottom:'1px solid '+P.border, display:'flex', gap:10, alignItems:'center' }}>
+        <STitle>Agente IA</STitle>
+        <input value={profileId} onChange={e=>setProfileId(e.target.value)} placeholder="ID do perfil (opcional)" style={{ ...INP, width:200, fontSize:11 }} />
+      </div>
       <div style={{ flex:1, overflowY:'auto', padding:16 }}>
         {chatHistory.length === 0 && <EmptyState icon="\u2609" title="Agente Mwango Brain" sub="Pergunte sobre prospeccao, perfis, ou peca sugestoes de mensagem." />}
         {chatHistory.map((m, i) => (
@@ -752,48 +619,329 @@ function AgentChat() {
   );
 }
 
-// ==========================================
-// MAIN APP
-// ==========================================
-export default function MBAApp() {
-  const { isAuthenticated, activeTab, setActiveTab, setAuthenticated } = useMBAStore();
-  const [clock, setClock] = useState('');
-  const [dashKey, setDashKey] = useState(0);
-  const refreshDash = () => setDashKey(k => k + 1);
+function CampaignsTab() {
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState('');
+  const [form, setForm] = useState({ name:'', status:'pending', targetCount:200, minFollowers:1000, maxFollowers:50000, platform:'all', maxPerDay:LIMIT_DIARIO });
+  const load = async () => { const res = await mbaFetch('/api/campaigns'); if (res.ok) { const d = await res.json(); setCampaigns(d.campaigns || []); } };
+  useEffect(() => { load(); }, []);
+  const save = async () => {
+    if (!form.name.trim()) return;
+    if (editId) { await mbaFetch('/api/campaigns', { method:'PATCH', body:JSON.stringify({ id:editId, ...form }) }); }
+    else { await mbaFetch('/api/campaigns', { method:'POST', body:JSON.stringify(form) }); }
+    setShowForm(false); setEditId(''); setForm({ name:'', status:'pending', targetCount:200, minFollowers:1000, maxFollowers:50000, platform:'all', maxPerDay:LIMIT_DIARIO }); load();
+  };
+  const edit = (c: any) => { setForm({ name:c.name, status:c.status, targetCount:c.targetCount, minFollowers:c.minFollowers, maxFollowers:c.maxFollowers, platform:c.platform, maxPerDay:c.maxPerDay }); setEditId(c.id); setShowForm(true); };
+  const remove = async (id: string) => { await mbaFetch('/api/campaigns?id='+id, { method:'DELETE' }); load(); };
+  return (
+    <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Campanhas ({campaigns.length})</STitle><Btn size="sm" onClick={()=>{setShowForm(!showForm);setEditId('');setForm({name:'',status:'pending',targetCount:200,minFollowers:1000,maxFollowers:50000,platform:'all',maxPerDay:LIMIT_DIARIO});}}>{showForm?'Cancelar':'Nova campanha'}</Btn></div>
+      {showForm && <Panel style={{ marginBottom:14 }}>
+        <STitle>{editId?'Editar':'Nova'} campanha</STitle>
+        <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
+          <div><Lbl>Nome</Lbl><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Nome da campanha" style={INP} /></div>
+          <div><Lbl>Estado</Lbl><select value={form.status} onChange={e=>setForm({...form,status:e.target.value})} style={SEL as any}><option value="pending">Pendente</option><option value="active">Activa</option><option value="paused">Pausada</option><option value="completed">Concluida</option></select></div>
+          <div><Lbl>Alvo</Lbl><input type="number" value={form.targetCount} onChange={e=>setForm({...form,targetCount:Number(e.target.value)})} style={INP} /></div>
+          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={e=>setForm({...form,platform:e.target.value})} style={SEL as any}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option></select></div>
+          <div><Lbl>Min. Seguidores</Lbl><input type="number" value={form.minFollowers} onChange={e=>setForm({...form,minFollowers:Number(e.target.value)})} style={INP} /></div>
+          <div><Lbl>Max. Seguidores</Lbl><input type="number" value={form.maxFollowers} onChange={e=>setForm({...form,maxFollowers:Number(e.target.value)})} style={INP} /></div>
+          <div><Lbl>Max/dia</Lbl><input type="number" value={form.maxPerDay} onChange={e=>setForm({...form,maxPerDay:Number(e.target.value)})} style={INP} /></div>
+        </div>
+        <Btn onClick={save} disabled={!form.name.trim()}>{editId?'Guardar':'Criar'}</Btn>
+      </Panel>}
+      {campaigns.length > 0 ? campaigns.map((c: any) => (
+        <Panel key={c.id} style={{ marginBottom:10 }}>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:8 }}>
+            <div><div style={{ color:P.text, fontSize:14, fontWeight:700 }}>{c.name}</div><div style={{ color:P.textDim, fontSize:11, marginTop:2 }}>{fmtDt(c.createdAt)}</div></div>
+            <div style={{ display:'flex', gap:6 }}><Btn size="sm" variant="ghost" onClick={()=>edit(c)}>Editar</Btn><Btn size="sm" variant="danger" onClick={()=>remove(c.id)}>Eliminar</Btn></div>
+          </div>
+          <div style={{ display:'flex', gap:16, flexWrap:'wrap' }}>
+            <div><Lbl>Estado</Lbl><StatusBadge status={c.status} /></div>
+            <div><Lbl>Enviadas</Lbl><div style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontSize:13 }}>{c._count?.messages||c.sentCount||0}</div></div>
+            <div><Lbl>Respostas</Lbl><div style={{ color:P.green, fontFamily:"'JetBrains Mono',monospace", fontSize:13 }}>{c.repliedCount||0}</div></div>
+            <div><Lbl>Perfis</Lbl><div style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontSize:13 }}>{c._count?.profiles||0}</div></div>
+            <div><Lbl>Plataforma</Lbl><div style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{c.platform}</div></div>
+          </div>
+        </Panel>
+      )) : <EmptyState icon="\u2699" title="Sem campanhas" sub="Crie a sua primeira campanha" />}
+    </div>
+  );
+}
 
+function AnalyticsTab() {
+  const [reportData, setReportData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [pdfStatus, setPdfStatus] = useState('');
+  const [webhookUrl, setWebhookUrl] = useState('');
+  const [abVariants, setAbVariants] = useState<any[]>([]);
+  const [abStats, setAbStats] = useState<any>({});
+  const [newAb, setNewAb] = useState({ group:'', name:'', content:'' });
+  const load = async () => {
+    setLoading(true);
+    const [r1, r2] = await Promise.all([mbaFetch('/api/pdf-report'), mbaFetch('/api/ab-test')]);
+    if (r1.ok) setReportData(await r1.json());
+    if (r2.ok) { const d = await r2.json(); setAbVariants(d.variants || []); setAbStats(d.groupStats || {}); }
+    setLoading(false);
+  };
+  useEffect(() => { load(); }, []);
+  const genPdf = async () => {
+    if (!reportData) return;
+    setPdfStatus('A gerar...');
+    try {
+      const { default: jsPDF } = await import('jspdf');
+      const doc = new jsPDF();
+      const d = reportData;
+      doc.setFontSize(20); doc.setTextColor(192, 0, 28); doc.text('MBA - Relatorio de Prospeccao', 20, 25);
+      doc.setFontSize(10); doc.setTextColor(144, 144, 170); doc.text('Mwango Brain Agent - ' + new Date().toLocaleString('pt-PT'), 20, 33);
+      doc.setDrawColor(192, 0, 28); doc.line(20, 37, 190, 37);
+      doc.setTextColor(60, 60, 60); doc.setFontSize(12); doc.text('Visao Geral', 20, 50);
+      doc.setFontSize(10);
+      const stats = [['Total de perfis', d.totalProfiles], ['Total de mensagens', d.totalMessages], ['Mensagens enviadas', d.outbound], ['Mensagens recebidas', d.inbound], ['Taxa de resposta', d.responseRate + '%'], ['Total de campanhas', d.totalCampaigns], ['Follow-ups pendentes', d.pendingFollowUps]];
+      stats.forEach(([l, v], i) => { doc.text(l + ': ' + v, 25, 60 + i * 7); });
+      let y = 60 + stats.length * 7 + 10;
+      doc.setFontSize(12); doc.text('Por Estado', 20, y); y += 8; doc.setFontSize(10);
+      (d.byStatus || []).forEach((s: any) => { doc.text(s.status + ': ' + s._count, 25, y); y += 7; });
+      y += 8; doc.setFontSize(12); doc.text('Por Plataforma', 20, y); y += 8; doc.setFontSize(10);
+      (d.byPlatform || []).forEach((p: any) => { doc.text(p.platform + ': ' + p._count, 25, y); y += 7; });
+      y += 8; doc.setFontSize(12); doc.text('Top 10 Perfis', 20, y); y += 8; doc.setFontSize(10);
+      (d.topProfiles || []).forEach((p: any, i: number) => { doc.text((i + 1) + '. ' + p.username + ' (' + p.platform + ') - ' + (p.followers || 0).toLocaleString() + ' seguidores, score: ' + (p.score || 0).toFixed(1), 25, y); y += 7; });
+      doc.save('MBA_Relatorio_' + new Date().toISOString().slice(0, 10) + '.pdf');
+      setPdfStatus('PDF gerado com sucesso');
+    } catch (e: any) { setPdfStatus('Erro: ' + (e.message || 'falha ao gerar PDF')); }
+  };
+  const addAbVariant = async () => {
+    if (!newAb.group || !newAb.content.trim()) return;
+    const res = await mbaFetch('/api/ab-test', { method:'POST', body:JSON.stringify(newAb) });
+    if (res.ok) { setNewAb({ group:'', name:'', content:'' }); load(); }
+  };
+  const removeAb = async (id: string) => { await mbaFetch('/api/ab-test?id='+id, { method:'DELETE' }); load(); };
+  return (
+    <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Analytics</STitle><Btn variant="ghost" size="sm" onClick={load} disabled={loading}>Actualizar</Btn></div>
+      {reportData && <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+        <StatCard label="Perfis" value={reportData.totalProfiles} />
+        <StatCard label="Mensagens" value={reportData.totalMessages} color={P.orange} />
+        <StatCard label="Taxa resposta" value={(reportData.responseRate||0).toFixed(1)+'%'} color={P.green} />
+        <StatCard label="Campanhas" value={reportData.totalCampaigns} color={P.blue} />
+      </div>}
+      {reportData && <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
+        <Panel><STitle>Por Estado</STitle><div style={{ display:'flex', flexDirection:'column', gap:8 }}>{(reportData.byStatus || []).map((s: any, i: number) => {
+          const max = Math.max(...(reportData.byStatus || []).map((x: any) => x._count), 1);
+          return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{s.status}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{s._count}</span></div><BarComp value={s._count} max={max} color={Object.values(statusColors)[i % 6] || P.red} h={8} /></div>;
+        })}</div></Panel>
+        <Panel><STitle>Por Plataforma</STitle><div style={{ display:'flex', flexDirection:'column', gap:8 }}>{(reportData.byPlatform || []).map((p: any, i: number) => {
+          const colors = [P.red, P.orange, P.blue, P.green];
+          const max = Math.max(...(reportData.byPlatform || []).map((x: any) => x._count), 1);
+          return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{p.platform}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p._count}</span></div><BarComp value={p._count} max={max} color={colors[i % 4]} h={8} /></div>;
+        })}</div></Panel>
+      </div>}
+      <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+        <Btn onClick={genPdf} disabled={!reportData || pdfStatus === 'A gerar...'}>Gerar relatorio PDF</Btn>
+        {pdfStatus && <span style={{ color:pdfStatus.includes('Erro')?'#ff6b6b':P.green, fontSize:12, alignSelf:'center' }}>{pdfStatus}</span>}
+      </div>
+      <Panel style={{ marginBottom:14 }}><STitle>Webhook URL</STitle>
+        <div style={{ display:'flex', gap:8, alignItems:'center' }}><input value={webhookUrl} onChange={e=>setWebhookUrl(e.target.value)} readOnly style={{ ...INP, flex:1, fontSize:11 }} placeholder={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhook`} /><Btn variant="ghost" size="sm" onClick={()=>{const u=`${typeof window !== 'undefined' ? window.location.origin : ''}/api/webhook`;setWebhookUrl(u);navigator.clipboard.writeText(u);}}>Copiar</Btn></div>
+        <div style={{ color:P.textDim, fontSize:11, marginTop:8 }}>Configure esta URL nos webhooks das plataformas para receber mensagens automaticamente.</div>
+      </Panel>
+      <Panel style={{ marginBottom:14 }}><STitle>Teste A/B de mensagens</STitle>
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 2fr auto', gap:8, marginBottom:10, alignItems:'end' }}>
+          <div><Lbl>Grupo</Lbl><input value={newAb.group} onChange={e=>setNewAb({...newAb,group:e.target.value})} placeholder="grupo_a" style={INP} /></div>
+          <div><Lbl>Nome</Lbl><input value={newAb.name} onChange={e=>setNewAb({...newAb,name:e.target.value})} placeholder="Variante A" style={INP} /></div>
+          <div><Lbl>Conteudo</Lbl><textarea value={newAb.content} onChange={e=>setNewAb({...newAb,content:e.target.value})} rows={2} style={{ ...INP, resize:'vertical' }} /></div>
+          <Btn onClick={addAbVariant} disabled={!newAb.group || !newAb.content.trim()} style={{ marginBottom:0 }}>Adicionar</Btn>
+        </div>
+        {abVariants.length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{abVariants.map((v: any) => {
+          const stats = abStats[v.groupName] || { sent: 0, replies: 0 };
+          const rate = stats.sent > 0 ? ((stats.replies / stats.sent) * 100).toFixed(1) : '0.0';
+          return <div key={v.id} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom:'1px solid '+P.border }}>
+            <div><div style={{ color:P.text, fontSize:12, fontWeight:600 }}>{v.name} <span style={{ color:P.blue, fontSize:10 }}>({v.groupName})</span></div><div style={{ color:P.textSec, fontSize:11, marginTop:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', maxWidth:400 }}>{v.content}</div></div>
+            <div style={{ display:'flex', alignItems:'center', gap:12, flexShrink:0 }}><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{stats.sent}env</span><span style={{ color:P.green, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{stats.replies}resp</span><span style={{ color:P.blue, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{rate}%</span><button onClick={()=>removeAb(v.id)} style={{ background:'none', border:'none', color:'#ff6b6b', cursor:'pointer', fontSize:14 }}>&times;</button></div>
+          </div>;
+        })}</div> : <div style={{ color:P.textDim, fontSize:12, textAlign:'center', padding:20 }}>Nenhuma variante A/B criada</div>}
+      </Panel>
+    </div>
+  );
+}
+
+function ActivityTab() {
+  const [logs, setLogs] = useState<any[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [actionFilter, setActionFilter] = useState('');
+  const load = async () => {
+    const params = new URLSearchParams({ page: String(page), limit: '50' });
+    if (actionFilter) params.set('action', actionFilter);
+    const res = await mbaFetch('/api/activity-logs?' + params);
+    if (res.ok) { const d = await res.json(); setLogs(d.logs || []); setTotal(d.total || 0); }
+  };
+  useEffect(() => { load(); }, [page, actionFilter]);
+  return (
+    <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}><STitle>Registo de actividade ({total})</STitle>
+        <div style={{ display:'flex', gap:8 }}>
+          <select value={actionFilter} onChange={e=>{setActionFilter(e.target.value);setPage(1);}} style={{ ...SEL as any, width:150 }}><option value="">Todas as accoes</option><option value="message_sent">Mensagens</option><option value="profile_created">Perfis</option><option value="login">Sessoes</option><option value="campaign_created">Campanhas</option><option value="backup">Backups</option></select>
+          <Btn variant="ghost" size="sm" onClick={load}>Actualizar</Btn>
+        </div>
+      </div>
+      <Panel>
+        {logs.length > 0 ? logs.map((log: any, i: number) => (
+          <div key={log.id || i} style={{ display:'flex', justifyContent:'space-between', padding:'8px 0', borderBottom:i<logs.length-1?'1px solid '+P.redDim:'none', alignItems:'flex-start' }}>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.redB, fontSize:10, fontWeight:700, textTransform:'uppercase' }}>{log.action}</span>{log.ipAddress && <span style={{ color:P.textDim, fontSize:10 }}>{log.ipAddress}</span>}</div>
+              {log.details && <div style={{ color:P.textSec, fontSize:11, marginTop:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{log.details}</div>}
+            </div>
+            <span style={{ color:P.textDim, fontSize:10, flexShrink:0, marginLeft:10 }}>{fmtDt(log.createdAt)}</span>
+          </div>
+        )) : <EmptyState icon="\u231A" title="Sem registos" sub="A actividade sera registada aqui" />}
+        {total > 50 && <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}><Btn variant="ghost" size="sm" disabled={page<=1} onClick={()=>setPage(page-1)}>Anterior</Btn><span style={{ color:P.textSec, fontSize:12, alignSelf:'center' }}>Pagina {page} de {Math.ceil(total/50)}</span><Btn variant="ghost" size="sm" disabled={page>=Math.ceil(total/50)} onClick={()=>setPage(page+1)}>Proxima</Btn></div>}
+      </Panel>
+    </div>
+  );
+}
+
+function ConfigTab({ onLogout }: { onLogout:()=>void }) {
+  const [cookies, setCookies] = useState<any[]>([]);
+  const [cookieEdits, setCookieEdits] = useState<Record<string,string>>({});
+  const [backups, setBackups] = useState<any[]>([]);
+  const [backupStatus, setBackupStatus] = useState('');
+  const [loadingCookies, setLoadingCookies] = useState(false);
+  const loadCookies = async () => {
+    setLoadingCookies(true);
+    const res = await mbaFetch('/api/cookies');
+    if (res.ok) { const d = await res.json(); setCookies(d.cookies || []); }
+    setLoadingCookies(false);
+  };
+  const saveCookies = async () => {
+    await mbaFetch('/api/cookies', { method:'PATCH', body:JSON.stringify({ updates:cookieEdits }) });
+    setCookieEdits({}); loadCookies();
+  };
+  const doBackup = async () => {
+    setBackupStatus('A criar backup...');
+    const res = await mbaFetch('/api/backup');
+    if (res.ok) { const d = await res.json(); setBackupStatus('Backup criado: ' + d.backupName); loadBackups(); }
+    else setBackupStatus('Erro ao criar backup');
+  };
+  const loadBackups = async () => {
+    const res = await mbaFetch('/api/backup', { method:'POST', body:JSON.stringify({ action:'list' }) });
+    if (res.ok) { const d = await res.json(); setBackups(d.backups || []); }
+  };
+  const restore = async (name: string) => {
+    if (!confirm('Restaurar o backup ' + name + '? Isto substituira a base de dados actual.')) return;
+    setBackupStatus('A restaurar...');
+    const res = await mbaFetch('/api/backup', { method:'POST', body:JSON.stringify({ action:'restore', backupName:name }) });
+    if (res.ok) setBackupStatus('Backup restaurado com sucesso. Recarregue a pagina.');
+    else setBackupStatus('Erro ao restaurar');
+  };
+  useEffect(() => { loadCookies(); loadBackups(); }, []);
+  return (
+    <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Configuracao</STitle><Btn variant="danger" onClick={onLogout}>Terminar sessao</Btn></div>
+      <Panel style={{ marginBottom:14 }}><STitle>Cookies de API</STitle>
+        <Btn variant="ghost" size="sm" onClick={loadCookies} disabled={loadingCookies}>{loadingCookies?'A carregar...':'Recarregar cookies'}</Btn>
+        <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:8 }}>{cookies.map((c: any) => (
+          <div key={c.key}>
+            <Lbl>{c.label}</Lbl>
+            <input value={cookieEdits[c.key] !== undefined ? cookieEdits[c.key] : (c.hasValue ? '[valor guardado]' : '')} onChange={e=>setCookieEdits({...cookieEdits, [c.key]:e.target.value})} placeholder={c.hasValue?'Deixe vazio para manter o valor actual':'Introduza o valor'} style={INP} />
+          </div>
+        ))}</div>
+        {cookies.length > 0 && <Btn style={{ marginTop:10 }} onClick={saveCookies}>Guardar cookies</Btn>}
+      </Panel>
+      <Panel style={{ marginBottom:14 }}><STitle>Backup e Restauracao</STitle>
+        <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap', alignItems:'center' }}>
+          <Btn onClick={doBackup}>Criar backup agora</Btn>
+          {backupStatus && <span style={{ color:backupStatus.includes('Erro')?'#ff6b6b':P.green, fontSize:12 }}>{backupStatus}</span>}
+        </div>
+        {backups.length > 0 && <div style={{ display:'flex', flexDirection:'column', gap:6 }}>{backups.map((b: any, i: number) => (
+          <div key={i} style={{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 0', borderBottom:'1px solid '+P.border }}>
+            <div><span style={{ color:P.text, fontSize:12 }}>{b.name}</span><span style={{ color:P.textDim, fontSize:10, marginLeft:10 }}>{(b.size/1024).toFixed(1)} KB</span></div>
+            <div style={{ display:'flex', gap:6, alignItems:'center' }}><span style={{ color:P.textDim, fontSize:10 }}>{b.date}</span><Btn size="sm" variant="ghost" onClick={()=>restore(b.name)}>Restaurar</Btn></div>
+          </div>
+        ))}</div>}
+      </Panel>
+      <Panel><STitle>Informacao do sistema</STitle>
+        <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+          <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:P.textSec, fontSize:12 }}>Versao</span><span style={{ color:P.text, fontSize:12, fontFamily:"'JetBrains Mono',monospace" }}>2.0.77</span></div>
+          <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:P.textSec, fontSize:12 }}>Motor</span><span style={{ color:P.text, fontSize:12 }}>Next.js + Bun + Prisma</span></div>
+          <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:P.textSec, fontSize:12 }}>Base de dados</span><span style={{ color:P.text, fontSize:12 }}>SQLite</span></div>
+          <div style={{ display:'flex', justifyContent:'space-between' }}><span style={{ color:P.textSec, fontSize:12 }}>Limite diario</span><span style={{ color:P.text, fontSize:12, fontFamily:"'JetBrains Mono',monospace" }}>{LIMIT_DIARIO} mensagens</span></div>
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+export default function MBAApp() {
+  const { isAuthenticated, sessionId, activeTab, setActiveTab, setAuthenticated, sessionRestored } = useMBAStore();
+  const [dashData, setDashData] = useState<any>(null);
+  const [clock, setClock] = useState('');
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showNotifs, setShowNotifs] = useState(false);
+  const loadDash = useCallback(async () => {
+    try { const res = await mbaFetch('/api/dashboard'); if (res.ok) setDashData(await res.json()); } catch {}
+  }, []);
+  const loadNotifs = useCallback(async () => {
+    try { const res = await mbaFetch('/api/notifications'); if (res.ok) { const d = await res.json(); setNotifications(d.messages || []); setUnreadCount(d.unreadCount || 0); } } catch {}
+  }, []);
   useEffect(() => {
-    const sid = storeGet('mba_session');
+ const sid = storeGet('mba_session');
     if (sid) { mbaFetch('/api/auth/check').then(r => { if (r.ok) setAuthenticated(true, sid); else { localStorage.removeItem('mba_session'); } }).catch(() => {}); }
   }, []);
-
   useEffect(() => {
     if (!isAuthenticated) return;
+    loadDash(); loadNotifs();
+    const iv = setInterval(() => { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); loadNotifs(); }, 30000);
     const tick = setInterval(() => setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })), 1000);
-    return () => clearInterval(tick);
-  }, [isAuthenticated]);
-
+    return () => { clearInterval(iv); clearInterval(tick); };
+  }, [isAuthenticated, loadDash, loadNotifs]);
+  const markNotifsRead = async () => {
+    const ids = notifications.filter(n => !n.isRead).map(n => n.id);
+    if (ids.length > 0) { await mbaFetch('/api/notifications', { method:'PATCH', body:JSON.stringify({ ids }) }); setUnreadCount(0); loadNotifs(); }
+  };
+  const doLogout = () => { localStorage.removeItem('mba_session'); setAuthenticated(false, null); };
   if (!isAuthenticated) return <LoginScreen />;
   return (
     <div style={{ width:'100vw', height:'100vh', background:P.bg, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-      <div style={{ height:48, borderBottom:'1px solid '+P.border, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', flexShrink:0, background:P.surface }}>
+      <div className="mba-header-inner" style={{ height:48, borderBottom:'1px solid '+P.border, display:'flex', alignItems:'center', justifyContent:'space-between', padding:'0 16px', flexShrink:0, background:P.surface }}>
         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
           <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:16, fontWeight:900, color:P.red, letterSpacing:2 }}>MBA</div>
           <div style={{ width:1, height:20, background:P.border }} />
-          <div style={{ color:P.textDim, fontSize:10, letterSpacing:2, textTransform:'uppercase' }}>MWANGO BRAIN AGENT</div>
+          <div style={{ color:P.textDim, fontSize:10, letterSpacing:2, textTransform:'uppercase' }} className="mba-hide-mobile">MWANGO BRAIN AGENT</div>
         </div>
-        <div style={{ color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{clock}</div>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <div style={{ position:'relative' }}>
+            <button onClick={()=>{setShowNotifs(!showNotifs);if(!showNotifs)markNotifsRead();}} style={{ background:'none', border:'1px solid '+P.border, borderRadius:6, padding:'4px 8px', cursor:'pointer', color:P.textSec, fontSize:14, position:'relative' }}>{unreadCount > 0 && <div style={{ position:'absolute', top:-4, right:-4, width:16, height:16, borderRadius:8, background:P.red, color:'#fff', fontSize:9, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700 }}>{unreadCount > 9 ? '9+' : unreadCount}</div>}☆</button>
+            {showNotifs && <div style={{ position:'absolute', top:36, right:0, width:320, background:P.surface, border:'1px solid '+P.border, borderRadius:8, padding:12, maxHeight:400, overflowY:'auto', zIndex:100 }}>
+              <div style={{ color:P.text, fontSize:12, fontWeight:700, marginBottom:8 }}>Notificacoes</div>
+              {notifications.length > 0 ? notifications.map((n: any, i: number) => (
+                <div key={i} style={{ padding:'6px 0', borderBottom:i<notifications.length-1?'1px solid '+P.redDim:'none' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:6 }}><span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{n.profile?.username || 'Sistema'}</span>{!n.isRead && <div style={{ width:5, height:5, borderRadius:'50%', background:P.red }} />}</div>
+                  <div style={{ color:P.textSec, fontSize:11, marginTop:2 }}>{n.content}</div>
+                  <div style={{ color:P.textDim, fontSize:9, marginTop:2 }}>{fmtDt(n.sentAt)}</div>
+                </div>
+              )) : <div style={{ color:P.textDim, fontSize:11, textAlign:'center', padding:16 }}>Sem notificacoes</div>}
+            </div>}
+          </div>
+          <div style={{ color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{clock}</div>
+        </div>
       </div>
-      <div style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
+      <div className="mba-tabs" style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
         {TABS.map(t => (
           <button key={t.id} onClick={()=>setActiveTab(t.id)} style={{ padding:'10px 16px', border:'none', borderBottom:activeTab===t.id?'2px solid '+P.red:'2px solid transparent', background:'transparent', color:activeTab===t.id?P.redB:P.textDim, fontSize:11, fontWeight:activeTab===t.id?700:500, cursor:'pointer', whiteSpace:'nowrap', letterSpacing:'.5px', transition:'all .15s' }}>{t.label}</button>
         ))}
       </div>
       <div style={{ flex:1, overflow:'hidden' }}>
-        {activeTab === 'dashboard' && <DashboardTab key={dashKey} onRefresh={refreshDash} />}
-        {activeTab === 'prospecting' && <ProspectingTab refreshDash={refreshDash} />}
-        {activeTab === 'messages' && <MessagesTab refreshDash={refreshDash} />}
+        {activeTab === 'dashboard' && <DashboardTab dashData={dashData} onRefresh={loadDash} />}
+        {activeTab === 'prospecting' && <ProspectingTab />}
+        {activeTab === 'messages' && <MessagesTab />}
+        {activeTab === 'followups' && <FollowUpsTab />}
         {activeTab === 'inbox' && <InboxTab />}
         {activeTab === 'agent' && <AgentChat />}
+        {activeTab === 'campaigns' && <CampaignsTab />}
+        {activeTab === 'analytics' && <AnalyticsTab />}
+        {activeTab === 'activity' && <ActivityTab />}
+        {activeTab === 'config' && <ConfigTab onLogout={doLogout} />}
       </div>
     </div>
   );
