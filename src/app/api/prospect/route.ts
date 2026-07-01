@@ -126,7 +126,6 @@ export async function POST(request: Request) {
             all.push({ platform:'facebook', username:fslug, fullName:items[fi].title||fslug, followers:0, following:0, postsCount:0, bio:(items[fi].description||'').substring(0,200), profileUrl:furl, avatarUrl:'', isVerified:false, isBusiness:true, category:'' });
           }
 
-
         log.push(plat + ': +' + items.length + ' resultados (total: ' + all.length + ')');
       } catch(ex) {
         var em = (ex instanceof Error) ? ex.message : String(ex);
