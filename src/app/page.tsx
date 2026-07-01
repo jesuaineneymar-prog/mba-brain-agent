@@ -351,7 +351,7 @@ function LoginScreen() {
   );
 }
 
-function DashboardTab({ refreshKey }: { refreshKey: number }) {
+function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh: () => void }) {
   const [dashData, setDashData] = useState<any>(null);
   const loadDash = function() { setDashData(computeDashboard()); };
   useEffect(function() { loadDash(); }, [refreshKey]);
