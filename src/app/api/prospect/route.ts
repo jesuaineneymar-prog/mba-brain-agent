@@ -6,12 +6,8 @@ import { NextResponse } from 'next/server';
 // Este endpoint so faz scraping e retorna dados
 // ==========================================
 
-// Credenciais para scraping
-const IG_SESSION = process.env.IG_SESSIONID || '22987806071%3APJEKR4ZKC0zjTw%3A2%3AAYi0iJ8xriE5IrXzp-0aNrMgYSP7ifTVENxiaQqmyA';
-const IG_CSRF = process.env.IG_CSRFTOKEN || 'h8hqhQ0rEsQw9nI0mW0Xbv1eYOFRGniR';
-const TT_SESSION = process.env.TT_SESSIONID || 'dd79eded99c88d754997376786cab26b';
-const TT_CSRF = process.env.TT_CSRF_TOKEN || 'AyfiABpC-i_oOFH5Mqeqef9imWi9LqKSKh3U';
-const META_TOKEN = process.env.META_ACCESS_TOKEN || 'EAAd4GmZBcHgoBR67cA1xirkz3e9xZCr1EssTZCUPj5pVT02tws8qzWIZA9qqOdWlgDWWAWWZABSQEZBzuSdCdmVxLTuOZAzoYdObDYEuBu5xdKA7EXoHQcYhEZAVZA0uquJymRHvi1uVEidQ0lXtQNdwcXEcbKCErxKOMRYZBZBTwHIfOQP0m8ZA5jVl8V1WhnefKWhHpr2VIyb3BcocOehBsAzNuqVYmUBrVe5WYVd63O7t2NPFV33TUQZDZD';
+// Credenciais para scraping (fallbacks embutidos)
+const META_TOKEN = 'EAAd4GmZBcHgoBR67cA1xirkz3e9xZCr1EssTZCUPj5pVT02tws8qzWIZA9qqOdWlgDWWAWWZABSQEZBzuSdCdmVxLTuOZAzoYdObDYEuBu5xdKA7EXoHQcYhEZAVZA0uquJymRHvi1uVEidQ0lXtQNdwcXEcbKCErxKOMRYZBZBTwHIfOQP0m8ZA5jVl8V1WhnefKWhHpr2VIyb3BcocOehBsAzNuqVYmUBrVe5WYVd63O7t2NPFV33TUQZDZD';
 
 interface ProspectRequest {
   platform: string;
@@ -40,29 +36,39 @@ export async function POST(request: Request) {
     const location = (filters.location || 'Angola').trim();
     const query = keywords ? `${keywords} ${location}` : location;
 
-    for (const platform of platforms) {
-      try {
-        let profiles: any[] = [];
-        switch (platform) {
-          case 'instagram':
-            profiles = await scrapeInstagram(query, filters.targetCount);
-            break;
-          case 'tiktok':
-            profiles = await scrapeTikTok(query, filters.targetCount);
-            break;
-          case 'facebook':
-            profiles = await scrapeFacebook(query, filters.targetCount);
-            break;
-          case 'linkedin':
-            profiles = await scrapeLinkedIn(query, filters.targetCount);
-            break;
+    // Executar todas as plataformas em paralelo
+    const results = await Promise.allSettled(
+      platforms.map(async (platform) => {
+        try {
+          let profiles: any[] = [];
+          switch (platform) {
+            case 'instagram':
+              profiles = await scrapeInstagram(query, filters.targetCount);
+              break;
+            case 'tiktok':
+              profiles = await scrapeTikTok(query, filters.targetCount);
+              break;
+            case 'facebook':
+              profiles = await scrapeFacebook(query, filters.targetCount);
+              break;
+            case 'linkedin':
+              profiles = await scrapeLinkedIn(query, filters.targetCount);
+              break;
+          }
+          console.log(`[MBA PROSPECT] ${platform}: ${profiles.length} perfis encontrados`);
+          return { platform, profiles, error: null };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[MBA PROSPECT] ${platform} erro:`, msg);
+          return { platform, profiles: [], error: msg };
         }
-        console.log(`[MBA PROSPECT] ${platform}: ${profiles.length} perfis encontrados`);
-        allProfiles.push(...profiles);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        errors.push(`${platform}: ${msg}`);
-        console.error(`[MBA PROSPECT] ${platform} erro:`, msg);
+      })
+    );
+
+    for (const r of results) {
+      if (r.status === 'fulfilled') {
+        allProfiles.push(...r.value.profiles);
+        if (r.value.error) errors.push(`${r.value.platform}: ${r.value.error}`);
       }
     }
 
@@ -102,6 +108,19 @@ export async function POST(request: Request) {
       notes: '',
     })).slice(0, filters.targetCount);
 
+    if (filtered.length === 0 && allProfiles.length === 0) {
+      return NextResponse.json({
+        success: true,
+        status: 'completed',
+        profilesFound: 0,
+        totalRaw: 0,
+        profiles: [],
+        campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
+        message: `Nenhuma plataforma retornou resultados. Erros: ${errors.length > 0 ? errors.join('; ') : 'Verifica a tua ligacao e tenta novamente.'}`,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    }
+
     if (filtered.length === 0) {
       return NextResponse.json({
         success: true,
@@ -110,7 +129,7 @@ export async function POST(request: Request) {
         totalRaw: allProfiles.length,
         profiles: [],
         campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-        message: `Nenhum perfil encontrado com os filtros actuais. ${allProfiles.length} perfis encontrados mas todos filtrados. Tenta alargar os filtros de seguidores.${errors.length ? ' Erros: ' + errors.join('; ') : ''}`,
+        message: `${allProfiles.length} perfis encontrados mas todos filtrados. Tenta: (1) reduzir seguidores minimos, (2) desmarcar "contas regulares", ou (3) usar palavras-chave mais especificas.${errors.length ? ' Avisos: ' + errors.join('; ') : ''}`,
         errors: errors.length > 0 ? errors : undefined,
       });
     }
@@ -133,163 +152,341 @@ export async function POST(request: Request) {
 }
 
 // ==========================================
-// INSTAGRAM - Direct API via cookies
+// INSTAGRAM - Multi-strategy approach
+// Strategy 1: Public JSON API (no auth)
+// Strategy 2: HTML page scraping
 // ==========================================
 async function scrapeInstagram(query: string, limit: number): Promise<any[]> {
   const profiles: any[] = [];
 
-  const igUid = IG_SESSION.split('%3A')[0];
-  const headers: Record<string, string> = {
-    'Cookie': `sessionid=${IG_SESSION}; csrftoken=${IG_CSRF}; ds_user_id=${igUid}`,
-    'X-CSRFToken': IG_CSRF,
-    'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Instagram 320.0.1.37 Mobile Safari/604.1',
-    'X-IG-App-ID': '936619743392459',
-    'X-IG-WWW-Claim': '0',
-    'X-Requested-With': 'XMLHttpRequest',
-  };
+  // STRATEGY 1: Try public API with mobile headers
+  try {
+    const res = await fetch(
+      `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(query)}&count=${limit}`,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Instagram 320.0.1.37 Mobile Safari/604.1',
+          'X-IG-App-ID': '936619743392459',
+          'Accept': 'application/json',
+          'Accept-Language': 'pt-PT,pt;q=0.9',
+          'X-Requested-With': 'com.instagram.android',
+        },
+        redirect: 'follow',
+      }
+    );
 
-  const res = await fetch(
-    `https://www.instagram.com/api/v1/web/search/topsearch/?context=blended&query=${encodeURIComponent(query)}&rank_token=0.5`,
-    { headers }
-  );
+    if (res.ok) {
+      const data = await res.json();
+      const users = data?.users || [];
+      for (const item of users) {
+        const u = item?.user;
+        if (!u || !u.username) continue;
 
-  if (!res.ok) {
-    throw new Error(`Instagram API retornou HTTP ${res.status}`);
+        profiles.push({
+          platform: 'instagram',
+          username: u.username,
+          fullName: u.full_name || '',
+          followers: parseInt(u.follower_count || '0') || 0,
+          following: parseInt(u.following_count || '0') || 0,
+          postsCount: parseInt(u.media_count || '0') || 0,
+          bio: u.biography || '',
+          profileUrl: `https://instagram.com/${u.username}`,
+          avatarUrl: u.profile_pic_url || '',
+          isVerified: u.is_verified || false,
+          isBusiness: u.is_business_account || false,
+          location: '',
+          category: u.category_name || '',
+          externalId: u.pk || '',
+        });
+      }
+      if (profiles.length > 0) return profiles;
+    }
+  } catch (e) {
+    console.log('[IG] Strategy 1 failed:', e instanceof Error ? e.message : 'unknown');
   }
 
-  const data = await res.json();
-  const users = data?.users || [];
+  // STRATEGY 2: Scrape public Instagram search page HTML
+  try {
+    const res = await fetch(
+      `https://www.instagram.com/web/search/topsearch/?query=${encodeURIComponent(query)}`,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Instagram 320.0.1.37 Mobile Safari/604.1',
+          'Accept': 'text/html,application/json',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+      }
+    );
 
-  for (const item of users) {
-    const u = item?.user;
-    if (!u) continue;
-
-    let followerCount = parseInt(u.follower_count || u.followerCount || '0') || 0;
-    let postCount = parseInt(u.media_count || u.mediaCount || '0') || 0;
-
-    // Se follower_count e 0, tentar buscar dados completos
-    if (followerCount === 0 && u.pk) {
+    if (res.ok) {
+      const text = await res.text();
+      // Try to parse as JSON (Instagram sometimes returns JSON with HTML wrapper)
       try {
-        await new Promise(r => setTimeout(r, 500));
-        const profileRes = await fetch(
-          `https://www.instagram.com/api/v1/users/${u.pk}/info/`,
-          { headers }
-        );
-        if (profileRes.ok) {
-          const profileData = await profileRes.json();
-          const userData = profileData?.user || {};
-          followerCount = userData.follower_count || userData.followerCount || 0;
-          postCount = userData.media_count || userData.mediaCount || 0;
-        }
-      } catch { /* usar defaults */ }
-    }
+        const jsonMatch = text.match(/\{["']users["']\s*:/);
+        if (jsonMatch) {
+          const startIdx = text.indexOf(jsonMatch[0]);
+          // Find the matching closing brace
+          let depth = 0;
+          let endIdx = startIdx;
+          for (let i = startIdx; i < text.length; i++) {
+            if (text[i] === '{') depth++;
+            if (text[i] === '}') depth--;
+            if (depth === 0) { endIdx = i + 1; break; }
+          }
+          const jsonStr = text.substring(startIdx, endIdx);
+          // This is embedded in a larger object, find the users array
+          const usersMatch = jsonStr.match(/"users"\s*:\s*\[([^\]]*(?:\[[^\]]*\][^\]]*)*)\]/);
+          if (usersMatch) {
+            // Simple extraction of usernames from the JSON
+            const usernameRegex = /"username"\s*:\s*"([^"]+)"/g;
+            const fullNameRegex = /"full_name"\s*:\s*"([^"]+)"/g;
+            const followerRegex = /"follower_count"\s*:\s*(\d+)/g;
+            const picRegex = /"profile_pic_url"\s*:\s*"([^"]+)"/g;
 
-    profiles.push({
-      platform: 'instagram',
-      username: u.username || '',
-      fullName: u.full_name || u.fullName || '',
-      followers: followerCount,
-      following: parseInt(u.following_count || u.followingCount || '0') || 0,
-      postsCount: postCount,
-      bio: u.biography || u.bio || '',
-      profileUrl: `https://instagram.com/${u.username || ''}`,
-      avatarUrl: u.profile_pic_url || u.profilePicUrl || u.profilePictureUrl || '',
-      isVerified: u.is_verified || u.isVerified || false,
-      isBusiness: u.is_business || u.isProfessionalAccount || false,
-      location: '',
-      category: u.category || '',
-      externalId: u.pk || u.id || '',
-    });
+            const usernames: string[] = [];
+            const fullNames: string[] = [];
+            const followerCounts: number[] = [];
+            const picUrls: string[] = [];
+
+            let m;
+            while ((m = usernameRegex.exec(usersMatch[0])) !== null) usernames.push(m[1]);
+            while ((m = fullNameRegex.exec(usersMatch[0])) !== null) fullNames.push(m[1]);
+            while ((m = followerRegex.exec(usersMatch[0])) !== null) followerCounts.push(parseInt(m[1]) || 0);
+            while ((m = picRegex.exec(usersMatch[0])) !== null) picUrls.push(m[1]);
+
+            for (let i = 0; i < usernames.length && i < limit; i++) {
+              profiles.push({
+                platform: 'instagram',
+                username: usernames[i],
+                fullName: fullNames[i] || '',
+                followers: followerCounts[i] || 0,
+                following: 0,
+                postsCount: 0,
+                bio: '',
+                profileUrl: `https://instagram.com/${usernames[i]}`,
+                avatarUrl: picUrls[i] || '',
+                isVerified: false,
+                isBusiness: false,
+                location: '',
+                category: '',
+                externalId: '',
+              });
+            }
+          }
+        }
+      } catch {
+        // HTML parsing failed, continue
+      }
+    }
+  } catch (e) {
+    console.log('[IG] Strategy 2 failed:', e instanceof Error ? e.message : 'unknown');
+  }
+
+  // STRATEGY 3: Use Google as proxy to find Instagram profiles
+  if (profiles.length === 0) {
+    try {
+      const googleRes = await fetch(
+        `https://www.google.com/search?q=site%3Ainstagram.com+${encodeURIComponent(query)}&num=${limit}`,
+        {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+          },
+        }
+      );
+      if (googleRes.ok) {
+        const html = await googleRes.text();
+        const igRegex = /instagram\.com\/([a-zA-Z0-9_.]+)/g;
+        const matches: Set<string> = new Set();
+        let m;
+        while ((m = igRegex.exec(html)) !== null) {
+          const u = m[1];
+          // Filter out non-profile URLs
+          if (u && !['p', 'explore', 'reel', 'stories', 'direct', 'accounts', 'www', 'api', 'web'].includes(u) && !u.includes('/')) {
+            matches.add(u);
+          }
+        }
+        for (const username of Array.from(matches).slice(0, limit)) {
+          profiles.push({
+            platform: 'instagram',
+            username,
+            fullName: username.replace(/[._]/g, ' '),
+            followers: 0,
+            following: 0,
+            postsCount: 0,
+            bio: '',
+            profileUrl: `https://instagram.com/${username}`,
+            avatarUrl: '',
+            isVerified: false,
+            isBusiness: false,
+            location: '',
+            category: '',
+            externalId: '',
+          });
+        }
+      }
+    } catch (e) {
+      console.log('[IG] Strategy 3 failed:', e instanceof Error ? e.message : 'unknown');
+    }
+  }
+
+  if (profiles.length === 0) {
+    throw new Error('Instagram nao retornou resultados. A sessao pode ter expirado.');
   }
 
   return profiles;
 }
 
 // ==========================================
-// TIKTOK - Search via cookies
+// TIKTOK - Multi-strategy
 // ==========================================
 async function scrapeTikTok(query: string, limit: number): Promise<any[]> {
   const profiles: any[] = [];
 
-  const headers: Record<string, string> = {
-    'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36',
-    'Referer': 'https://www.tiktok.com/',
-  };
-
-  const res = await fetch(
-    `https://www.tiktok.com/api/search/user/general/?keyword=${encodeURIComponent(query)}&count=${limit}&offset=0&source=normal`,
-    { headers }
-  );
-
-  if (!res.ok) return profiles;
-
-  const text = await res.text();
-
+  // STRATEGY 1: TikTok search API
   try {
-    const data = JSON.parse(text);
-    const users = data?.user_list || [];
-    for (const item of users) {
-      const u = item?.user || {};
-      profiles.push({
-        platform: 'tiktok',
-        username: u.uniqueId || u.nickname || '',
-        fullName: u.nickname || '',
-        followers: u.followerCount || 0,
-        following: u.followingCount || 0,
-        postsCount: u.videoCount || 0,
-        bio: u.signature || '',
-        profileUrl: `https://tiktok.com/@${u.uniqueId || ''}`,
-        avatarUrl: u.avatarMedium || u.avatarThumb || '',
-        isVerified: u.verified || false,
-        isBusiness: u.commerceUserInfo?.commerceUser || false,
-        location: '',
-        category: '',
-        externalId: u.id || u.uid || '',
-      });
+    const res = await fetch(
+      `https://www.tiktok.com/api/search/user/general/?keyword=${encodeURIComponent(query)}&count=${limit}&offset=0&source=normal`,
+      {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.120 Mobile Safari/537.36',
+          'Referer': 'https://www.tiktok.com/',
+          'Accept': 'application/json',
+        },
+      }
+    );
+
+    if (res.ok) {
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        const users = data?.user_list || [];
+        for (const item of users) {
+          const u = item?.user || {};
+          profiles.push({
+            platform: 'tiktok',
+            username: u.uniqueId || u.nickname || '',
+            fullName: u.nickname || '',
+            followers: u.followerCount || 0,
+            following: u.followingCount || 0,
+            postsCount: u.videoCount || 0,
+            bio: u.signature || '',
+            profileUrl: `https://tiktok.com/@${u.uniqueId || ''}`,
+            avatarUrl: u.avatarMedium || u.avatarThumb || '',
+            isVerified: u.verified || false,
+            isBusiness: u.commerceUserInfo?.commerceUser || false,
+            location: '',
+            category: '',
+            externalId: u.id || u.uid || '',
+          });
+        }
+        if (profiles.length > 0) return profiles;
+      } catch {
+        // Not JSON, try HTML
+      }
     }
-  } catch {
-    console.log('[MBA PROSPECT] TikTok retornou HTML. Pesquisa TikTok nao disponivel via server-side.');
+  } catch (e) {
+    console.log('[TT] Strategy 1 failed');
+  }
+
+  // STRATEGY 2: Google proxy
+  if (profiles.length === 0) {
+    try {
+      const res = await fetch(
+        `https://www.google.com/search?q=site%3Atiktok.com%2F%40+${encodeURIComponent(query)}&num=${limit}`,
+        { headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' } }
+      );
+      if (res.ok) {
+        const html = await res.text();
+        const ttRegex = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
+        const matches: Set<string> = new Set();
+        let m;
+        while ((m = ttRegex.exec(html)) !== null) {
+          if (m[1]) matches.add(m[1]);
+        }
+        for (const username of Array.from(matches).slice(0, limit)) {
+          profiles.push({
+            platform: 'tiktok',
+            username,
+            fullName: username,
+            followers: 0, following: 0, postsCount: 0,
+            bio: '', profileUrl: `https://tiktok.com/@${username}`,
+            avatarUrl: '', isVerified: false, isBusiness: false,
+            location: '', category: '', externalId: '',
+          });
+        }
+      }
+    } catch { /* ignore */ }
   }
 
   return profiles;
 }
 
 // ==========================================
-// FACEBOOK - Search via Graph API
+// FACEBOOK - Graph API
 // ==========================================
 async function scrapeFacebook(query: string, limit: number): Promise<any[]> {
-  if (!META_TOKEN) return [];
-
   try {
     const res = await fetch(
-      `https://graph.facebook.com/v19.0/pages/search?q=${encodeURIComponent(query)}&limit=${limit}&access_token=${META_TOKEN}`
+      `https://graph.facebook.com/v19.0/pages/search?q=${encodeURIComponent(query)}&fields=id,name,username,fan_count,followers_count,category,description,picture.width(100).height(100)&limit=${limit}&access_token=${META_TOKEN}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0' } }
     );
-    if (!res.ok) return [];
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.log('[FB] Graph API error:', res.status, errText.substring(0, 200));
+      // Try Google proxy as fallback
+      return scrapeFacebookGoogle(query, limit);
+    }
     const data = await res.json();
     const pages = data?.data || [];
+    if (pages.length === 0) return scrapeFacebookGoogle(query, limit);
     return pages.map((p: any) => ({
       platform: 'facebook',
-      username: p.name?.replace(/\s+/g, '_').toLowerCase() || '',
+      username: p.username || `page_${p.id}`,
       fullName: p.name || '',
-      followers: p.likes || p.fan_count || 0,
-      following: 0,
-      postsCount: 0,
-      bio: p.description || p.about || '',
-      profileUrl: `https://facebook.com/${p.id || ''}`,
+      followers: p.fan_count || p.followers_count || 0,
+      following: 0, postsCount: 0,
+      bio: (p.description || '').substring(0, 200),
+      profileUrl: p.username ? `https://facebook.com/${p.username}` : `https://facebook.com/${p.id}`,
       avatarUrl: p.picture?.data?.url || '',
-      isVerified: false,
-      isBusiness: true,
-      location: p.location?.city || '',
-      category: p.category || '',
+      isVerified: false, isBusiness: true,
+      location: '', category: p.category || '',
       externalId: p.id || '',
     }));
   } catch {
-    return [];
+    return scrapeFacebookGoogle(query, limit);
   }
 }
 
+async function scrapeFacebookGoogle(query: string, limit: number): Promise<any[]> {
+  try {
+    const res = await fetch(
+      `https://www.google.com/search?q=site%3Afacebook.com+${encodeURIComponent(query)}&num=${limit}`,
+      { headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)' } }
+    );
+    if (!res.ok) return [];
+    const html = await res.text();
+    const fbRegex = /facebook\.com\/([a-zA-Z0-9_.]+)/g;
+    const matches: Set<string> = new Set();
+    let m;
+    while ((m = fbRegex.exec(html)) !== null) {
+      const u = m[1];
+      if (u && !['watch', 'reel', 'stories', 'groups', 'events', 'marketplace', 'gaming', 'login', 'recover', 'help'].includes(u)) {
+        matches.add(u);
+      }
+    }
+    return Array.from(matches).slice(0, limit).map(username => ({
+      platform: 'facebook', username,
+      fullName: username.replace(/[._]/g, ' '),
+      followers: 0, following: 0, postsCount: 0,
+      bio: '', profileUrl: `https://facebook.com/${username}`,
+      avatarUrl: '', isVerified: false, isBusiness: false,
+      location: '', category: '', externalId: '',
+    }));
+  } catch { return []; }
+}
+
 // ==========================================
-// LINKEDIN - Search via Google as proxy
+// LINKEDIN - Google proxy
 // ==========================================
 async function scrapeLinkedIn(query: string, limit: number): Promise<any[]> {
   try {
@@ -310,24 +507,14 @@ async function scrapeLinkedIn(query: string, limit: number): Promise<any[]> {
     }
 
     return Array.from(matches).slice(0, limit).map(username => ({
-      platform: 'linkedin',
-      username,
+      platform: 'linkedin', username,
       fullName: username.replace(/[-_]/g, ' '),
-      followers: 0,
-      following: 0,
-      postsCount: 0,
-      bio: '',
-      profileUrl: `https://linkedin.com/in/${username}`,
-      avatarUrl: '',
-      isVerified: false,
-      isBusiness: false,
-      location: '',
-      category: '',
-      externalId: '',
+      followers: 0, following: 0, postsCount: 0,
+      bio: '', profileUrl: `https://linkedin.com/in/${username}`,
+      avatarUrl: '', isVerified: false, isBusiness: false,
+      location: '', category: '', externalId: '',
     }));
-  } catch {
-    return [];
-  }
+  } catch { return []; }
 }
 
 // ==========================================
@@ -341,14 +528,12 @@ function calculateScore(profile: any, filters: ProspectRequest): number {
   const followers = profile.followers || 0;
   const posts = profile.postsCount || 0;
   const hasBio = (profile.bio || '').length > 20;
-  const hasLocation = !!profile.location;
   const followerScore = Math.min((followers / Math.max(filters.maxFollowers, 1)) * 40, 40);
   const postScore = Math.min((posts / 100) * 25, 25);
   const bioScore = hasBio ? 10 : 0;
-  const locationScore = hasLocation ? 5 : 0;
   const verifiedPenalty = profile.isVerified ? -20 : 0;
   const businessPenalty = profile.isBusiness ? -15 : 0;
-  return Math.max(0, Math.round(followerScore + postScore + bioScore + locationScore + 20 + verifiedPenalty + businessPenalty));
+  return Math.max(0, Math.round(followerScore + postScore + bioScore + 20 + verifiedPenalty + businessPenalty));
 }
 
 function extractCategory(profile: any): string {
