@@ -11,6 +11,8 @@ var ACTORS: Record<string,string> = {
   facebook: 'nFJndFXA5zjCTuudP',
 };
 
+var LIMIT_ERROR = '';
+
 async function runActor(actorId: string, input: Record<string, any>, token: string, maxWait: number): Promise<any[]> {
   var r = await fetch('https://api.apify.com/v2/acts/' + actorId + '/runs', {
     method: 'POST',
@@ -19,7 +21,11 @@ async function runActor(actorId: string, input: Record<string, any>, token: stri
   });
   if (!r.ok) {
     var eData = await r.json().catch(function() { return {}; });
-    throw new Error((eData && eData.error && eData.error.message) ? eData.error.message : 'Actor erro ' + r.status);
+    var errMsg = (eData && eData.error && eData.error.message) ? eData.error.message : 'Actor erro ' + r.status;
+    if (errMsg.indexOf('hard limit') >= 0 || errMsg.indexOf('limit exceeded') >= 0) {
+      LIMIT_ERROR = 'LIMITE_MENSAL';
+    }
+    throw new Error(errMsg);
   }
   var d = await r.json();
   var runId = (d && d.data && d.data.id) ? d.data.id : '';
@@ -186,6 +192,7 @@ async function fetchFB(loc: string, need: number, seen: Set<string>, all: any[],
 
 export async function POST(request: Request) {
   var t0 = Date.now();
+  LIMIT_ERROR = '';
   var body = await request.json();
   var token = APIFY_KEY;
 
@@ -215,6 +222,16 @@ export async function POST(request: Request) {
   await Promise.all(promises);
 
   var elapsed = Math.round((Date.now() - t0) / 1000);
+
+  // Verificar se atingiu limite mensal Apify
+  if (LIMIT_ERROR === 'LIMITE_MENSAL') {
+    return NextResponse.json({
+      success: false, status: 'limit_exceeded',
+      profilesFound: 0, totalRaw: 0, profiles: [],
+      message: 'LIMITE MENSAL APIFY ATINGIDO. O plano gratuito acabou. Cria uma nova conta em apify.com e actualiza a API key.',
+      log: ['LIMITE MENSAL APIFY - necessaria nova conta'],
+    });
+  }
 
   // Filtragem principal
   var filtered = [];
@@ -249,7 +266,7 @@ export async function POST(request: Request) {
       success: true, status: 'completed',
       profilesFound: 0, totalRaw: all.length, profiles: [],
       campaignName: body.campaignName || 'Campanha ' + new Date().toLocaleDateString('pt-PT'),
-      message: '0 perfis encontrados. Tenta outra localizacao ou plataforma.',
+      message: LIMIT_ERROR ? 'Erro na API: ' + LIMIT_ERROR + '. Tenta novamente.' : '0 perfis encontrados. Tenta outra localizacao ou plataforma.',
       log: ['Bruto: ' + all.length + ' | Tempo: ' + elapsed + 's'],
     });
   }

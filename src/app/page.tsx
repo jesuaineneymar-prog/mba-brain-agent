@@ -543,6 +543,9 @@ function ProspectingTab() {
       const d = await res.json().catch(function() { return null; });
       if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); return; }
       setProspectMsg(d.message || '');
+      if (d.status === 'limit_exceeded') {
+        setProspectMsg('!! LIMITE MENSAL APIFY !! Cria nova conta gratis em apify.com e envia a nova API key.');
+      }
       if (d.profiles && d.profiles.length > 0) {
         setResults(d.profiles);
         var saved = getProfiles();
@@ -585,7 +588,7 @@ function ProspectingTab() {
           <div><Lbl>Alvo</Lbl><input type="number" value={form.targetCount} onChange={function(e) { setForm({...form, targetCount: Number(e.target.value)}); }} style={INP} /></div>
         </div>
         <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar...' : 'Iniciar Prospeccao'}</Btn>
-        {prospectMsg && <div style={{ color:P.textSec, fontSize:11, marginTop:8 }}>{prospectMsg}</div>}
+        {prospectMsg && <div style={{ color: prospectMsg.indexOf('LIMITE') >= 0 ? '#ff4444' : P.textSec, fontSize:11, marginTop:8, fontWeight: prospectMsg.indexOf('LIMITE') >= 0 ? 700 : 400 }}>{prospectMsg}</div>}
       </Panel>
 
       <Panel style={{ marginBottom:14 }}>
