@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 
 export const maxDuration = 60;
 
-const _k = ['apify_api_p','GGVpKelzFK9pFWCI','E1JV7ALQzF0gr33iHOM'];
+const _k = ['apify_api_4wlrrm2yBIIsybn4y','lXWfpyRhfZQeL0IjhU3'];
 const APIFY_KEY = _k.join('');
 
 var ACTORS: Record<string,string> = {
