@@ -286,7 +286,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
 function ProspectingTab() {
   const [apifyKey, setApifyKey] = useState(() => { try { return localStorage.getItem('mba_apify_key') || ''; } catch { return ''; } });
   const saveApifyKey = (k: string) => { setApifyKey(k); try { localStorage.setItem('mba_apify_key', k); } catch {} };
-  const [form, setForm] = useState({ platform:'instagram', minFollowers:1000, maxFollowers:50000, minMonthsActive:12, requireRegular:true, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
+  const [form, setForm] = useState({ platform:'instagram', minFollowers:0, maxFollowers:1000000, minMonthsActive:0, requireRegular:false, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());

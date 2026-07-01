@@ -299,16 +299,17 @@ export async function POST(request: Request) {
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     log.push(`Total bruto: ${allProfiles.length} em ${elapsed}s`);
 
-    // Filtrar - perfis do Google (FB/LinkedIn) passam sem filtro de seguidores
+    // Filtrar - APENAS bots obvios, o resto passa
     const filtered = allProfiles.filter(p => {
       if (!p.username) return false;
       if (detectBot(p)) return false;
-      // Perfis do Google search: aceitar sempre (utilizador valida manualmente)
-      if (p.fromGoogle) return !p.isVerified;
-      const followers = p.followers || 0;
-      if (followers < filters.minFollowers || followers > filters.maxFollowers) return false;
-      if (filters.requireRegular && (p.postsCount || 0) < 10) return false;
-      if (p.isVerified || p.isBusiness) return false;
+      // Apenas filtros de seguidores se o utilizador definiu
+      if (!p.fromGoogle) {
+        const followers = p.followers || 0;
+        if (filters.minFollowers > 0 && followers < filters.minFollowers) return false;
+        if (followers > filters.maxFollowers && filters.maxFollowers < 1000000) return false;
+        if (filters.requireRegular && (p.postsCount || 0) < 10) return false;
+      }
       return true;
     }).map(p => ({
       id: generateId(),
