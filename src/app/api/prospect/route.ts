@@ -249,6 +249,42 @@ function detectBot(profile: any): boolean {
   return false;
 }
 
+// Detectar se o perfil e um estabelecimento/negocio
+function isEstablishment(profile: any): boolean {
+  const bio = (profile.bio || '').toLowerCase();
+  const cat = (profile.category || '').toLowerCase();
+  const name = (profile.fullName || '').toLowerCase();
+  const username = (profile.username || '').toLowerCase();
+  // Categorias do Instagram que indicam negocio
+  if (profile.isBusiness) return true;
+  // Palavras-chave de estabelecimento na bio/categoria
+  const bizWords = /restaur|cafe|hotel|pousada|loja|store|shop|boutique|salao|barbear|clinica|farmac|supermerc|mercado|empresa|ltda|company|corp|inc\.|sarl|studio|academy|escola|colegio|universid|centro.*comer|imobiliaria|agencia.*viage|dentista|advogad|escritor|propriedade|real estate|restaurant|food|dining|bar &|club|discotec|gym|fitness.*center|spa|beauty.*salon|nail.*salon|hair.*salon|pet.*shop|auto.*part/oficina|mecanica|pintura|construc|engenharia|arquitet|contabil|consultor/i;
+  if (bizWords.test(bio) || bizWords.test(cat) || bizWords.test(name)) return true;
+  // Username com palavras de negocio
+  const bizUsernames = /restaur|cafe|hotel|loja|shop|store|boutique|salon|barber|clinica|farmac|mercado|imobili|dent|advoc|oficina|academy|school|gym|spa|beauty|nail|hair|pet.*shop/i;
+  if (bizUsernames.test(username)) return true;
+  return false;
+}
+
+// Verificar se o perfil e angolano
+function isAngolan(profile: any): boolean {
+  const bio = (profile.bio || '').toLowerCase();
+  const loc = (profile.location || '').toLowerCase();
+  const name = (profile.fullName || '').toLowerCase();
+  // Cidades e provincias de Angola
+  const angolaPlaces = /angola|luanda|benguela|huambo|lobito|lubango|cabinda|malanje|namibe|huila|bie|cuanza|cunene|kuando|lunda|moxico|uige|zaire|sumbe|soyo|tombwa|ongiva|menongue|saurimo|dundo|ndalatando|mbanza/i;
+  // Indicadores de angolanidade
+  const angolaIndicators = /\bAO\b|\b🇦🇴\b|angolano|angolana|made in angola|from angola|em angola|de angola|angola |ao\b/i;
+  // DDI angolano
+  const angolaPhone = /\+244|\(244\)|244\d{9}/;
+  if (angolaPlaces.test(bio) || angolaPlaces.test(loc)) return true;
+  if (angolaIndicators.test(bio)) return true;
+  if (angolaPhone.test(bio)) return true;
+  // Se vem do Google Search com query Angola, assumir angolano
+  if (profile.fromGoogle) return true;
+  return false;
+}
+
 // ==========================================
 // MAIN
 // ==========================================
@@ -299,14 +335,20 @@ export async function POST(request: Request) {
     const elapsed = Math.round((Date.now() - startTime) / 1000);
     log.push(`Total bruto: ${allProfiles.length} em ${elapsed}s`);
 
-    // Filtrar - APENAS bots obvios e estabelecimentos (Facebook)
-    // TUDO o resto passa: verificados, business, qualquer numero de seguidores
+    // Filtrar conforme regras do utilizador
+    const MAX_FOLLOWERS = 50000;
     const filtered = allProfiles.filter(p => {
       if (!p.username) return false;
-      // Detectar bots obvios
+      // Bots obvios
       if (detectBot(p)) return false;
-      // Facebook: excluir estabelecimentos/paginas de negocio
-      if (p.platform === 'facebook' && p.isBusiness) return false;
+      // Contas verificadas - NAO
+      if (p.isVerified) return false;
+      // Max 50k seguidores
+      if ((p.followers || 0) > MAX_FOLLOWERS) return false;
+      // Estabelecimentos/negocios - NAO
+      if (isEstablishment(p)) return false;
+      // Apenas contas angolanas
+      if (!isAngolan(p)) return false;
       return true;
     }).map(p => ({
       id: generateId(),
@@ -335,11 +377,12 @@ export async function POST(request: Request) {
       notes: '',
     })).slice(0, filters.targetCount);
 
-    log.push(`Filtrados: ${filtered.length} | Descartados: ${allProfiles.length - filtered.length}`);
+    const discarded = allProfiles.length - filtered.length;
+    log.push(`Filtrados: ${filtered.length} | Descartados: ${discarded} (verificados, >50k seg, estabelecimentos ou nao-angolanos)`);
 
     if (filtered.length === 0) {
       const helpMsg = allProfiles.length > 0
-        ? ' Todos os perfis encontrados parecem ser bots. Tenta termos de busca diferentes.'
+        ? ' Perfis encontrados mas nao passaram nos filtros (verificados, >50k seg, estabelecimentos ou nao-angolanos). Tenta palavras-chave diferentes como "musica Luanda" ou "moda Angola".'
         : ' Nenhum perfil encontrado. Tenta palavras-chave diferentes como "restaurante Luanda" ou "musica Angola".';
 
       return NextResponse.json({
