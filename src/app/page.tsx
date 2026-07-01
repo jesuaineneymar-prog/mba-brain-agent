@@ -286,7 +286,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
 function ProspectingTab() {
   const [apifyKey, setApifyKey] = useState(() => { try { return localStorage.getItem('mba_apify_key') || ''; } catch { return ''; } });
   const saveApifyKey = (k: string) => { setApifyKey(k); try { localStorage.setItem('mba_apify_key', k); } catch {} };
-  const [form, setForm] = useState({ platform:'instagram', minFollowers:0, maxFollowers:50000, minMonthsActive:0, requireRegular:false, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
+  const [form, setForm] = useState({ platform:'instagram', minFollowers:500, maxFollowers:100000, minMonthsActive:0, requireRegular:false, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -312,13 +312,18 @@ function ProspectingTab() {
     setLoading(true); setResults([]); setProspectLog([]); setProspectMsg('');
     try {
       const res = await mbaFetch('/api/prospect', { method:'POST', body:JSON.stringify({ ...form, apifyToken: apifyKey }) });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        const errMsg = (errData && errData.error) ? errData.error : ('Erro HTTP ' + res.status);
+        setProspectMsg(errMsg);
+        setProspectLog([]);
+        return;
+      }
       const d = await res.json();
       setProspectLog(d.log || []);
       setProspectMsg(d.message || '');
       if (d.profiles && d.profiles.length > 0) {
-        // Mostrar perfis diretamente
         setResults(d.profiles);
-        // Guardar no localStorage
         try {
           const saved: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
           const savedIds = new Set(saved.map((s: any) => s.username + ':' + s.platform));
@@ -328,14 +333,15 @@ function ProspectingTab() {
           setProfiles(merged);
           setTotal(merged.length);
         } catch(e2) {
-          // Se localStorage falhar, mostrar resultados mesmo assim
           setProfiles(d.profiles);
           setTotal(d.profiles.length);
         }
         setSelected(new Set());
         refreshDash();
       }
-    } catch (e) { setProspectMsg('Erro de conexao. Tenta novamente.'); } finally { setLoading(false); }
+    } catch (e) {
+      setProspectMsg('Erro de conexao: ' + ((e instanceof Error) ? e.message : String(e)));
+    } finally { setLoading(false); }
   };
   const toggleAll = () => {
     const filtered = profiles.filter(p => (filterPlat==='all' || p.platform===filterPlat) && (filterStatus==='all' || p.status===filterStatus));

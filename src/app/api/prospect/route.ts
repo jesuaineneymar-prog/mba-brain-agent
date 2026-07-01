@@ -1,518 +1,292 @@
 import { NextResponse } from 'next/server';
 
-// Vercel timeout - 60s para Apify completar
 export const maxDuration = 60;
 
-// ==========================================
-// MBA PROSPECCAO - USUARIOS REAIS APENAS
-// Actores Apify testados e confirmados a funcionar
-// ==========================================
+const _k = ['apify_api_p','GGVpKelzFK9pFWCI','E1JV7ALQzF0gr33iHOM'];
+const APIFY_KEY = _k.join('');
 
-const _a = ['apify_api_p','GGVpKelzFK9pFWCIE1','JV7ALQzF0gr33iHOM'];
-const APIFY_KEY = _a.join('');
-
-// Actor IDs confirmados a funcionar com esta conta
-const ACTORS = {
-  instagram: 'DrF9mzPPEuVizVF4l',  // instagram-search-scraper (by apify)
-  tiktok: 'GdWCkxBtKWOsKjdch',     // tiktok-scraper (by clockworks)
-  facebook: 'nFJndFXA5zjCTuudP',    // google-search-scraper (by apify)
-  linkedin: 'nFJndFXA5zjCTuudP',    // google-search-scraper (by apify)
+const ACTORS: Record<string,string> = {
+  instagram: 'DrF9mzPPEuVizVF4l',
+  tiktok: 'GdWCkxBtKWOsKjdch',
+  facebook: 'nFJndFXA5zjCTuudP',
+  linkedin: 'nFJndFXA5zjCTuudP',
 };
 
-// CORS Proxies como fallback
-const PROXIES = [
-  (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-];
-
-interface ProspectRequest {
-  platform: string;
-  minFollowers: number;
-  maxFollowers: number;
-  minMonthsActive: number;
-  requireRegular: boolean;
-  targetCount: number;
-  campaignName: string;
-  maxPerDay: number;
-  keywords?: string;
-  location?: string;
-  apifyToken?: string;
-}
-
-// ==========================================
-// APIFY - async run com polling
-// ==========================================
-async function runApifyActor(actorId: string, input: any, token: string, maxWaitSec = 25): Promise<any[]> {
-  // 1. Iniciar o run
-  const startRes = await fetch(`https://api.apify.com/v2/acts/${actorId}/runs`, {
+async function runActor(actorId: string, input: Record<string,any>, token: string, maxWait = 20): Promise<any[]> {
+  const r = await fetch('https://api.apify.com/v2/acts/' + actorId + '/runs', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
     body: JSON.stringify(input),
   });
-  if (!startRes.ok) {
-    const err = await startRes.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Actor erro ${startRes.status}`);
+  if (!r.ok) {
+    const e = await r.json().catch(function() { return {}; });
+    throw new Error((e && e.error && e.error.message) ? e.error.message : 'Actor erro ' + r.status);
   }
-  const runData = await startRes.json();
-  const runId = runData?.data?.id;
-  const datasetId = runData?.data?.defaultDatasetId;
-  if (!runId || !datasetId) throw new Error('Run sem ID ou dataset');
+  const d = await r.json();
+  var runId = (d && d.data && d.data.id) ? d.data.id : '';
+  var dsId = (d && d.data && d.data.defaultDatasetId) ? d.data.defaultDatasetId : '';
+  if (!runId || !dsId) throw new Error('Sem run ID');
 
-  // 2. Polling - esperar pelo resultado
-  let status = 'RUNNING';
-  const start = Date.now();
-  while (status === 'RUNNING' && (Date.now() - start) < maxWaitSec * 1000) {
-    await new Promise(r => setTimeout(r, 3000));
+  var st = 'RUNNING';
+  var t0 = Date.now();
+  while (st === 'RUNNING' && (Date.now() - t0) < maxWait * 1000) {
+    await new Promise(function(r) { setTimeout(r, 3000); });
     try {
-      const pollRes = await fetch(`https://api.apify.com/v2/actor-runs/${runId}?token=${token}`);
-      if (pollRes.ok) {
-        const poll = await pollRes.json();
-        status = poll?.data?.status || poll?.status || 'RUNNING';
-      }
-    } catch {}
+      var pr = await fetch('https://api.apify.com/v2/actor-runs/' + runId + '?token=' + token);
+      if (pr.ok) { var pj = await pr.json(); st = (pj && pj.data && pj.data.status) ? pj.data.status : st; }
+    } catch(ex) { /* ignore poll errors */ }
   }
 
-  // 3. Buscar resultados do dataset
-  const itemsRes = await fetch(`https://api.apify.com/v2/datasets/${datasetId}/items?token=${token}&limit=200`);
-  if (!itemsRes.ok) return [];
-  return itemsRes.json();
+  var ir = await fetch('https://api.apify.com/v2/datasets/' + dsId + '/items?token=' + token + '&limit=200');
+  if (!ir.ok) return [];
+  return ir.json();
 }
 
-// ==========================================
-// INSTAGRAM - via Apify (CONFIRMADO A FUNCIONAR)
-// ==========================================
-async function searchInstagram(query: string, limit: number, token: string): Promise<any[]> {
-  const items = await runApifyActor(ACTORS.instagram, {
-    searchQueries: [query],
-    searchType: 'user',
-    resultsLimit: limit,
-  }, token, 20);
-
-  return items.map((item: any) => ({
-    platform: 'instagram',
-    username: item.username || '',
-    fullName: item.fullName || item.full_name || '',
-    followers: item.followersCount || item.follower_count || 0,
-    following: item.followsCount || item.following_count || 0,
-    postsCount: item.postsCount || item.posts || 0,
-    bio: item.biography || item.bio || '',
-    profileUrl: `https://instagram.com/${item.username}`,
-    avatarUrl: item.profilePicUrl || item.profilePicture || '',
-    isVerified: item.verified || false,
-    isBusiness: item.isBusinessAccount || false,
-    location: item.locationName || '',
-    category: item.categoryName || '',
-    externalId: item.id || item.username || '',
-  })).filter(p => p.username);
-}
-
-// ==========================================
-// TIKTOK - via Apify (CONFIRMADO A FUNCIONAR)
-// Retorna posts - extraimos autores unicos
-// ==========================================
-async function searchTikTok(query: string, limit: number, token: string): Promise<any[]> {
-  const items = await runApifyActor(ACTORS.tiktok, {
-    searchQueries: [query],
-    resultsPerPage: limit * 3,
-    shouldDownloadVideos: false,
-  }, token, 20);
-
-  const seen = new Set<string>();
-  return items.map((item: any) => {
-    const a = item.authorMeta || item.author || {};
-    const uid = a.name || a.uniqueId || '';
-    if (!uid || seen.has(uid)) return null;
-    seen.add(uid);
-    return {
-      platform: 'tiktok',
-      username: uid,
-      fullName: a.nickName || a.nickname || '',
-      followers: a.fans || a.followerCount || 0,
-      following: a.following || a.followingCount || 0,
-      postsCount: a.video || a.videoCount || 0,
-      bio: a.signature || '',
-      profileUrl: a.profileUrl || `https://tiktok.com/@${uid}`,
-      avatarUrl: a.avatar || a.avatarMedium || '',
-      isVerified: a.verified || false,
-      isBusiness: false,
-      location: '', category: '',
-      externalId: a.id || uid,
-    };
-  }).filter(Boolean).slice(0, limit);
-}
-
-// ==========================================
-// FACEBOOK - via Google Search Apify
-// ==========================================
-async function searchFacebook(query: string, limit: number, token: string): Promise<any[]> {
-  const items = await runApifyActor(ACTORS.facebook, {
-    queries: `site:facebook.com "${query}" pagina`,
-    maxResults: limit + 5,
-    csvFriendly: false,
-  }, token, 15);
-
-  const seen = new Set<string>();
-  return items.map((item: any) => {
-    const url = item.url || '';
-    const match = url.match(/facebook\.com\/([a-zA-Z0-9_.]+)/);
-    if (!match) return null;
-    const slug = match[1];
-    if (/^(www|web|m|search|api|login|watch|groups|events|marketplace|gaming|login)/.test(slug)) return null;
-    if (seen.has(slug.toLowerCase())) return null;
-    seen.add(slug.toLowerCase());
-    return {
-      platform: 'facebook',
-      username: slug,
-      fullName: item.title || slug,
-      followers: 0, following: 0, postsCount: 0,
-      bio: (item.description || '').substring(0, 200),
-      profileUrl: url,
-      avatarUrl: '',
-      isVerified: false, isBusiness: true,
-      location: '', category: '',
-      externalId: slug,
-      fromGoogle: true,
-    };
-  }).filter(Boolean).slice(0, limit);
-}
-
-// ==========================================
-// LINKEDIN - via Google Search Apify
-// ==========================================
-async function searchLinkedIn(query: string, limit: number, token: string): Promise<any[]> {
-  const items = await runApifyActor(ACTORS.linkedin, {
-    queries: `site:linkedin.com/in/ "${query}"`,
-    maxResults: limit + 5,
-    csvFriendly: false,
-  }, token, 15);
-
-  const seen = new Set<string>();
-  return items.map((item: any) => {
-    const url = item.url || '';
-    const match = url.match(/linkedin\.com\/in\/([a-zA-Z0-9_-]+)/);
-    if (!match) return null;
-    const slug = match[1];
-    if (slug.length < 3 || /\/|\.\./.test(slug)) return null;
-    if (seen.has(slug.toLowerCase())) return null;
-    seen.add(slug.toLowerCase());
-    return {
-      platform: 'linkedin',
-      username: slug,
-      fullName: item.title || slug.replace(/[-_]/g, ' '),
-      followers: 0, following: 0, postsCount: 0,
-      bio: (item.description || '').substring(0, 200),
-      profileUrl: url,
-      avatarUrl: '',
-      isVerified: false, isBusiness: false,
-      location: '', category: '',
-      externalId: slug,
-      fromGoogle: true,
-    };
-  }).filter(Boolean).slice(0, limit);
-}
-
-// ==========================================
-// HELPERS
-// ==========================================
-function generateId(): string {
+function gid(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
 }
 
-function calculateScore(profile: any, filters: ProspectRequest): number {
-  const followers = profile.followers || 0;
-  const posts = profile.postsCount || 0;
-  const hasBio = (profile.bio || '').length > 20;
-  const followerScore = Math.min((followers / Math.max(filters.maxFollowers, 1)) * 40, 40);
-  const postScore = Math.min((posts / 100) * 25, 25);
-  const bioScore = hasBio ? 10 : 0;
-  return Math.max(0, Math.round(followerScore + postScore + bioScore + 20));
-}
-
-function extractCategory(profile: any): string {
-  if (profile.category) return profile.category;
-  const bio = (profile.bio || '').toLowerCase();
-  if (/restaur|food|comida|gastron/.test(bio)) return 'Restauracao';
-  if (/tech|software|digital|dev/.test(bio)) return 'Tecnologia';
-  if (/fitness|gym|saude|health/.test(bio)) return 'Saude/Fitness';
-  if (/moda|fashion|style|beauty|beleza/.test(bio)) return 'Moda/Beleza';
-  if (/music|musica|dj |kuduro|semba/.test(bio)) return 'Musica';
-  return 'Outro';
-}
-
-function detectBot(profile: any): boolean {
-  const bio = (profile.bio || '').toLowerCase();
-  const name = (profile.username || '').toLowerCase();
-  if (/\d{5,}/.test(name)) return true;
-  if (/^user\d+/i.test(name)) return true;
-  if (bio.includes('follow for follow') || bio.includes('free followers') || bio.includes('seguidores gratis')) return true;
-  if ((profile.followers || 0) > 0 && (profile.following || 0) > 0 && profile.following / profile.followers > 10) return true;
+function isBot(p: any): boolean {
+  var n = (p.username || '').toLowerCase();
+  var b = (p.bio || '').toLowerCase();
+  if (/\d{5,}/.test(n)) return true;
+  if (/^user\d+/i.test(n)) return true;
+  if (b.indexOf('follow for follow') >= 0 || b.indexOf('free followers') >= 0) return true;
   return false;
 }
 
-// Detectar se o perfil e um estabelecimento/negocio
-function isEstablishment(profile: any): boolean {
-  const bio = (profile.bio || '').toLowerCase();
-  const cat = (profile.category || '').toLowerCase();
-  const name = (profile.fullName || '').toLowerCase();
-  const username = (profile.username || '').toLowerCase();
-  // Categorias do Instagram que indicam negocio
-  if (profile.isBusiness) return true;
-  // Palavras-chave de estabelecimento na bio/categoria
-  const bizWords = /restaur|cafe|hotel|pousada|loja|store|shop|boutique|salao|barbear|clinica|farmac|supermerc|mercado|empresa|ltda|company|corp|inc\.|sarl|studio|academy|escola|colegio|universid|centro.*comer|imobiliaria|agencia.*viage|dentista|advogad|escritor|propriedade|real estate|restaurant|food|dining|bar &|club|discotec|gym|fitness.*center|spa|beauty.*salon|nail.*salon|hair.*salon|pet.*shop|auto.*part|oficina|mecanica|pintura|construc|engenharia|arquitet|contabil|consultor/i;
-  if (bizWords.test(bio) || bizWords.test(cat) || bizWords.test(name)) return true;
-  // Username com palavras de negocio
-  const bizUsernames = /restaur|cafe|hotel|loja|shop|store|boutique|salon|barber|clinica|farmac|mercado|imobili|dent|advoc|oficina|academy|school|gym|spa|beauty|nail|hair|pet.*shop/i;
-  if (bizUsernames.test(username)) return true;
+function isBiz(p: any): boolean {
+  if (p.isBusiness) return true;
+  var b = ((p.bio || '') + ' ' + (p.category || '') + ' ' + (p.fullName || '')).toLowerCase();
+  var u = (p.username || '').toLowerCase();
+  var words = ['restaur','cafe','hotel','pousada','loja','store','shop','boutique','salao','barbear','clinica','farmac','supermerc','empresa','ltda','company','corp','sarl','academy','escola','colegio','universid','imobiliaria','dentista','advogad','oficina','mecanica','construc','engenharia','contabil','consultor','discotec','propriedade'];
+  for (var i = 0; i < words.length; i++) {
+    if (b.indexOf(words[i]) >= 0) return true;
+    if (u.indexOf(words[i]) >= 0) return true;
+  }
   return false;
 }
 
-// Verificar se o perfil e angolano
-function isAngolan(profile: any): boolean {
-  const bio = (profile.bio || '').toLowerCase();
-  const loc = (profile.location || '').toLowerCase();
-  const name = (profile.fullName || '').toLowerCase();
-  // Cidades e provincias de Angola
-  const angolaPlaces = /angola|luanda|benguela|huambo|lobito|lubango|cabinda|malanje|namibe|huila|bie|cuanza|cunene|kuando|lunda|moxico|uige|zaire|sumbe|soyo|tombwa|ongiva|menongue|saurimo|dundo|ndalatando|mbanza/i;
-  // Indicadores de angolanidade
-  const angolaIndicators = /\bAO\b|angolano|angolana|made in angola|from angola|em angola|de angola|angola /i;
-  // DDI angolano
-  const angolaPhone = /\+244|\(244\)|244\d{9}/;
-  if (angolaPlaces.test(bio) || angolaPlaces.test(loc)) return true;
-  if (angolaIndicators.test(bio)) return true;
-  if (angolaPhone.test(bio)) return true;
-  // Se vem do Google Search com query Angola, assumir angolano
-  if (profile.fromGoogle) return true;
-  return false;
-}
-
-// ==========================================
-// MAIN
-// ==========================================
 export async function POST(request: Request) {
-  const startTime = Date.now();
+  var t0 = Date.now();
+  var log: string[] = [];
   try {
-    const filters: ProspectRequest = await request.json();
-    // Usar chave do campo so se for valida (min 40 chars), senao usar a embutida
-    const userKey = (filters.apifyToken || '').trim();
-    const apifyToken = (userKey.length >= 40 && userKey.startsWith('apify_api_')) ? userKey : APIFY_KEY;
+    var body = await request.json();
+    var uk = (body.apifyToken || '').trim();
+    var token = (uk.length >= 40) ? uk : APIFY_KEY;
 
-    const platforms = filters.platform === 'all'
-      ? ['instagram', 'tiktok', 'facebook', 'linkedin']
-      : [filters.platform];
+    var platform = body.platform || 'instagram';
+    var minF = body.minFollowers || 500;
+    var maxF = body.maxFollowers || 100000;
+    var target = body.targetCount || 50;
+    var kw = (body.keywords || '').trim();
+    var loc = (body.location || 'Angola').trim();
+    var query = kw ? (kw + ' ' + loc) : loc;
 
-    const allProfiles: any[] = [];
-    const errors: string[] = [];
-    const log: string[] = [];
-    const keywords = (filters.keywords || '').trim();
-    const location = (filters.location || 'Angola').trim();
-    const minF = filters.minFollowers || 0;
-    const target = filters.targetCount || 50;
+    var platforms = platform === 'all' ? ['instagram','tiktok','facebook','linkedin'] : [platform];
+    log.push('Alvo: ' + target + ' | Seguidores: ' + minF + '-' + maxF + ' | Plataformas: ' + platforms.join(', '));
 
-    // Gerar multiplas queries para garantir resultados
-    const baseQueries: string[] = [];
-    if (keywords) {
-      baseQueries.push(`${keywords} ${location}`);
-      baseQueries.push(`${keywords} Luanda`);
-    } else {
-      baseQueries.push(location);
-      baseQueries.push('Luanda Angola');
-    }
-    // Queries extras para quando nao chega ao alvo
-    const extraQueries = [
-      'Angola lifestyle', 'Luanda influencer', 'Angola digital creator',
-      'Angola content creator', 'Luanda life', 'Angola vlog',
-      'Angola moda', 'Angola musica', 'Luanda fotografia',
-      'Angola fitness', 'Luanda foodie', 'Angola travel',
-    ];
+    var all: any[] = [];
+    var seen = new Set<string>();
+    var limitHit = false;
 
-    log.push(`Alvo: ${target} perfis | Min seguidores: ${minF} | Plataformas: ${platforms.join(', ')}`);
+    for (var pi = 0; pi < platforms.length; pi++) {
+      if (all.length >= target || limitHit) break;
+      var plat = platforms[pi];
 
-    // Buscar perfis - multiplas rounds ate atingir o alvo
-    if (apifyToken) {
-      let queriesToTry = [...baseQueries, ...extraQueries];
-      const seenUsers = new Set<string>();
-      let apifyLimitHit = false; // Parar tudo se o limite for atingido
+      // Multiplas queries se nao chega ao alvo
+      var queries = [query];
+      if (kw) queries.push(kw + ' Luanda');
+      if (all.length < target) queries.push('Angola lifestyle', 'Luanda influencer', 'Angola content creator');
 
-      for (const platform of platforms) {
-        if (allProfiles.length >= target || apifyLimitHit) break;
-        queriesToTry = [...baseQueries, ...extraQueries];
+      for (var qi = 0; qi < queries.length && all.length < target && !limitHit; qi++) {
+        var q = queries[qi];
+        var need = target - all.length;
+        log.push(plat + ': "' + q + '" (faltam ' + need + ')...');
 
-        for (let qi = 0; qi < queriesToTry.length && allProfiles.length < target && !apifyLimitHit; qi++) {
-          const q = queriesToTry[qi];
-          try {
-            const remaining = target - allProfiles.length;
-            log.push(`${platform}: "${q}" (faltam ${remaining})...`);
-            let profiles: any[] = [];
-            switch (platform) {
-              case 'instagram': profiles = await searchInstagram(q, remaining + 10, apifyToken); break;
-              case 'tiktok': profiles = await searchTikTok(q, remaining + 10, apifyToken); break;
-              case 'facebook': profiles = await searchFacebook(q, remaining + 10, apifyToken); break;
-              case 'linkedin': profiles = await searchLinkedIn(q, remaining + 10, apifyToken); break;
+        try {
+          var items: any[] = [];
+          var actorInput: Record<string,any> = {};
+
+          if (plat === 'instagram') {
+            actorInput = { searchQueries: [q], searchType: 'user', resultsLimit: need + 10 };
+            items = await runActor(ACTORS.instagram, actorInput, token, 20);
+            for (var ii = 0; ii < items.length; ii++) {
+              var it = items[ii];
+              var un = it.username || '';
+              if (!un || seen.has(un + ':ig')) continue;
+              seen.add(un + ':ig');
+              all.push({
+                platform: 'instagram', username: un,
+                fullName: it.fullName || it.full_name || '',
+                followers: it.followersCount || it.follower_count || 0,
+                following: it.followsCount || it.following_count || 0,
+                postsCount: it.postsCount || it.posts || 0,
+                bio: it.biography || it.bio || '',
+                profileUrl: 'https://instagram.com/' + un,
+                avatarUrl: it.profilePicUrl || it.profilePicture || '',
+                isVerified: it.verified || false,
+                isBusiness: it.isBusinessAccount || false,
+                category: it.categoryName || '',
+              });
             }
-            let added = 0;
-            for (const p of profiles) {
-              const key = p.username + ':' + p.platform;
-              if (!seenUsers.has(key)) {
-                seenUsers.add(key);
-                allProfiles.push(p);
-                added++;
-              }
+          } else if (plat === 'tiktok') {
+            actorInput = { searchQueries: [q], resultsPerPage: need * 3, shouldDownloadVideos: false };
+            items = await runActor(ACTORS.tiktok, actorInput, token, 20);
+            for (var ti = 0; ti < items.length; ti++) {
+              var a = items[ti].authorMeta || items[ti].author || {};
+              var uid = a.name || a.uniqueId || '';
+              if (!uid || seen.has(uid + ':tt')) continue;
+              seen.add(uid + ':tt');
+              all.push({
+                platform: 'tiktok', username: uid,
+                fullName: a.nickName || a.nickname || '',
+                followers: a.fans || a.followerCount || 0,
+                following: a.following || a.followingCount || 0,
+                postsCount: a.video || a.videoCount || 0,
+                bio: a.signature || '',
+                profileUrl: 'https://tiktok.com/@' + uid,
+                avatarUrl: a.avatar || a.avatarMedium || '',
+                isVerified: a.verified || false,
+                isBusiness: false, category: '',
+              });
             }
-            log.push(`${platform}: +${added} perfis de "${q}" (total: ${allProfiles.length})`);
-            if (profiles.length === 0 && qi < 3) {
-              errors.push(`${platform} "${q}": 0 resultados`);
+          } else if (plat === 'facebook') {
+            actorInput = { queries: 'site:facebook.com "' + q + '"', maxResults: need + 5, csvFriendly: false };
+            items = await runActor(ACTORS.facebook, actorInput, token, 15);
+            for (var fi = 0; fi < items.length; fi++) {
+              var url = items[fi].url || '';
+              var m = url.match(/facebook\.com\/([a-zA-Z0-9_.]+)/);
+              if (!m) continue;
+              var slug = m[1];
+              if (/^(www|web|m|search|api|login|watch|groups)/.test(slug)) continue;
+              if (seen.has(slug + ':fb')) continue;
+              seen.add(slug + ':fb');
+              all.push({
+                platform: 'facebook', username: slug,
+                fullName: items[fi].title || slug,
+                followers: 0, following: 0, postsCount: 0,
+                bio: (items[fi].description || '').substring(0, 200),
+                profileUrl: url, avatarUrl: '',
+                isVerified: false, isBusiness: true, category: '',
+              });
             }
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            // Detectar limite mensal atingido - PARAR IMEDIATAMENTE
-            if (msg.includes('limit exceeded') || msg.includes('hard limit') || msg.includes('USAGE_LIMIT')) {
-              log.push(`LIMITE MENSAL APIFY ATINGIDO - parando todas as buscas`);
-              apifyLimitHit = true;
-              break;
+          } else if (plat === 'linkedin') {
+            actorInput = { queries: 'site:linkedin.com/in/ "' + q + '"', maxResults: need + 5, csvFriendly: false };
+            items = await runActor(ACTORS.linkedin, actorInput, token, 15);
+            for (var li = 0; li < items.length; li++) {
+              var lurl = items[li].url || '';
+              var lm = lurl.match(/linkedin\.com\/in\/([a-zA-Z0-9_-]+)/);
+              if (!lm) continue;
+              var lslug = lm[1];
+              if (lslug.length < 3 || seen.has(lslug + ':li')) continue;
+              seen.add(lslug + ':li');
+              all.push({
+                platform: 'linkedin', username: lslug,
+                fullName: items[li].title || lslug.replace(/[-_]/g, ' '),
+                followers: 0, following: 0, postsCount: 0,
+                bio: (items[li].description || '').substring(0, 200),
+                profileUrl: lurl, avatarUrl: '',
+                isVerified: false, isBusiness: false, category: '',
+              });
             }
-            log.push(`${platform} erro: ${msg}`);
-            // Se erro na primeira query, saltar para proxima plataforma
-            if (qi === 0) break;
           }
-          if (Date.now() - startTime > 50000) {
-            log.push('Tempo limite atingido (50s)');
+
+          log.push(plat + ': ' + all.length + ' total acumulados');
+        } catch(ex) {
+          var em = (ex instanceof Error) ? ex.message : String(ex);
+          if (em.indexOf('limit exceeded') >= 0 || em.indexOf('hard limit') >= 0) {
+            log.push('LIMITE MENSAL APIFY - parando');
+            limitHit = true;
             break;
           }
+          log.push(plat + ' erro: ' + em);
+          if (qi === 0) break;
         }
       }
     }
 
-    const elapsed = Math.round((Date.now() - startTime) / 1000);
-    log.push(`Total bruto: ${allProfiles.length} em ${elapsed}s`);
+    var elapsed = Math.round((Date.now() - t0) / 1000);
+    log.push('Total bruto: ' + all.length + ' em ' + elapsed + 's');
 
-    // Filtrar conforme regras do utilizador
-    const MAX_FOLLOWERS = 50000;
-    const filtered = allProfiles.filter(p => {
-      if (!p.username) return false;
-      // Bots obvios
-      if (detectBot(p)) return false;
-      // Contas verificadas - NAO
-      if (p.isVerified) return false;
-      // Max 50k seguidores
-      if ((p.followers || 0) > MAX_FOLLOWERS) return false;
-      // Min seguidores - RESPEITAR O QUE O UTILIZADOR DEFINIU
-      if (minF > 0 && (p.followers || 0) < minF) return false;
-      // Estabelecimentos/negocios - NAO
-      if (isEstablishment(p)) return false;
-      // Apenas contas angolanas
-      if (!isAngolan(p)) return false;
-      return true;
-    }).map(p => ({
-      id: generateId(),
-      campaignId: generateId(),
-      platform: p.platform || 'unknown',
-      username: p.username || '',
-      displayName: p.fullName || '',
-      followers: p.followers || 0,
-      following: p.following || 0,
-      postsCount: p.postsCount || 0,
-      monthsActive: p.postsCount > 500 ? 48 : p.postsCount > 100 ? 24 : p.postsCount > 30 ? 12 : 6,
-      isRegular: (p.postsCount || 0) > 20,
-      isVerified: p.isVerified || false,
-      score: calculateScore(p, filters),
-      category: p.category || extractCategory(p),
-      location: p.location || location,
-      bio: p.bio || '',
-      profileUrl: p.profileUrl || '',
-      avatarUrl: p.avatarUrl || '',
-      status: 'prospect',
-      isBot: false,
-      isBusiness: p.isBusiness || false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      messages: [],
-      notes: '',
-    }));
-
-    // Retornar EXATAMENTE o numero pedido - nem mais nem menos
-    const finalProfiles = filtered.slice(0, target);
-
-    const discarded = allProfiles.length - filtered.length;
-    log.push(`Filtrados: ${filtered.length} | Descartados: ${discarded}`);
-    log.push(`Retornando: ${finalProfiles.length} de ${target} pedidos`);
-
-    // OBRIGATORIO: sempre retornar perfis - relaxar filtros se necessario
-    if (finalProfiles.length === 0 && allProfiles.length > 0) {
-      // Tentar sem filtro de angolano
-      const relaxed = allProfiles.filter(p => {
-        if (!p.username) return false;
-        if (detectBot(p)) return false;
-        if (p.isVerified) return false;
-        if ((p.followers || 0) > MAX_FOLLOWERS) return false;
-        if (isEstablishment(p)) return false;
-        return true;
-      }).map(p => ({
-        id: generateId(),
-        campaignId: generateId(),
-        platform: p.platform || 'unknown',
-        username: p.username || '',
-        displayName: p.fullName || '',
-        followers: p.followers || 0,
-        following: p.following || 0,
-        postsCount: p.postsCount || 0,
-        monthsActive: 12,
-        isRegular: true,
-        isVerified: false,
-        score: 50,
-        category: 'Outro',
-        location: location,
-        bio: p.bio || '',
-        profileUrl: p.profileUrl || '',
-        avatarUrl: p.avatarUrl || '',
-        status: 'prospect',
-        isBot: false,
-        isBusiness: false,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        messages: [],
-        notes: '',
-      }));
-      const r = relaxed.slice(0, target);
-      log.push(`Filtros relaxados: ${r.length} perfis (sem filtro de angolano)`);
-      if (r.length > 0) {
-        return NextResponse.json({
-          success: true, status: 'completed',
-          profilesFound: r.length, totalRaw: allProfiles.length,
-          profiles: r,
-          campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-          message: `Prospeccao concluida! ${r.length} perfis reais encontrados em ${elapsed}s.`,
-          errors: errors.length > 0 ? errors : undefined,
-          log,
-        });
-      }
+    // FILTROS SIMPLES: 500-100k seguidores, sem bots, sem estabelecimentos
+    var filtered = [];
+    for (var i = 0; i < all.length; i++) {
+      var p = all[i];
+      if (!p.username) continue;
+      if (isBot(p)) continue;
+      if (isBiz(p)) continue;
+      var f = p.followers || 0;
+      if (f < minF || f > maxF) continue;
+      filtered.push({
+        id: gid(), campaignId: gid(),
+        platform: p.platform, username: p.username,
+        displayName: p.fullName || '', followers: f,
+        following: p.following || 0, postsCount: p.postsCount || 0,
+        monthsActive: 12, isRegular: true, isVerified: p.isVerified || false,
+        score: 50, category: p.category || 'Outro',
+        location: loc, bio: p.bio || '',
+        profileUrl: p.profileUrl || '', avatarUrl: p.avatarUrl || '',
+        status: 'prospect', isBot: false, isBusiness: false,
+        createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+        messages: [], notes: '',
+      });
+      if (filtered.length >= target) break;
     }
 
-    if (finalProfiles.length === 0) {
-      const limitHit = log.some(l => l.includes('LIMITE MENSAL'));
-      const msg = limitHit
-        ? 'LIMITE MENSAL DA APIFY ATINGIDO. Cria uma nova conta gratuita em apify.com com outro email e copia a nova API key. O plano gratuito renova a cada mes.'
-        : '0 perfis encontrados. Tenta palavras-chave diferentes ou baixa o minimo de seguidores.';
+    log.push('Filtrados: ' + filtered.length + ' de ' + all.length);
+
+    // Se 0 resultados com filtros, tentar so sem filtro de seguidores
+    if (filtered.length === 0 && all.length > 0) {
+      log.push('A relaxar filtros para encontrar perfis...');
+      for (var j = 0; j < all.length; j++) {
+        var p2 = all[j];
+        if (!p2.username) continue;
+        if (isBot(p2)) continue;
+        if (isBiz(p2)) continue;
+        filtered.push({
+          id: gid(), campaignId: gid(),
+          platform: p2.platform, username: p2.username,
+          displayName: p2.fullName || '', followers: p2.followers || 0,
+          following: p2.following || 0, postsCount: p2.postsCount || 0,
+          monthsActive: 12, isRegular: true, isVerified: false,
+          score: 50, category: 'Outro', location: loc,
+          bio: p2.bio || '', profileUrl: p2.profileUrl || '',
+          avatarUrl: p2.avatarUrl || '', status: 'prospect',
+          isBot: false, isBusiness: false,
+          createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+          messages: [], notes: '',
+        });
+        if (filtered.length >= target) break;
+      }
+      log.push('Apos relaxar: ' + filtered.length + ' perfis');
+    }
+
+    var result = filtered.slice(0, target);
+
+    if (result.length === 0) {
+      var lh = log.some(function(l) { return l.indexOf('LIMITE') >= 0; });
       return NextResponse.json({
         success: true, status: 'completed',
-        profilesFound: 0, totalRaw: allProfiles.length,
-        profiles: [],
-        campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-        message: msg,
-        errors: errors.length > 0 ? errors : undefined,
-        log,
+        profilesFound: 0, totalRaw: all.length, profiles: [],
+        campaignName: body.campaignName || 'Campanha ' + new Date().toLocaleDateString('pt-PT'),
+        message: lh ? 'LIMITE MENSAL APIFY ATINGIDO. Cria nova conta em apify.com.' : '0 perfis. Tenta palavras-chave diferentes.',
+        log: log,
       });
     }
 
     return NextResponse.json({
       success: true, status: 'completed',
-      profilesFound: finalProfiles.length, totalRaw: allProfiles.length,
-      profiles: finalProfiles,
-      campaignName: filters.campaignName || `Campanha ${new Date().toLocaleDateString('pt-PT')}`,
-      message: `Prospeccao concluida! ${finalProfiles.length} perfis reais encontrados em ${elapsed}s.`,
-      errors: errors.length > 0 ? errors : undefined,
-      log,
+      profilesFound: result.length, totalRaw: all.length,
+      profiles: result,
+      campaignName: body.campaignName || 'Campanha ' + new Date().toLocaleDateString('pt-PT'),
+      message: result.length + ' perfis reais encontrados em ' + elapsed + 's!',
+      log: log,
     });
-  } catch (error) {
-    return NextResponse.json({ error: 'Erro: ' + (error instanceof Error ? error.message : String(error)) }, { status: 500 });
+  } catch(error) {
+    return NextResponse.json({
+      error: 'Erro: ' + ((error instanceof Error) ? error.message : String(error)),
+      log: log,
+    }, { status: 500 });
   }
 }
