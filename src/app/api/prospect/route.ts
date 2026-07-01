@@ -258,7 +258,7 @@ function isEstablishment(profile: any): boolean {
   // Categorias do Instagram que indicam negocio
   if (profile.isBusiness) return true;
   // Palavras-chave de estabelecimento na bio/categoria
-  const bizWords = /restaur|cafe|hotel|pousada|loja|store|shop|boutique|salao|barbear|clinica|farmac|supermerc|mercado|empresa|ltda|company|corp|inc\.|sarl|studio|academy|escola|colegio|universid|centro.*comer|imobiliaria|agencia.*viage|dentista|advogad|escritor|propriedade|real estate|restaurant|food|dining|bar &|club|discotec|gym|fitness.*center|spa|beauty.*salon|nail.*salon|hair.*salon|pet.*shop|auto.*part/oficina|mecanica|pintura|construc|engenharia|arquitet|contabil|consultor/i;
+  const bizWords = /restaur|cafe|hotel|pousada|loja|store|shop|boutique|salao|barbear|clinica|farmac|supermerc|mercado|empresa|ltda|company|corp|inc\.|sarl|studio|academy|escola|colegio|universid|centro.*comer|imobiliaria|agencia.*viage|dentista|advogad|escritor|propriedade|real estate|restaurant|food|dining|bar &|club|discotec|gym|fitness.*center|spa|beauty.*salon|nail.*salon|hair.*salon|pet.*shop|auto.*part|oficina|mecanica|pintura|construc|engenharia|arquitet|contabil|consultor/i;
   if (bizWords.test(bio) || bizWords.test(cat) || bizWords.test(name)) return true;
   // Username com palavras de negocio
   const bizUsernames = /restaur|cafe|hotel|loja|shop|store|boutique|salon|barber|clinica|farmac|mercado|imobili|dent|advoc|oficina|academy|school|gym|spa|beauty|nail|hair|pet.*shop/i;
@@ -274,7 +274,7 @@ function isAngolan(profile: any): boolean {
   // Cidades e provincias de Angola
   const angolaPlaces = /angola|luanda|benguela|huambo|lobito|lubango|cabinda|malanje|namibe|huila|bie|cuanza|cunene|kuando|lunda|moxico|uige|zaire|sumbe|soyo|tombwa|ongiva|menongue|saurimo|dundo|ndalatando|mbanza/i;
   // Indicadores de angolanidade
-  const angolaIndicators = /\bAO\b|\b🇦🇴\b|angolano|angolana|made in angola|from angola|em angola|de angola|angola |ao\b/i;
+  const angolaIndicators = /\bAO\b|angolano|angolana|made in angola|from angola|em angola|de angola|angola /i;
   // DDI angolano
   const angolaPhone = /\+244|\(244\)|244\d{9}/;
   if (angolaPlaces.test(bio) || angolaPlaces.test(loc)) return true;
