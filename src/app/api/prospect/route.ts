@@ -93,116 +93,58 @@ export async function POST(request: Request) {
     for (var pi = 0; pi < platforms.length; pi++) {
       if (all.length >= target || limitHit) break;
       var plat = platforms[pi];
+      var q = query;
+      var need = target - all.length;
+      log.push(plat + ': "' + q + '"...');
 
-      // Multiplas queries se nao chega ao alvo
-      var queries = [query];
-      if (kw) queries.push(kw + ' Luanda');
-      if (all.length < target) queries.push('Angola lifestyle', 'Luanda influencer', 'Angola content creator');
+      try {
+        var items: any[] = [];
 
-      for (var qi = 0; qi < queries.length && all.length < target && !limitHit; qi++) {
-        var q = queries[qi];
-        var need = target - all.length;
-        log.push(plat + ': "' + q + '" (faltam ' + need + ')...');
-
-        try {
-          var items: any[] = [];
-          var actorInput: Record<string,any> = {};
-
-          if (plat === 'instagram') {
-            actorInput = { searchQueries: [q], searchType: 'user', resultsLimit: need + 10 };
-            items = await runActor(ACTORS.instagram, actorInput, token, 20);
-            for (var ii = 0; ii < items.length; ii++) {
-              var it = items[ii];
-              var un = it.username || '';
-              if (!un || seen.has(un + ':ig')) continue;
-              seen.add(un + ':ig');
-              all.push({
-                platform: 'instagram', username: un,
-                fullName: it.fullName || it.full_name || '',
-                followers: it.followersCount || it.follower_count || 0,
-                following: it.followsCount || it.following_count || 0,
-                postsCount: it.postsCount || it.posts || 0,
-                bio: it.biography || it.bio || '',
-                profileUrl: 'https://instagram.com/' + un,
-                avatarUrl: it.profilePicUrl || it.profilePicture || '',
-                isVerified: it.verified || false,
-                isBusiness: it.isBusinessAccount || false,
-                category: it.categoryName || '',
-              });
-            }
-          } else if (plat === 'tiktok') {
-            actorInput = { searchQueries: [q], resultsPerPage: need * 3, shouldDownloadVideos: false };
-            items = await runActor(ACTORS.tiktok, actorInput, token, 20);
-            for (var ti = 0; ti < items.length; ti++) {
-              var a = items[ti].authorMeta || items[ti].author || {};
-              var uid = a.name || a.uniqueId || '';
-              if (!uid || seen.has(uid + ':tt')) continue;
-              seen.add(uid + ':tt');
-              all.push({
-                platform: 'tiktok', username: uid,
-                fullName: a.nickName || a.nickname || '',
-                followers: a.fans || a.followerCount || 0,
-                following: a.following || a.followingCount || 0,
-                postsCount: a.video || a.videoCount || 0,
-                bio: a.signature || '',
-                profileUrl: 'https://tiktok.com/@' + uid,
-                avatarUrl: a.avatar || a.avatarMedium || '',
-                isVerified: a.verified || false,
-                isBusiness: false, category: '',
-              });
-            }
-          } else if (plat === 'facebook') {
-            actorInput = { queries: 'site:facebook.com "' + q + '"', maxResults: need + 5, csvFriendly: false };
-            items = await runActor(ACTORS.facebook, actorInput, token, 15);
-            for (var fi = 0; fi < items.length; fi++) {
-              var url = items[fi].url || '';
-              var m = url.match(/facebook\.com\/([a-zA-Z0-9_.]+)/);
-              if (!m) continue;
-              var slug = m[1];
-              if (/^(www|web|m|search|api|login|watch|groups)/.test(slug)) continue;
-              if (seen.has(slug + ':fb')) continue;
-              seen.add(slug + ':fb');
-              all.push({
-                platform: 'facebook', username: slug,
-                fullName: items[fi].title || slug,
-                followers: 0, following: 0, postsCount: 0,
-                bio: (items[fi].description || '').substring(0, 200),
-                profileUrl: url, avatarUrl: '',
-                isVerified: false, isBusiness: true, category: '',
-              });
-            }
-          } else if (plat === 'linkedin') {
-            actorInput = { queries: 'site:linkedin.com/in/ "' + q + '"', maxResults: need + 5, csvFriendly: false };
-            items = await runActor(ACTORS.linkedin, actorInput, token, 15);
-            for (var li = 0; li < items.length; li++) {
-              var lurl = items[li].url || '';
-              var lm = lurl.match(/linkedin\.com\/in\/([a-zA-Z0-9_-]+)/);
-              if (!lm) continue;
-              var lslug = lm[1];
-              if (lslug.length < 3 || seen.has(lslug + ':li')) continue;
-              seen.add(lslug + ':li');
-              all.push({
-                platform: 'linkedin', username: lslug,
-                fullName: items[li].title || lslug.replace(/[-_]/g, ' '),
-                followers: 0, following: 0, postsCount: 0,
-                bio: (items[li].description || '').substring(0, 200),
-                profileUrl: lurl, avatarUrl: '',
-                isVerified: false, isBusiness: false, category: '',
-              });
-            }
+        if (plat === 'instagram') {
+          items = await runActor(ACTORS.instagram, { searchQueries: [q], searchType: 'user', resultsLimit: need + 10 }, token, 12);
+          for (var ii = 0; ii < items.length; ii++) {
+            var it = items[ii]; var un = it.username || '';
+            if (!un || seen.has(un + ':ig')) continue;
+            seen.add(un + ':ig');
+            all.push({ platform:'instagram', username:un, fullName:it.fullName||it.full_name||'', followers:it.followersCount||it.follower_count||0, following:it.followsCount||it.following_count||0, postsCount:it.postsCount||it.posts||0, bio:it.biography||it.bio||'', profileUrl:'https://instagram.com/'+un, avatarUrl:it.profilePicUrl||it.profilePicture||'', isVerified:it.verified||false, isBusiness:it.isBusinessAccount||false, category:it.categoryName||'' });
           }
-
-          log.push(plat + ': ' + all.length + ' total acumulados');
-        } catch(ex) {
-          var em = (ex instanceof Error) ? ex.message : String(ex);
-          if (em.indexOf('limit exceeded') >= 0 || em.indexOf('hard limit') >= 0) {
-            log.push('LIMITE MENSAL APIFY - parando');
-            limitHit = true;
-            break;
+        } else if (plat === 'tiktok') {
+          items = await runActor(ACTORS.tiktok, { searchQueries:[q], resultsPerPage:need*3, shouldDownloadVideos:false }, token, 12);
+          for (var ti = 0; ti < items.length; ti++) {
+            var a = items[ti].authorMeta || items[ti].author || {}; var uid = a.name || a.uniqueId || '';
+            if (!uid || seen.has(uid+':tt')) continue;
+            seen.add(uid+':tt');
+            all.push({ platform:'tiktok', username:uid, fullName:a.nickName||a.nickname||'', followers:a.fans||a.followerCount||0, following:a.following||a.followingCount||0, postsCount:a.video||a.videoCount||0, bio:a.signature||'', profileUrl:'https://tiktok.com/@'+uid, avatarUrl:a.avatar||a.avatarMedium||'', isVerified:a.verified||false, isBusiness:false, category:'' });
           }
-          log.push(plat + ' erro: ' + em);
-          if (qi === 0) break;
+        } else if (plat === 'facebook') {
+          items = await runActor(ACTORS.facebook, { queries:'site:facebook.com "'+q+'"', maxResults:need+5, csvFriendly:false }, token, 10);
+          for (var fi = 0; fi < items.length; fi++) {
+            var furl = items[fi].url || ''; var fm = furl.match(/facebook\.com\/([a-zA-Z0-9_.]+)/);
+            if (!fm) continue; var fslug = fm[1];
+            if (/^(www|web|m|search|api|login|watch|groups)/.test(fslug) || seen.has(fslug+':fb')) continue;
+            seen.add(fslug+':fb');
+            all.push({ platform:'facebook', username:fslug, fullName:items[fi].title||fslug, followers:0, following:0, postsCount:0, bio:(items[fi].description||'').substring(0,200), profileUrl:furl, avatarUrl:'', isVerified:false, isBusiness:true, category:'' });
+          }
+        } else if (plat === 'linkedin') {
+          items = await runActor(ACTORS.linkedin, { queries:'site:linkedin.com/in/ "'+q+'"', maxResults:need+5, csvFriendly:false }, token, 10);
+          for (var li = 0; li < items.length; li++) {
+            var lurl = items[li].url || ''; var lm = lurl.match(/linkedin\.com\/in\/([a-zA-Z0-9_-]+)/);
+            if (!lm) continue; var lslug = lm[1];
+            if (lslug.length < 3 || seen.has(lslug+':li')) continue;
+            seen.add(lslug+':li');
+            all.push({ platform:'linkedin', username:lslug, fullName:items[li].title||lslug.replace(/[-_]/g,' '), followers:0, following:0, postsCount:0, bio:(items[li].description||'').substring(0,200), profileUrl:lurl, avatarUrl:'', isVerified:false, isBusiness:false, category:'' });
+          }
         }
+
+        log.push(plat + ': +' + items.length + ' resultados (total: ' + all.length + ')');
+      } catch(ex) {
+        var em = (ex instanceof Error) ? ex.message : String(ex);
+        if (em.indexOf('limit exceeded') >= 0 || em.indexOf('hard limit') >= 0) {
+          log.push('LIMITE MENSAL APIFY - parando');
+          limitHit = true;
+          break;
+        }
+        log.push(plat + ' erro: ' + em);
       }
     }
 

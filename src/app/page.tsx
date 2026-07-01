@@ -284,8 +284,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
 }
 
 function ProspectingTab() {
-  const [apifyKey, setApifyKey] = useState(() => { try { return localStorage.getItem('mba_apify_key') || ''; } catch { return ''; } });
-  const saveApifyKey = (k: string) => { setApifyKey(k); try { localStorage.setItem('mba_apify_key', k); } catch {} };
+
   const [form, setForm] = useState({ platform:'instagram', minFollowers:500, maxFollowers:100000, minMonthsActive:0, requireRegular:false, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -311,7 +310,7 @@ function ProspectingTab() {
   const runProspect = async () => {
     setLoading(true); setResults([]); setProspectLog([]); setProspectMsg('');
     try {
-      const res = await mbaFetch('/api/prospect', { method:'POST', body:JSON.stringify({ ...form, apifyToken: apifyKey }) });
+      const res = await mbaFetch('/api/prospect', { method:'POST', body:JSON.stringify(form) });
       if (!res.ok) {
         const errData = await res.json().catch(() => null);
         const errMsg = (errData && errData.error) ? errData.error : ('Erro HTTP ' + res.status);
@@ -378,12 +377,12 @@ function ProspectingTab() {
           <div><Lbl>Palavras-chave</Lbl><input value={form.keywords} onChange={e=>setForm({...form,keywords:e.target.value})} placeholder="restaurante, hotel, cafe" style={INP} /></div>
           <div><Lbl>Localizacao</Lbl><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} style={INP} /></div>
         </div>
-        <div style={{ marginBottom:8 }}><Lbl>Apify API Key <span style={{ color:P.textDim, fontWeight:400 }}>(gratuita em apify.com)</span></Lbl><div style={{ display:'flex', gap:6 }}><input value={apifyKey} onChange={e=>saveApifyKey(e.target.value)} placeholder="apify_api_xxx..." style={INP} /></div></div>
+
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}><Toggle on={form.requireRegular} onChange={v=>setForm({...form,requireRegular:v})} /><span style={{ color:P.textSec, fontSize:12 }}>Exigir contas regulares</span></div>
         <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar usuarios REAIS...' : 'Iniciar Prospeccao'}</Btn>
         {prospectMsg && <div style={{ marginTop:10, padding:10, borderRadius:6, background: results.length > 0 ? 'rgba(0,192,99,0.08)' : 'rgba(192,0,28,0.08)', border:'1px solid '+(results.length > 0 ? 'rgba(0,192,99,0.2)' : 'rgba(192,0,28,0.2)'), color: results.length > 0 ? P.green : P.orange, fontSize:11, lineHeight:1.5 }}>{prospectMsg}</div>}
         {prospectLog.length > 0 && <div style={{ marginTop:8, padding:8, borderRadius:6, background:P.surface2, border:'1px solid '+P.border, fontSize:10, color:P.textDim, fontFamily:"'JetBrains Mono',monospace", lineHeight:1.6, maxHeight:120, overflowY:'auto' }}>{prospectLog.map((l,i)=><div key={i}>{'> '+l}</div>)}</div>}
-        {!apifyKey && <div style={{ marginTop:10, padding:10, borderRadius:6, background:'rgba(59,130,246,0.06)', border:'1px solid rgba(59,130,246,0.15)', color:P.blue, fontSize:11, lineHeight:1.5 }}><div style={{ fontWeight:700, marginBottom:4 }}>Para melhores resultados, adiciona a tua Apify Key:</div><div>1. Abre <a href="https://apify.com" target="_blank" rel="noreferrer" style={{ color:P.redB, textDecoration:'underline' }}>apify.com</a> no teu telefone e cria conta gratuita</div><div>2. Vai a Settings &gt; Integrations &gt; API</div><div>3. Copia a API key e cola no campo acima</div><div style={{ marginTop:4, color:P.textDim }}>O Apify garante acesso real a Instagram, TikTok, Facebook e LinkedIn.</div></div>}
+
       </Panel>
       {results.length > 0 && <Panel style={{ marginBottom:14, border:'1px solid rgba(0,192,99,0.2)' }}><STitle style={{ color:P.green }}>Resultados da prospeccao ({results.length} perfis REAIS)</STitle><div style={{ color:P.textSec, fontSize:12, marginBottom:10 }}>{results.length} perfis reais encontrados e guardados. Todos os perfis foram extraidos de plataformas reais.</div></Panel>}
       <Panel>
