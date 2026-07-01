@@ -24,9 +24,7 @@ const SEL: React.CSSProperties = { ...INP, appearance:'none' as any, cursor:'poi
 const LIMIT_DIARIO = 30;
 const PROPOSTA = 'Ola,\nO meu nome e Jesuaine Cristiano e represento a Mwango Brain, uma agencia criativa sediada em Luanda, Angola.\nTenho acompanhado o seu perfil com interesse e gostaria de lhe apresentar uma proposta de aquisicao da sua conta.\n\nEstamos dispostos a fazer uma oferta justa pelo seu perfil. Caso tenha interesse em saber mais detalhes, basta responder a esta mensagem e entraremos em contacto rapidamente.\n\nAguardamos o seu contacto.\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 const TABS = [
-  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},
-  {id:'followups',label:'FOLLOW-UPS'},{id:'inbox',label:'INBOX'},{id:'agent',label:'AGENTE IA'},
-  {id:'campaigns',label:'CAMPANHAS'},{id:'analytics',label:'ANALYTICS'},{id:'activity',label:'ACTIVIDADE'},{id:'config',label:'CONFIGURACAO'},
+  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},{id:'agent',label:'AGENTE IA'},
 ];
 const storeGet = (k:string, d:string='') => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const storeSet = (k:string, v:string) => { try { localStorage.setItem(k, v); } catch {} };
@@ -285,7 +283,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
 
 function ProspectingTab() {
 
-  const [form, setForm] = useState({ platform:'instagram', minFollowers:500, maxFollowers:100000, minMonthsActive:0, requireRegular:false, targetCount:50, campaignName:'', maxPerDay:LIMIT_DIARIO, keywords:'', location:'Angola' });
+  const [form, setForm] = useState({ platform:'instagram', minFollowers:500, maxFollowers:100000, targetCount:50, location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -298,13 +296,16 @@ function ProspectingTab() {
   const [detailProfile, setDetailProfile] = useState<any>(null);
   const [prospectLog, setProspectLog] = useState<string[]>([]);
   const [prospectMsg, setProspectMsg] = useState('');
-  const loadProfiles = async () => {
-    const params = new URLSearchParams({ page: String(page), limit: '50' });
-    if (filterPlat !== 'all') params.set('platform', filterPlat);
-    if (filterStatus !== 'all') params.set('status', filterStatus);
-    if (search) params.set('search', search);
-    const res = await mbaFetch('/api/profiles?' + params);
-    if (res.ok) { const d = await res.json(); setProfiles(d.profiles || []); setTotal(d.total || 0); }
+  const loadProfiles = () => {
+    try {
+      let all: any[] = JSON.parse(localStorage.getItem('mba_profiles') || '[]');
+      if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; });
+      if (filterStatus !== 'all') all = all.filter(function(p: any) { return p.status === filterStatus; });
+      if (search) { var s = search.toLowerCase(); all = all.filter(function(p: any) { return (p.username || '').toLowerCase().indexOf(s) >= 0 || (p.displayName || '').toLowerCase().indexOf(s) >= 0; }); }
+      setTotal(all.length);
+      var start = (page - 1) * 50;
+      setProfiles(all.slice(start, start + 50));
+    } catch(e) {}
   };
   useEffect(() => { loadProfiles(); }, [page, filterPlat, filterStatus, search]);
   const runProspect = async () => {
@@ -368,28 +369,20 @@ function ProspectingTab() {
       <Panel style={{ marginBottom:14 }}>
         <STitle>Nova Prospeccao</STitle>
         <div className="mba-grid-2" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
-          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={e=>setForm({...form,platform:e.target.value})} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option><option value="all">Todas</option></select></div>
-          <div><Lbl>Nome da campanha</Lbl><input value={form.campaignName} onChange={e=>setForm({...form,campaignName:e.target.value})} placeholder="Ex: Restaurantes Luanda" style={INP} /></div>
+          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={e=>setForm({...form,platform:e.target.value})} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="all">Todas</option></select></div>
+          <div><Lbl>Localizacao</Lbl><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} style={INP} /></div>
           <div><Lbl>Min. Seguidores</Lbl><input type="number" value={form.minFollowers} onChange={e=>setForm({...form,minFollowers:Number(e.target.value)})} style={INP} /></div>
           <div><Lbl>Max. Seguidores</Lbl><input type="number" value={form.maxFollowers} onChange={e=>setForm({...form,maxFollowers:Number(e.target.value)})} style={INP} /></div>
           <div><Lbl>Alvo</Lbl><input type="number" value={form.targetCount} onChange={e=>setForm({...form,targetCount:Number(e.target.value)})} style={INP} /></div>
-          <div><Lbl>Max/dia</Lbl><input type="number" value={form.maxPerDay} onChange={e=>setForm({...form,maxPerDay:Number(e.target.value)})} style={INP} /></div>
-          <div><Lbl>Palavras-chave</Lbl><input value={form.keywords} onChange={e=>setForm({...form,keywords:e.target.value})} placeholder="restaurante, hotel, cafe" style={INP} /></div>
-          <div><Lbl>Localizacao</Lbl><input value={form.location} onChange={e=>setForm({...form,location:e.target.value})} style={INP} /></div>
         </div>
-
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}><Toggle on={form.requireRegular} onChange={v=>setForm({...form,requireRegular:v})} /><span style={{ color:P.textSec, fontSize:12 }}>Exigir contas regulares</span></div>
-        <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar usuarios REAIS...' : 'Iniciar Prospeccao'}</Btn>
-        {prospectMsg && <div style={{ marginTop:10, padding:10, borderRadius:6, background: results.length > 0 ? 'rgba(0,192,99,0.08)' : 'rgba(192,0,28,0.08)', border:'1px solid '+(results.length > 0 ? 'rgba(0,192,99,0.2)' : 'rgba(192,0,28,0.2)'), color: results.length > 0 ? P.green : P.orange, fontSize:11, lineHeight:1.5 }}>{prospectMsg}</div>}
-        {prospectLog.length > 0 && <div style={{ marginTop:8, padding:8, borderRadius:6, background:P.surface2, border:'1px solid '+P.border, fontSize:10, color:P.textDim, fontFamily:"'JetBrains Mono',monospace", lineHeight:1.6, maxHeight:120, overflowY:'auto' }}>{prospectLog.map((l,i)=><div key={i}>{'> '+l}</div>)}</div>}
-
+        <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar...' : 'Iniciar Prospeccao'}</Btn>
       </Panel>
       {results.length > 0 && <Panel style={{ marginBottom:14, border:'1px solid rgba(0,192,99,0.2)' }}><STitle style={{ color:P.green }}>Resultados da prospeccao ({results.length} perfis REAIS)</STitle><div style={{ color:P.textSec, fontSize:12, marginBottom:10 }}>{results.length} perfis reais encontrados e guardados. Todos os perfis foram extraidos de plataformas reais.</div></Panel>}
       <Panel>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}><STitle>Perfis ({total})</STitle>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Pesquisar..." style={{ ...INP, width:160 }} />
-            <select value={filterPlat} onChange={e=>{setFilterPlat(e.target.value);setPage(1);}} style={{ ...SEL as any, width:110 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="linkedin">LinkedIn</option></select>
+            <select value={filterPlat} onChange={e=>{setFilterPlat(e.target.value);setPage(1);}} style={{ ...SEL as any, width:110 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option></select>
             <select value={filterStatus} onChange={e=>{setFilterStatus(e.target.value);setPage(1);}} style={{ ...SEL as any, width:120 }}><option value="all">Todos estados</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option><option value="accepted">Aceite</option></select>
             <Btn variant="ghost" size="sm" onClick={exportCSV.bind(null, filtered)}>Exportar CSV</Btn>
           </div>
@@ -434,13 +427,13 @@ function MessagesTab() {
   const [selVariant, setSelVariant] = useState('default');
   const [schedDate, setSchedDate] = useState('');
   const [queueInfo, setQueueInfo] = useState<any>({});
-  const loadMessages = async () => {
-    const res = await mbaFetch('/api/profiles?limit=100');
+  const loadMessages = () => {
     let allProfiles: any[] = [];
-    if (res.ok) { const d = await res.json(); allProfiles = d.profiles || []; setProfiles(allProfiles); }
+    try { allProfiles = JSON.parse(localStorage.getItem('mba_profiles') || '[]'); } catch {}
+    setProfiles(allProfiles);
     const msgs: any[] = [];
-    allProfiles.forEach((p: any) => { if (p.messages) p.messages.forEach((m: any) => msgs.push({...m, _username:p.username, _platform:p.platform})); });
-    setMessages(msgs.sort((a: any, b: any) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime()));
+    allProfiles.forEach(function(p: any) { if (p.messages) p.messages.forEach(function(m: any) { msgs.push({content:m.content, direction:m.direction, sentAt:m.sentAt, abTestGroup:m.abTestGroup, _username:p.username, _platform:p.platform}); }); });
+    setMessages(msgs.sort(function(a: any, b: any) { return new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(); }));
   };
   const loadQueue = async () => {
     const res = await mbaFetch('/api/send-message');
@@ -949,13 +942,7 @@ export default function MBAApp() {
         {activeTab === 'dashboard' && <DashboardTab dashData={dashData} onRefresh={loadDash} />}
         {activeTab === 'prospecting' && <ProspectingTab />}
         {activeTab === 'messages' && <MessagesTab />}
-        {activeTab === 'followups' && <FollowUpsTab />}
-        {activeTab === 'inbox' && <InboxTab />}
         {activeTab === 'agent' && <AgentChat />}
-        {activeTab === 'campaigns' && <CampaignsTab />}
-        {activeTab === 'analytics' && <AnalyticsTab />}
-        {activeTab === 'activity' && <ActivityTab />}
-        {activeTab === 'config' && <ConfigTab onLogout={doLogout} />}
       </div>
     </div>
   );

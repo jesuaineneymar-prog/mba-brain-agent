@@ -9,7 +9,6 @@ const ACTORS: Record<string,string> = {
   instagram: 'DrF9mzPPEuVizVF4l',
   tiktok: 'GdWCkxBtKWOsKjdch',
   facebook: 'nFJndFXA5zjCTuudP',
-  linkedin: 'nFJndFXA5zjCTuudP',
 };
 
 async function runActor(actorId: string, input: Record<string,any>, token: string, maxWait = 20): Promise<any[]> {
@@ -83,7 +82,7 @@ export async function POST(request: Request) {
     var loc = (body.location || 'Angola').trim();
     var query = kw ? (kw + ' ' + loc) : loc;
 
-    var platforms = platform === 'all' ? ['instagram','tiktok','facebook','linkedin'] : [platform];
+    var platforms = platform === 'all' ? ['instagram','tiktok','facebook'] : [platform];
     log.push('Alvo: ' + target + ' | Seguidores: ' + minF + '-' + maxF + ' | Plataformas: ' + platforms.join(', '));
 
     var all: any[] = [];
@@ -101,7 +100,8 @@ export async function POST(request: Request) {
         var items: any[] = [];
 
         if (plat === 'instagram') {
-          items = await runActor(ACTORS.instagram, { searchQueries: [q], searchType: 'user', resultsLimit: need + 10 }, token, 12);
+          var igQueries = [q, loc + ' lifestyle', loc + ' influencer', loc + ' creator', loc + ' pessoas'];
+          items = await runActor(ACTORS.instagram, { searchQueries: igQueries, searchType: 'user', resultsLimit: need + 30 }, token, 15);
           for (var ii = 0; ii < items.length; ii++) {
             var it = items[ii]; var un = it.username || '';
             if (!un || seen.has(un + ':ig')) continue;
@@ -125,16 +125,7 @@ export async function POST(request: Request) {
             seen.add(fslug+':fb');
             all.push({ platform:'facebook', username:fslug, fullName:items[fi].title||fslug, followers:0, following:0, postsCount:0, bio:(items[fi].description||'').substring(0,200), profileUrl:furl, avatarUrl:'', isVerified:false, isBusiness:true, category:'' });
           }
-        } else if (plat === 'linkedin') {
-          items = await runActor(ACTORS.linkedin, { queries:'site:linkedin.com/in/ "'+q+'"', maxResults:need+5, csvFriendly:false }, token, 10);
-          for (var li = 0; li < items.length; li++) {
-            var lurl = items[li].url || ''; var lm = lurl.match(/linkedin\.com\/in\/([a-zA-Z0-9_-]+)/);
-            if (!lm) continue; var lslug = lm[1];
-            if (lslug.length < 3 || seen.has(lslug+':li')) continue;
-            seen.add(lslug+':li');
-            all.push({ platform:'linkedin', username:lslug, fullName:items[li].title||lslug.replace(/[-_]/g,' '), followers:0, following:0, postsCount:0, bio:(items[li].description||'').substring(0,200), profileUrl:lurl, avatarUrl:'', isVerified:false, isBusiness:false, category:'' });
-          }
-        }
+
 
         log.push(plat + ': +' + items.length + ' resultados (total: ' + all.length + ')');
       } catch(ex) {
