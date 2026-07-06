@@ -664,11 +664,6 @@ function ProspectingTab() {
       const d = await res.json().catch(function() { return null; });
       if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); return; }
       setProspectMsg(d.message || '');
-      if (d.cookiesExpired) {
-        storeSet('mba_cookies_expired', '1');
-      } else {
-        storeSet('mba_cookies_expired', '0');
-      }
       if (d.status === 'limit_exceeded') {
         setProspectMsg('!! LIMITE MENSAL APIFY !! Cria nova conta gratis em apify.com e envia a nova API key.');
       }
@@ -677,18 +672,11 @@ function ProspectingTab() {
         var saved = getProfiles();
         var savedIds = new Set(saved.map(function(s: any) { return s.username + ':' + s.platform; }));
         var newOnes = d.profiles.filter(function(p: any) { return !savedIds.has(p.username + ':' + p.platform); });
-        var autoTime = new Date().toISOString();
-        for (var ni = 0; ni < newOnes.length; ni++) {
-          newOnes[ni].status = 'prospect';
-          newOnes[ni].firstContactedAt = autoTime;
-          newOnes[ni].messages = [{ content: PROPOSTA, direction: 'outbound', sentAt: autoTime, type: 'initial', sendAttempted: false, delivered: false, deliveryMsg: '' }];
-        }
         var merged = saved.concat(newOnes);
         saveProfiles(merged);
         setProfiles(merged);
         setTotal(merged.length);
         setSelected(new Set());
-        setTimeout(function() { sendUnsentMessages(); }, 1500);
       }
     setLoading(false);
   };
@@ -768,12 +756,7 @@ function MessagesTab() {
   const [selProfile, setSelProfile] = useState('');
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
-  const [cookiesExpired, setCookiesExpired] = useState(function() {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem('mba_cookies_expired') === '1';
-    }
-    return false;
-  });
+  const [cookiesExpired, setCookiesExpired] = useState(false);
 
   const loadMessages = function() {
     var allProfiles = getProfiles();
@@ -818,9 +801,9 @@ function MessagesTab() {
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      {cookiesExpired && <Panel style={{ marginBottom:14, border:'1px solid ' + P.borderHi }}>
-        <STitle style={{ color:P.redB }}>Cookies Expirados!</STitle>
-        <div style={{ color:P.textSec, fontSize:10, marginBottom:8 }}>Os cookies IG/TT expiraram. Actualiza para voltar a prospeccionar e enviar DMs.</div>
+      <Panel style={{ marginBottom:14, border:'1px solid ' + P.borderHi }}>
+        <STitle style={{ color:P.redB }}>Cookies para Envio de DMs</STitle>
+        <div style={{ color:P.textSec, fontSize:10, marginBottom:8 }}>Os cookies sao necessarios para enviar mensagens directas (DMs). A prospeccao funciona sem cookies.</div>
         <div style={{ background:P.redDim, borderRadius:6, padding:10, border:'1px solid '+P.border }}>
           <div style={{ color:P.redB, fontSize:11, fontWeight:700, marginBottom:6 }}>COMO OBTER COOKIES NO KIWI BROWSER:</div>
           <div style={{ color:P.textSec, fontSize:9, lineHeight:'1.7' }}>
@@ -834,7 +817,7 @@ function MessagesTab() {
             <b>IG:</b> sessionid + csrftoken | <b>TT:</b> sessionid + tt_csrf_token<br/>
           </div>
         </div>
-      </Panel>}
+      </Panel>
       <div style={{ display:'flex', gap:6, marginBottom:14 }}>
         {[['all','Todas'],['outbound','Enviadas'],['inbound','Recebidas']].map(function(item) {
           var k = item[0]; var l = item[1];
@@ -1084,8 +1067,7 @@ export default function MBAApp() {
     if (!isAuthenticated) return;
     checkInbox();
     checkFollowUpsAndReplies();
-    sendUnsentMessages();
-    var autoInterval = setInterval(function() { checkInbox(); checkFollowUpsAndReplies(); sendUnsentMessages(); }, 60000);
+    var autoInterval = setInterval(function() { checkInbox(); checkFollowUpsAndReplies(); }, 60000);
     var tick = setInterval(function() { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); }, 1000);
     return function() { clearInterval(autoInterval); clearInterval(tick); };
   }, [isAuthenticated]);
