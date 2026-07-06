@@ -510,7 +510,7 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
           {(d.topProfiles || []).length > 0 ? d.topProfiles.map(function(p: any, i: number) {
             return <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 0', borderBottom:i<9?'1px solid '+P.border:'none' }}>
               <div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div>
-              <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{(p.followers||0).toLocaleString('pt-PT')}</span>
+              <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.followers > 0 ? p.followers.toLocaleString('pt-PT') : '—'}</span>
             </div>;
           }) : <EmptyState icon="\u25CE" title="Sem perfis" sub="Aguardando prospeccao" />}
         </Panel>
@@ -855,7 +855,7 @@ function MessagesTab() {
           <Lbl>Perfil</Lbl>
           <select value={selProfile} onChange={function(e) { setSelProfile(e.target.value); }} style={SEL as any}>
             <option value="">Seleccionar perfil...</option>
-            {profiles.map(function(p: any) { return <option key={p.id} value={p.id}>{p.username} ({p.platform}) - {(p.followers||0).toLocaleString()} seg</option>; })}
+            {profiles.map(function(p: any) { return <option key={p.id} value={p.id}>{p.username} ({p.platform}) - {p.followers > 0 ? p.followers.toLocaleString() : '—'} seg</option>; })}
           </select>
         </div>
         <textarea value={msgText} onChange={function(e) { setMsgText(e.target.value); }} rows={4} style={{ ...INP, resize:'vertical', marginBottom:8 }} />
