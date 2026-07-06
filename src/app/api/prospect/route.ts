@@ -590,7 +590,7 @@ export async function POST(request: any) {
       if (!tp._isAngola && !isAngola(tp.username) && !isAngola(tp.fullName)) continue;
       var tf = tp.followers || 0;
       if (tf > maxF) continue;
-      if (tf > 0 && tf < minF) continue;
+      if (tf < minF) continue;
       ttQual.push(makeProfile(tp, loc));
     }
   }
@@ -600,7 +600,7 @@ export async function POST(request: any) {
       if (!ip.username || isBot(ip) || isBiz(ip)) continue;
       var igF = ip.followers || 0;
       if (igF > maxF) continue;
-      if (igF > 0 && igF < minF) continue;
+      if (igF < minF) continue;
       if (!ip._isAngola && !isAngola(ip.bio) && !isAngola(ip.fullName) && !isAngola(ip.username)) continue;
       igQual.push(makeProfile(ip, loc));
     }
@@ -611,7 +611,7 @@ export async function POST(request: any) {
       if (!ffp.username || isBot(ffp) || isBiz(ffp)) continue;
       var fff = ffp.followers || 0;
       if (fff > maxF) continue;
-      if (fff > 0 && fff < minF) continue;
+      if (fff < minF) continue;
       if (!ffp._isAngola && !isAngola(ffp.bio) && !isAngola(ffp.fullName)) continue;
       fbQual.push(makeProfile(ffp, loc));
     }
@@ -626,11 +626,16 @@ export async function POST(request: any) {
   fbQual.sort(function(a, b) { return (b.followers || 0) - (a.followers || 0); });
 
   var qualified: any[] = [];
-  var maxLen = Math.max(ttQual.length, igQual.length, fbQual.length);
-  for (var sli = 0; sli < maxLen && qualified.length < target; sli++) {
-    if (doTT && sli < ttQual.length) qualified.push(ttQual[sli]);
-    if (doIG && sli < igQual.length) qualified.push(igQual[sli]);
-    if (doFB && sli < fbQual.length) qualified.push(fbQual[sli]);
+  var ttI = 0, igI = 0, fbI = 0;
+  // Interleave: TT, IG, FB, TT, IG, FB...
+  while (qualified.length < target) {
+    var added = false;
+    if (doTT && ttI < ttQual.length) { qualified.push(ttQual[ttI]); ttI++; added = true; }
+    if (qualified.length >= target) break;
+    if (doIG && igI < igQual.length) { qualified.push(igQual[igI]); igI++; added = true; }
+    if (qualified.length >= target) break;
+    if (doFB && fbI < fbQual.length) { qualified.push(fbQual[fbI]); fbI++; added = true; }
+    if (!added) break;
   }
 
   var elapsed = Math.round((Date.now() - t0) / 1000);
