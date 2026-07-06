@@ -140,8 +140,14 @@ function extractFBFromBio(bio) {
   if (!bio) return '';
   var m1 = bio.match(/facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,49})/i);
   if (m1 && isValidFB(m1[1])) return m1[1];
-  var m2 = bio.match(/fb[\s:.]+(?:\.com\/)?([a-zA-Z][a-zA-Z0-9._-]{2,49})/i);
+  var m2 = bio.match(/fb\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,49})/i);
   if (m2 && isValidFB(m2[1])) return m2[1];
+  var m3 = bio.match(/fb\.me\/([a-zA-Z][a-zA-Z0-9._-]{2,49})/i);
+  if (m3 && isValidFB(m3[1])) return m3[1];
+  var m4 = bio.match(/fb[\s:]+@?([a-zA-Z][a-zA-Z0-9._-]{2,49})\b/i);
+  if (m4 && isValidFB(m4[1])) return m4[1];
+  var m5 = bio.match(/facebook[\s:]+(?:page[\s:]*)?([a-zA-Z][a-zA-Z0-9._-]{2,49})\b/i);
+  if (m5 && isValidFB(m5[1])) return m5[1];
   return '';
 }
 
@@ -237,16 +243,16 @@ function fetchIGProfileCookies(username, sessionid, csrftoken) {
   });
 }
 
-/* ===== FACEBOOK VIA TOKEN ===== */
+/* ===== FACEBOOK: enrich individual page via Graph API ===== */
 
-function fetchFBSearch(query, token) {
+function fetchFBPageInfo(pageIdOrName, token) {
+  if (!token) return Promise.resolve(null);
   return fetchW(
-    'https://graph.facebook.com/v19.0/search?type=page&q=' +
-    encodeURIComponent(query) +
-    '&fields=id,name,fan_count,category,link,description' +
-    '&limit=25&access_token=' + token,
+    'https://graph.facebook.com/v19.0/' + encodeURIComponent(pageIdOrName) +
+    '?fields=id,name,fan_count,category,link,description,picture.width(100).height(100)' +
+    '&access_token=' + token,
     { headers: { 'Accept': 'application/json' } },
-    3000
+    5000
   ).then(function(res) {
     if (!res || !res.ok) return null;
     return res.json().then(function(d) { return d; }).catch(function() { return null; });
@@ -260,7 +266,8 @@ function getTTQueries() {
     'angola influencer', 'angola creator', 'angola lifestyle',
     'angola moda', 'angola fitness', 'angola musica',
     'angola kizomba', 'angola dance', 'angola comedia',
-    'luanda influencer'
+    'luanda influencer', 'angola entrepreneur', 'angola digital',
+    'angola content creator', 'luanda lifestyle'
   ];
   for (var i = queries.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
@@ -273,7 +280,8 @@ function getIGFBQueries() {
   var base = [
     'angola influencer', 'angola creator', 'angola lifestyle',
     'angola moda', 'angola kizomba', 'luanda influencer',
-    'angola fitness', 'angola musica'
+    'angola fitness', 'angola musica', 'angola digital',
+    'luanda creator', 'angola entrepreneur'
   ];
   for (var i = base.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
@@ -304,7 +312,7 @@ export async function POST(request) {
   var fbToken = body.fbToken || '';
 
   var hasIG = igSession && igCsrf;
-  var hasFB = fbToken && fbToken.length > 20;
+  var hasFB = true;
 
   var doTT = platform === 'all' || platform === 'tiktok';
   var doIG = platform === 'all' || platform === 'instagram';
@@ -443,6 +451,35 @@ export async function POST(request) {
         if (uData.category_name) tgt.category = uData.category_name;
       }
       logs.push('IG enriched: ' + enriched + '/' + toEnrich.length);
+
+      /* Extract FB links from enriched IG bios */
+      if (doFB) {
+        var igFbCount = 0;
+        for (var ifbi = 0; ifbi < toEnrich.length; ifbi++) {
+          var igfbProfile = toEnrich[ifbi];
+          var igfbHandle = extractFBFromBio(igfbProfile.bio || '');
+          if (igfbHandle && !fbSeen.has(igfbHandle.toLowerCase())) {
+            fbSeen.add(igfbHandle.toLowerCase());
+            fbRaw.push({
+              platform: 'facebook', username: igfbHandle,
+              fullName: igfbProfile.fullName || '',
+              followers: igfbProfile.followers || 0,
+              following: 0, postsCount: 0,
+              bio: igfbProfile.bio || '',
+              profileUrl: 'https://facebook.com/' + igfbHandle,
+              avatarUrl: igfbProfile.avatarUrl || '',
+              isVerified: igfbProfile.isVerified,
+              category: igfbProfile.category || '',
+              _isAngola: igfbProfile._isAngola,
+              _source: 'ig_bio'
+            });
+            igFbCount++;
+          }
+        }
+        if (igFbCount > 0) {
+          logs.push('FB from IG bios: ' + igFbCount);
+        }
+      }
     }
   } else if (doIG) {
     logs.push('IG SEM CREDENCIAIS - pulando');
@@ -508,60 +545,41 @@ export async function POST(request) {
   logs.push('IG total: ' + igRaw.length + ' FB from bios: ' + fbRaw.length);
 
   /* ============================================
-     PHASE 4: Facebook via TOKEN
+     PHASE 4: Enrich FB profiles from bios
+     (FB search via cookies/token is blocked by FB)
      ============================================ */
-  var _m1 = ['EAAd4GmZBcHgoBR67cA1xirkz3e9xZCr1EssTZCUPj5',
-    'pVT02tws8qzWIZA9qqOdWlgDWWAWWZABSQEZBzuS',
-    'dCdmVxLTuOZAzoYdObDYEuBu5xdKA7EXoHQcYhEZ',
-    'AVZA0uquJymRHvi1uVEidQ0lXtQNdwcXEcbKCErxK',
-    'OMRYZBZBTwHIfOQP0m8ZA5jVl8V1WhnefKWhHpr2V',
-    'Iyb3BcocOehBsAzNuqVYmUBrVe5WYVd63O7t2NPFV',
-    '33TUQZDZD'];
-  var defaultFBToken = _m1.join('');
-  var fbTok = fbToken || defaultFBToken;
-
-  if (doFB && fbTok) {
-    var fbQueries = getIGFBQueries();
-    logs.push('FB queries (via token): ' + fbQueries.length);
-    var fbPromises = [];
-    for (var fqi = 0; fqi < fbQueries.length; fqi++) {
-      fbPromises.push(fetchFBSearch(fbQueries[fqi], fbTok));
+  if (doFB && fbRaw.length > 0) {
+    var fbToEnrich = fbRaw.slice(0, 10);
+    var fbEnrichPromises = [];
+    for (var fei = 0; fei < fbToEnrich.length; fei++) {
+      fbEnrichPromises.push(
+        (function(idx) {
+          return fetchFBPageInfo(
+            fbToEnrich[idx].username, fbToken
+          ).then(function(result) { return { result: result, idx: idx }; });
+        })(fei)
+      );
     }
-    var fbResponses = await Promise.all(fbPromises);
-    var fbSearchOk = 0;
-
-    for (var fri = 0; fri < fbResponses.length; fri++) {
-      var fbResp = fbResponses[fri];
-      if (!fbResp || !fbResp.data) continue;
-      fbSearchOk++;
-      var fbQuery = fbQueries[fri] || '';
-      var fbQueryAO = isAngolaQuery(fbQuery);
-      var fbPages = fbResp.data || [];
-
-      for (var fpi = 0; fpi < fbPages.length; fpi++) {
-        var page = fbPages[fpi];
-        var pgName = page.name || '';
-        if (!isValidFB(pgName)) continue;
-        var pgId = page.id || '';
-        if (fbSeen.has(pgId)) continue;
-        fbSeen.add(pgId);
-        fbRaw.push({
-          platform: 'facebook', username: pgId,
-          fullName: pgName, followers: page.fan_count || 0,
-          following: 0, postsCount: 0,
-          bio: page.description || page.category || '',
-          profileUrl: page.link || ('https://facebook.com/' + pgId),
-          avatarUrl: '', isVerified: false,
-          category: page.category || '',
-          _isAngola: fbQueryAO || isAngola(pgName) ||
-            isAngola(page.description || ''),
-          _source: 'fb_search'
-        });
+    var fbEnrichResults = await Promise.all(fbEnrichPromises);
+    var fbEnriched = 0;
+    for (var feri = 0; feri < fbEnrichResults.length; feri++) {
+      var fer = fbEnrichResults[feri];
+      var fbPage = fer.result;
+      if (!fbPage || fbPage.error || !fbPage.name) continue;
+      fbEnriched++;
+      var fbTgt = fbToEnrich[fer.idx];
+      fbTgt.fullName = fbPage.name;
+      fbTgt.followers = fbPage.fan_count || 0;
+      fbTgt.bio = fbPage.description || fbTgt.bio;
+      fbTgt.category = fbPage.category || '';
+      fbTgt.profileUrl = fbPage.link || fbTgt.profileUrl;
+      if (fbPage.picture && fbPage.picture.data) {
+        fbTgt.avatarUrl = fbPage.picture.data.url || '';
       }
+      if (isAngola(fbPage.name)) fbTgt._isAngola = true;
+      if (isAngola(fbPage.description || '')) fbTgt._isAngola = true;
     }
-    logs.push('FB search ok:' + fbSearchOk + ' total:' + fbRaw.length);
-  } else if (doFB) {
-    logs.push('FB SEM TOKEN - pulando');
+    logs.push('FB enriched: ' + fbEnriched + '/' + fbToEnrich.length);
   }
 
   /* ============================================

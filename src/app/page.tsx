@@ -40,8 +40,7 @@ function getStoredCredentials() {
     igSession: storeGet('mba_ig_session') || '',
     igCsrf: storeGet('mba_ig_csrf') || '',
     ttSession: storeGet('mba_tt_session') || '',
-    ttCsrf: storeGet('mba_tt_csrf') || '',
-    fbToken: storeGet('mba_fb_token') || ''
+    ttCsrf: storeGet('mba_tt_csrf') || ''
   };
 }
 
@@ -653,7 +652,6 @@ function ProspectingTab() {
       var prospectBody: any = { ...form };
       if (creds.igSession) prospectBody.igSession = creds.igSession;
       if (creds.igCsrf) prospectBody.igCsrf = creds.igCsrf;
-      if (creds.fbToken) prospectBody.fbToken = creds.fbToken;
       const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body:JSON.stringify(prospectBody) }).catch(function() { return null; });
       if (!res) { setProspectMsg('Erro de conexao'); setLoading(false); return; }
       if (!res.ok) {
