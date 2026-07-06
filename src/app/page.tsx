@@ -420,7 +420,8 @@ function MessagesTab() {
   const sendMessage = async (sched?: string) => {
     if (!selProfile || !msgText.trim()) return;
     setSending(true);
-    await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({ profileId:selProfile, message:msgText, abTestGroup:selVariant!=='default'?selVariant:undefined, scheduledAt:sched||undefined }) });
+    var targetProfile = profiles.find((p: any) => p.id === selProfile);
+    await mbaFetch('/api/send-message', { method:'POST', body:JSON.stringify({ username: targetProfile?.username, platform: targetProfile?.platform, message:msgText, sentToday:0, abTestGroup:selVariant!=='default'?selVariant:undefined, scheduledAt:sched||undefined }) });
     setSending(false); loadMessages(); loadQueue();
   };
   const selMsgText = selVariant !== 'default' ? (abVariants.find(v => v.groupName === selVariant)?.content || msgText) : msgText;
@@ -781,21 +782,8 @@ function ActivityTab() {
 }
 
 function ConfigTab({ onLogout }: { onLogout:()=>void }) {
-  const [cookies, setCookies] = useState<any[]>([]);
-  const [cookieEdits, setCookieEdits] = useState<Record<string,string>>({});
   const [backups, setBackups] = useState<any[]>([]);
   const [backupStatus, setBackupStatus] = useState('');
-  const [loadingCookies, setLoadingCookies] = useState(false);
-  const loadCookies = async () => {
-    setLoadingCookies(true);
-    const res = await mbaFetch('/api/cookies');
-    if (res.ok) { const d = await res.json(); setCookies(d.cookies || []); }
-    setLoadingCookies(false);
-  };
-  const saveCookies = async () => {
-    await mbaFetch('/api/cookies', { method:'PATCH', body:JSON.stringify({ updates:cookieEdits }) });
-    setCookieEdits({}); loadCookies();
-  };
   const doBackup = async () => {
     setBackupStatus('A criar backup...');
     const res = await mbaFetch('/api/backup');
@@ -813,20 +801,10 @@ function ConfigTab({ onLogout }: { onLogout:()=>void }) {
     if (res.ok) setBackupStatus('Backup restaurado com sucesso. Recarregue a pagina.');
     else setBackupStatus('Erro ao restaurar');
   };
-  useEffect(() => { loadCookies(); loadBackups(); }, []);
+  useEffect(() => { loadBackups(); }, []);
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Configuracao</STitle><Btn variant="danger" onClick={onLogout}>Terminar sessao</Btn></div>
-      <Panel style={{ marginBottom:14 }}><STitle>Cookies de API</STitle>
-        <Btn variant="ghost" size="sm" onClick={loadCookies} disabled={loadingCookies}>{loadingCookies?'A carregar...':'Recarregar cookies'}</Btn>
-        <div style={{ marginTop:10, display:'flex', flexDirection:'column', gap:8 }}>{cookies.map((c: any) => (
-          <div key={c.key}>
-            <Lbl>{c.label}</Lbl>
-            <input value={cookieEdits[c.key] !== undefined ? cookieEdits[c.key] : (c.hasValue ? '[valor guardado]' : '')} onChange={e=>setCookieEdits({...cookieEdits, [c.key]:e.target.value})} placeholder={c.hasValue?'Deixe vazio para manter o valor actual':'Introduza o valor'} style={INP} />
-          </div>
-        ))}</div>
-        {cookies.length > 0 && <Btn style={{ marginTop:10 }} onClick={saveCookies}>Guardar cookies</Btn>}
-      </Panel>
       <Panel style={{ marginBottom:14 }}><STitle>Backup e Restauracao</STitle>
         <div style={{ display:'flex', gap:8, marginBottom:10, flexWrap:'wrap', alignItems:'center' }}>
           <Btn onClick={doBackup}>Criar backup agora</Btn>
