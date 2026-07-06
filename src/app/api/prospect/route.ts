@@ -182,28 +182,26 @@ function fetchTikTokSearch(query) {
 
 /* ===== INSTAGRAM VIA COOKIES ===== */
 
+var IG_UA = 'Instagram 320.1.0.36.109 Android (33/13; 480dpi; 1080x2400; samsung; SM-G991B; exynos2100; en_US; 528954967)';
+
 function fetchIGSearchCookies(query, sessionid, csrftoken) {
   var dsUserId = sessionid.split('%3A')[0] || '';
-  var rankToken = dsUserId + '_' + Math.random().toString(36).substring(2, 15);
   var cookies = 'sessionid=' + sessionid +
     '; csrftoken=' + csrftoken +
     '; ds_user_id=' + dsUserId +
-    '; ig_did=00000000-0000-0000-0000-000000000000' +
-    '; mid=XYZ; rur=FTW';
+    '; ig_did=00000000-0000-0000-0000-000000000000';
 
   return fetchW(
-    'https://www.instagram.com/api/v1/users/web_search_top/?context=blended&query=' +
+    'https://i.instagram.com/api/v1/users/search/?q=' +
     encodeURIComponent(query) +
-    '&rank_token=' + rankToken,
+    '&count=20',
     {
       headers: {
         'Cookie': cookies,
         'X-IG-App-ID': '936619743392459',
         'X-CSRFToken': csrftoken,
-        'X-Requested-With': 'XMLHttpRequest',
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-        'Accept-Language': 'pt-PT,pt;q=0.9',
-        'X-IG-WWW-Claim': '0'
+        'User-Agent': IG_UA,
+        'Accept-Language': 'en-US;q=0.9'
       }
     },
     3000
@@ -218,8 +216,7 @@ function fetchIGProfileCookies(username, sessionid, csrftoken) {
   var cookies = 'sessionid=' + sessionid +
     '; csrftoken=' + csrftoken +
     '; ds_user_id=' + dsUserId +
-    '; ig_did=00000000-0000-0000-0000-000000000000' +
-    '; mid=XYZ; rur=FTW';
+    '; ig_did=00000000-0000-0000-0000-000000000000';
 
   return fetchW(
     'https://www.instagram.com/api/v1/users/web_profile_info/?username=' +
@@ -229,10 +226,8 @@ function fetchIGProfileCookies(username, sessionid, csrftoken) {
         'Cookie': cookies,
         'X-IG-App-ID': '936619743392459',
         'X-CSRFToken': csrftoken,
-        'X-Requested-With': 'XMLHttpRequest',
-        'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-        'Accept-Language': 'pt-PT,pt;q=0.9',
-        'X-IG-WWW-Claim': '0'
+        'User-Agent': IG_UA,
+        'Accept-Language': 'en-US;q=0.9'
       }
     },
     3000
@@ -394,28 +389,61 @@ export async function POST(request) {
 
       for (var iu = 0; iu < igUsers.length; iu++) {
         var igU = igUsers[iu];
-        var userData = igU.user || igU;
-        var igUn = userData.username || '';
+        var igUn = igU.username || '';
         if (!igUn || !isValidIG(igUn)) continue;
         if (igSeen.has(igUn.toLowerCase())) continue;
         igSeen.add(igUn.toLowerCase());
         igRaw.push({
           platform: 'instagram', username: igUn,
-          fullName: userData.full_name || '',
-          followers: userData.follower_count || 0,
-          following: userData.following_count || 0,
-          postsCount: 0, bio: userData.biography || '',
+          fullName: igU.full_name || '',
+          followers: 0,
+          following: 0,
+          postsCount: 0, bio: '',
           profileUrl: 'https://instagram.com/' + igUn,
-          avatarUrl: userData.profile_pic_url || '',
-          isVerified: userData.is_verified || false,
-          category: userData.category || '',
-          _isAngola: igQueryAO || isAngola(userData.full_name) ||
-            isAngola(userData.biography) || isAngola(igUn)
+          avatarUrl: igU.profile_pic_url || '',
+          isVerified: igU.is_verified || false,
+          category: '',
+          _isAngola: igQueryAO || isAngola(igU.full_name) || isAngola(igUn)
         });
       }
     }
     logs.push('IG search ok:' + igSearchOk + '/' + igQueries.length +
       ' users:' + igRaw.length);
+
+    if (igRaw.length > 0) {
+      var toEnrich = igRaw.slice(0, 15);
+      var enrichPromises = [];
+      for (var eci = 0; eci < toEnrich.length; eci++) {
+        enrichPromises.push(
+          (function(idx) {
+            return fetchIGProfileCookies(
+              toEnrich[idx].username, igSession, igCsrf
+            ).then(function(result) { return { result: result, idx: idx }; });
+          })(eci)
+        );
+      }
+      var enrichResults = await Promise.all(enrichPromises);
+      var enriched = 0;
+      for (var eri = 0; eri < enrichResults.length; eri++) {
+        var er = enrichResults[eri];
+        var igData = er.result;
+        if (!igData || !igData.data || !igData.data.user) continue;
+        var uData = igData.data.user;
+        var fCount = (uData.edge_followed_by && uData.edge_followed_by.count) || 0;
+        if (fCount < 1) continue;
+        enriched++;
+        var tgt = toEnrich[er.idx];
+        tgt.followers = fCount;
+        tgt.following = (uData.edge_follow && uData.edge_follow.count) || 0;
+        tgt.postsCount = (uData.edge_owner_to_timeline_media && uData.edge_owner_to_timeline_media.count) || 0;
+        if (uData.biography) tgt.bio = uData.biography;
+        if (uData.full_name) tgt.fullName = uData.full_name;
+        if (uData.profile_pic_url) tgt.avatarUrl = uData.profile_pic_url;
+        if (uData.is_verified) tgt.isVerified = true;
+        if (uData.category_name) tgt.category = uData.category_name;
+      }
+      logs.push('IG enriched: ' + enriched + '/' + toEnrich.length);
+    }
   } else if (doIG) {
     logs.push('IG SEM CREDENCIAIS - pulando');
   }
