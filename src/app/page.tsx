@@ -35,6 +35,15 @@ function getProfiles(): any[] {
 function saveProfiles(profiles: any[]) {
   if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem('mba_profiles', JSON.stringify(profiles)); }
 }
+function getStoredCredentials() {
+  return {
+    igSession: storeGet('mba_ig_session') || '',
+    igCsrf: storeGet('mba_ig_csrf') || '',
+    ttSession: storeGet('mba_tt_session') || '',
+    ttCsrf: storeGet('mba_tt_csrf') || '',
+    fbToken: storeGet('mba_fb_token') || ''
+  };
+}
 
 function computeDashboard() {
   var profiles = getProfiles();
