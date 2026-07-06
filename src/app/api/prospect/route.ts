@@ -179,7 +179,7 @@ function fetchTikTokSearch(query) {
         'x-rapidapi-host': TT_HOST
       }
     },
-    3000
+    5000
   ).then(function(res) {
     if (!res || !res.ok) return null;
     return res.json().then(function(d) { return d; }).catch(function() { return null; });
@@ -210,10 +210,11 @@ function fetchIGSearchCookies(query, sessionid, csrftoken) {
         'Accept-Language': 'en-US;q=0.9'
       }
     },
-    3000
+    6000
   ).then(function(res) {
-    if (!res || !res.ok) return null;
-    return res.json().then(function(d) { return d; }).catch(function() { return null; });
+    if (!res) return { _err: 'timeout' };
+    if (!res.ok) return { _err: 'http_' + res.status };
+    return res.json().then(function(d) { return d; }).catch(function() { return { _err: 'parse_fail' }; });
   });
 }
 
@@ -236,7 +237,7 @@ function fetchIGProfileCookies(username, sessionid, csrftoken) {
         'Accept-Language': 'en-US;q=0.9'
       }
     },
-    3000
+    5000
   ).then(function(res) {
     if (!res || !res.ok) return null;
     return res.json().then(function(d) { return d; }).catch(function() { return null; });
@@ -320,7 +321,7 @@ export async function POST(request) {
 
   logs.push('Platform:' + platform +
     ' TT:' + doTT + ' IG:' + doIG + ' FB:' + doFB);
-  logs.push('Creds - IG:' + (hasIG ? 'YES' : 'NO') +
+  logs.push('Creds - IG:' + (hasIG ? 'YES(s:' + igSession.substring(0, 8) + ')' : 'NO') +
     ' FB:' + (hasFB ? 'YES' : 'NO'));
 
   /* ============================================
@@ -328,6 +329,7 @@ export async function POST(request) {
      ============================================ */
   var ttRaw = [];
   var ttSeen = new Set();
+  var ttQuotaExceeded = false;
 
   if (doTT) {
     var ttQueries = getTTQueries();
@@ -340,7 +342,12 @@ export async function POST(request) {
 
     for (var ri = 0; ri < ttResponses.length; ri++) {
       var data = ttResponses[ri];
-      if (!data || data.code !== 0) continue;
+      if (!data) continue;
+      if (data.message && data.message.indexOf('quota') >= 0) {
+        ttQuotaExceeded = true;
+        continue;
+      }
+      if (data.code !== 0) continue;
       var list = (data.data && data.data.user_list) ? data.data.user_list : [];
       var queryUsed = ttQueries[ri] || '';
       var queryIsAO = isAngolaQuery(queryUsed);
@@ -369,6 +376,9 @@ export async function POST(request) {
     var aoC = 0;
     for (var aci = 0; aci < ttRaw.length; aci++) { if (ttRaw[aci]._isAngola) aoC++; }
     logs.push('TT raw:' + ttRaw.length + ' Angola:' + aoC);
+    if (ttQuotaExceeded) {
+      logs.push('TT QUOTA EXCEEDED');
+    }
   }
 
   /* ============================================
@@ -376,6 +386,7 @@ export async function POST(request) {
      ============================================ */
   var igRaw = [];
   var igSeen = new Set();
+  var igSearchOk = 0;
 
   if (doIG && hasIG) {
     var igQueries = getIGFBQueries();
@@ -385,11 +396,14 @@ export async function POST(request) {
       igPromises.push(fetchIGSearchCookies(igQueries[igi], igSession, igCsrf));
     }
     var igResponses = await Promise.all(igPromises);
-    var igSearchOk = 0;
 
     for (var isr = 0; isr < igResponses.length; isr++) {
       var igResp = igResponses[isr];
       if (!igResp) continue;
+      if (igResp._err) {
+        logs.push('IG err q' + isr + ':' + igResp._err);
+        continue;
+      }
       igSearchOk++;
       var igUsers = igResp.users || [];
       var igQuery = igQueries[isr] || '';
@@ -653,15 +667,21 @@ export async function POST(request) {
 
   var message = '';
   var cookiesExpired = false;
+  var ttQuotaMsg = '';
+
+  if (doTT && ttRaw.length === 0 && ttQuotaExceeded) {
+    ttQuotaMsg = ' !! TikTok: quota mensal da API esgotada. Cria nova conta gratis em rapidapi.com ou espera o reset mensal.';
+  }
+
   if (finalProfiles.length === 0) {
-    message = '0 perfis. ' + logs.join(' | ');
+    message = '0 perfis. ' + logs.join(' | ') + ttQuotaMsg;
   } else {
     message = ttQual.length + ' TT + ' + igQual.length +
       ' IG + ' + fbQual.length + ' = ' + finalProfiles.length +
-      ' perfis em ' + elapsed + 's';
+      ' perfis em ' + elapsed + 's' + ttQuotaMsg;
   }
 
-  if (hasIG && doIG && igRaw.length === 0) {
+  if (hasIG && doIG && igRaw.length === 0 && igSearchOk > 0) {
     cookiesExpired = true;
   }
 
