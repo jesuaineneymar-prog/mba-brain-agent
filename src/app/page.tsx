@@ -570,7 +570,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
           <button onClick={onClose} style={{ background:'none', border:'none', color:P.textSec, cursor:'pointer', fontSize:18 }}>&times;</button>
         </div>
         <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
-          <div><Lbl>Seguidores</Lbl><div style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace" }}>{(profile.followers||0).toLocaleString('pt-PT')}</div></div>
+          <div><Lbl>Seguidores</Lbl><div style={{ color: profile.followers > 0 ? P.text : P.textDim, fontFamily:"'JetBrains Mono',monospace" }}>{profile.followers > 0 ? profile.followers.toLocaleString('pt-PT') : '\u2014'}</div></div>
           <div><Lbl>Score</Lbl><div style={{ color:P.redB, fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>{(profile.score||0).toFixed(1)}</div></div>
           <div><Lbl>Posts</Lbl><div style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace" }}>{profile.postsCount||0}</div></div>
           {profile.profileUrl && <div style={{ alignSelf:'flex-end' }}><a href={profile.profileUrl} target="_blank" rel="noreferrer"><Btn variant="ghost" size="sm">Abrir perfil</Btn></a></div>}
@@ -682,15 +682,6 @@ function ProspectingTab() {
   };
 
   var filtered = results.length > 0 ? results : profiles;
-  var sentCount = 0;
-  var failedCount = 0;
-  for (var ci = 0; ci < filtered.length; ci++) {
-    var cms = filtered[ci].messages || [];
-    for (var cj = 0; cj < cms.length; cj++) {
-      if (cms[cj].direction === 'outbound' && cms[cj].sendAttempted && cms[cj].delivered) sentCount++;
-      if (cms[cj].direction === 'outbound' && cms[cj].sendAttempted && !cms[cj].delivered) failedCount++;
-    }
-  }
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
@@ -719,25 +710,20 @@ function ProspectingTab() {
         </div>
 
         {total > 0 && <div style={{ display:'flex', gap:12, marginBottom:10, flexWrap:'wrap' }}>
-          <div style={{ color:P.green, fontSize:11 }}><span style={{ fontWeight:700 }}>{sentCount}</span> DMs entregues</div>
-          {failedCount > 0 && <div style={{ color:'#ff4444', fontSize:11 }}><span style={{ fontWeight:700 }}>{failedCount}</span> DMs falharam</div>}
+          <div style={{ color:P.textSec, fontSize:11 }}><span style={{ fontWeight:700 }}>{total}</span> perfis encontrados</div>
         </div>}
 
         <div style={{ overflowX:'auto' }}>
-          <div style={{ minWidth:580 }}>
+          <div style={{ minWidth:480 }}>
             <div style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.border, color:P.textDim, fontSize:10, fontWeight:600, letterSpacing:'.5px' }}>
-              <div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div><div style={{ width:70, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:70 }}>PLATAFORMA</div><div style={{ width:80 }}>DM STATUS</div><div style={{ width:50 }}></div>
+              <div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div><div style={{ width:80, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:70 }}>PLATAFORMA</div><div style={{ width:50 }}></div>
             </div>
             {filtered.map(function(p: any) {
-              var lastMsg = null;
-              var pmsgs = p.messages || [];
-              for (var mi = pmsgs.length - 1; mi >= 0; mi--) { if (pmsgs[mi].direction === 'outbound') { lastMsg = pmsgs[mi]; break; } }
               return <div key={p.id} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}>
                 <div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{p.username}</div>
                 <div style={{ flex:2, color:P.textSec, fontSize:12 }}>{p.displayName||'-'}</div>
-                <div style={{ width:70, textAlign:'right', color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{(p.followers||0).toLocaleString('pt-PT')}</div>
+                <div style={{ width:80, textAlign:'right', color: p.followers > 0 ? P.text : P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.followers > 0 ? p.followers.toLocaleString('pt-PT') : '\u2014'}</div>
                 <div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div>
-                <div style={{ width:80 }}>{lastMsg ? <DeliveryBadge msg={lastMsg} /> : <span style={{ color:P.textDim, fontSize:9 }}>-</span>}</div>
                 <div style={{ width:50 }}><button onClick={function() { setDetailProfile(p); }} style={{ background:'none', border:'none', color:P.textSec, cursor:'pointer', fontSize:14 }}>&#9776;</button></div>
               </div>;
             })}
@@ -746,6 +732,57 @@ function ProspectingTab() {
         {total > 50 && <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}><Btn variant="ghost" size="sm" disabled={page<=1} onClick={function() { setPage(page-1); }}>Anterior</Btn><span style={{ color:P.textSec, fontSize:12, alignSelf:'center' }}>Pagina {page} de {Math.ceil(total/50)}</span><Btn variant="ghost" size="sm" disabled={page>=Math.ceil(total/50)} onClick={function() { setPage(page+1); }}>Proxima</Btn></div>}
       </Panel>
       {detailProfile && <ProfileDetailModal profile={detailProfile} onClose={function() { setDetailProfile(null); loadProfiles(); }} onUpdate={loadProfiles} />}
+    </div>
+  );
+}
+
+function CookieInputSection() {
+  const [igSession, setIgSession] = useState(storeGet('mba_ig_session') || '');
+  const [igCsrf, setIgCsrf] = useState(storeGet('mba_ig_csrf') || '');
+  const [ttSession, setTtSession] = useState(storeGet('mba_tt_session') || '');
+  const [ttCsrf, setTtCsrf] = useState(storeGet('mba_tt_csrf') || '');
+  const [saved, setSaved] = useState(false);
+
+  const saveCookies = function() {
+    storeSet('mba_ig_session', igSession);
+    storeSet('mba_ig_csrf', igCsrf);
+    storeSet('mba_tt_session', ttSession);
+    storeSet('mba_tt_csrf', ttCsrf);
+    setSaved(true);
+    setTimeout(function() { setSaved(false); }, 2000);
+  };
+
+  return (
+    <div>
+      <div style={{ background:P.redDim, borderRadius:6, padding:10, border:'1px solid '+P.border, marginBottom:10 }}>
+        <div style={{ color:P.redB, fontSize:11, fontWeight:700, marginBottom:6 }}>COMO OBTER COOKIES NO KIWI BROWSER:</div>
+        <div style={{ color:P.textSec, fontSize:9, lineHeight:'1.7' }}>
+          <b>Passo 1:</b> Abre Kiwi Browser e vai a instagram.com (ou tiktok.com)<br/>
+          <b>Passo 2:</b> Faz login na tua conta<br/>
+          <b>Passo 3:</b> Vai a chrome://extensions no Kiwi, activa modo desenvolvedor, instala "Cookie Editor"<br/>
+          <b>Passo 4:</b> Abre instagram.com logado, clica no Cookie Editor, copia sessionid e csrftoken<br/><br/>
+          <b>IG:</b> sessionid + csrftoken | <b>TT:</b> sessionid + tt_csrf_token<br/>
+        </div>
+      </div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
+        <div>
+          <Lbl>IG Session ID</Lbl>
+          <input value={igSession} onChange={function(e) { setIgSession(e.target.value); }} placeholder="Cole o sessionid aqui..." style={INP} />
+        </div>
+        <div>
+          <Lbl>IG CSRF Token</Lbl>
+          <input value={igCsrf} onChange={function(e) { setIgCsrf(e.target.value); }} placeholder="Cole o csrftoken aqui..." style={INP} />
+        </div>
+        <div>
+          <Lbl>TT Session ID</Lbl>
+          <input value={ttSession} onChange={function(e) { setTtSession(e.target.value); }} placeholder="Cole o sessionid aqui..." style={INP} />
+        </div>
+        <div>
+          <Lbl>TT CSRF Token</Lbl>
+          <input value={ttCsrf} onChange={function(e) { setTtCsrf(e.target.value); }} placeholder="Cole o tt_csrf_token aqui..." style={INP} />
+        </div>
+      </div>
+      <Btn onClick={saveCookies} disabled={false}>{saved ? 'Guardado!' : 'Guardar Cookies'}</Btn>
     </div>
   );
 }
@@ -804,19 +841,7 @@ function MessagesTab() {
       <Panel style={{ marginBottom:14, border:'1px solid ' + P.borderHi }}>
         <STitle style={{ color:P.redB }}>Cookies para Envio de DMs</STitle>
         <div style={{ color:P.textSec, fontSize:10, marginBottom:8 }}>Os cookies sao necessarios para enviar mensagens directas (DMs). A prospeccao funciona sem cookies.</div>
-        <div style={{ background:P.redDim, borderRadius:6, padding:10, border:'1px solid '+P.border }}>
-          <div style={{ color:P.redB, fontSize:11, fontWeight:700, marginBottom:6 }}>COMO OBTER COOKIES NO KIWI BROWSER:</div>
-          <div style={{ color:P.textSec, fontSize:9, lineHeight:'1.7' }}>
-            <b>Passo 1:</b> Abre Kiwi Browser e vai a instagram.com (ou tiktok.com)<br/>
-            <b>Passo 2:</b> Faz login na tua conta<br/>
-            <b>Passo 3:</b> Apaga a barra de URL, escreve: <span style={{ color:P.redB, fontFamily:"'JetBrains Mono',monospace", fontSize:8 }}>javascript:void(document.title=document.cookie)</span> e da Enter<br/>
-            <b>Passo 4:</b> O titulo da pagina muda para mostrar os cookies. Copia o texto<br/>
-            <b>Passo 5:</b> Procura "sessionid=VALOR" e "csrftoken=VALOR" - copia so o VALOR<br/>
-            <b>Passo 6:</b> Vai a chrome://extensions no Kiwi, activa modo desenvolvedor, instala "Cookie Editor"<br/>
-            <b>Passo 7:</b> Abre instagram.com logado, clica no Cookie Editor, copia sessionid e csrftoken<br/><br/>
-            <b>IG:</b> sessionid + csrftoken | <b>TT:</b> sessionid + tt_csrf_token<br/>
-          </div>
-        </div>
+        <CookieInputSection />
       </Panel>
       <div style={{ display:'flex', gap:6, marginBottom:14 }}>
         {[['all','Todas'],['outbound','Enviadas'],['inbound','Recebidas']].map(function(item) {
@@ -1065,11 +1090,8 @@ export default function MBAApp() {
 
   useEffect(function() {
     if (!isAuthenticated) return;
-    checkInbox();
-    checkFollowUpsAndReplies();
-    var autoInterval = setInterval(function() { checkInbox(); checkFollowUpsAndReplies(); }, 60000);
     var tick = setInterval(function() { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); }, 1000);
-    return function() { clearInterval(autoInterval); clearInterval(tick); };
+    return function() { clearInterval(tick); };
   }, [isAuthenticated]);
 
   if (!isAuthenticated) return <LoginScreen />;
