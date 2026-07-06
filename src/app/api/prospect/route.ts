@@ -5,6 +5,34 @@ export var maxDuration = 60;
 var SCRAPINGANT_KEY = '897af2903f4848fba1f603a46273d842';
 var SCRAPINGANT_BASE = 'https://api.scrapingant.com/v1/general';
 
+var LUSO_WORDS = [
+  'angola', 'angolana', 'angolano', 'luanda', 'benguela',
+  'huambo', 'lobito', 'cabinda', 'lubango', 'namibe',
+  'malanje', 'sumbe', 'soyo', 'dundo', 'huila',
+  'cuanza', 'zaire', 'cunene', 'moxico', 'lunda',
+  'bie', '_ao', '_angola', '+244', 'angol',
+  'luandense', 'benguelense', 'cabindense', 'huambiense',
+  'portugal', 'portuguesa', 'portugues', 'lisboa', 'porto',
+  'brasil', 'brasileira', 'brasileiro', 'sao paulo', 'brasilia',
+  'mozambique', 'moçambicana', 'moçambicano', 'maputo',
+  'caboverde', 'cabo verde', 'cabo-verdiano', 'praia',
+  'guine-bissau', 'guine bissau', 'bissau',
+  'sao tome', 'sao tome e principe', 'timor', 'timor-leste',
+  'lusofono', 'lusofona', 'lusofono',
+  'portugues', 'fala portugues', 'pt-br', 'pt_pt',
+  'dili', 'beira', 'nampula', 'loanda',
+  'angolan', 'mozambican', 'cape verdean'
+];
+
+function isLuso(text: string): boolean {
+  if (!text) return false;
+  var lower = text.toLowerCase();
+  for (var i = 0; i < LUSO_WORDS.length; i++) {
+    if (lower.indexOf(LUSO_WORDS[i]) >= 0) return true;
+  }
+  return false;
+}
+
 function gid(): string {
   return Date.now().toString(36) + Math.random().toString(36).substring(2, 9);
 }
@@ -509,6 +537,7 @@ export async function POST(request: any) {
     for (var tqi = 0; tqi < ttRaw.length; tqi++) {
       var tp = ttRaw[tqi];
       if (!tp.username || isBot(tp) || isBiz(tp)) continue;
+      if (!isLuso(tp.bio) && !isLuso(tp.fullName) && !isLuso(tp.username) && !isLuso(tp.category)) continue;
       var tf = tp.followers || 0;
       if (tf > maxF) continue;
       if (tf > 0 && tf < minF) continue;
@@ -519,6 +548,7 @@ export async function POST(request: any) {
     for (var igfi = 0; igfi < igRaw.length; igfi++) {
       var ip = igRaw[igfi];
       if (!ip.username || isBot(ip) || isBiz(ip)) continue;
+      if (!isLuso(ip.bio) && !isLuso(ip.fullName) && !isLuso(ip.username) && !isLuso(ip.category)) continue;
       var igF = ip.followers || 0;
       if (igF > maxF) continue;
       if (igF > 0 && igF < minF) continue;
@@ -529,6 +559,7 @@ export async function POST(request: any) {
     for (var ffi = 0; ffi < fbRaw.length; ffi++) {
       var ffp = fbRaw[ffi];
       if (!ffp.username || isBot(ffp) || isBiz(ffp)) continue;
+      if (!isLuso(ffp.bio) && !isLuso(ffp.fullName) && !isLuso(ffp.username) && !isLuso(ffp.category)) continue;
       var fff = ffp.followers || 0;
       if (fff > maxF) continue;
       if (fff > 0 && fff < minF) continue;
