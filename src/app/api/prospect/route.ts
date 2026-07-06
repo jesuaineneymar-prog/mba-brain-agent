@@ -74,9 +74,10 @@ function isValidIG(un: string): boolean {
   var bad = ['p', 'explore', 'reel', 'reels', 'stories', 'direct',
     'accounts', 'about', 'api', 'blog', 'help', 'press',
     'developer', 'legal', 'privacy', 'terms', 'web', 'email',
-    'insta', 'instagram'];
+    'insta', 'instagram', 'reel', 'graphql'];
   if (bad.indexOf(un.toLowerCase()) >= 0) return false;
   if (/^\d/.test(un)) return false;
+  if (un.toLowerCase().indexOf('official') >= 0 && un.length < 8) return false;
   return true;
 }
 
@@ -90,7 +91,10 @@ function isValidFB(name: string): boolean {
     'apps', 'privacy', 'terms', 'careers', 'directory',
     'people', 'places', 'games', 'business', 'story',
     'public', 'profile.php', 'watch', 'fundraiser',
-    'plugins', 'policies', 'campaign', 'landing'];
+    'plugins', 'policies', 'campaign', 'landing',
+    'sharer', 'share', 'watch', 'login', 'recover',
+    'policies', 'create', 'settings', 'edit', 'nfx',
+    'stories', 'reel', 'explore'];
   if (bad.indexOf(name.toLowerCase()) >= 0) return false;
   if (/^\d+$/.test(name)) return false;
   return true;
@@ -139,93 +143,20 @@ async function saFetch(url: string, timeoutMs: number): Promise<{ content: strin
   }
 }
 
-/* ===== TIKTOK: DuckDuckGo search ===== */
+/* ===== DuckDuckGo search — works for ALL platforms ===== */
 
-async function searchTTViaDDG(query: string): Promise<string[]> {
+async function searchDDG(query: string, urlPattern: RegExp, timeoutMs: number): Promise<string[]> {
   var ddgUrl = 'https://html.duckduckgo.com/html/?q=' +
     encodeURIComponent(query) + '&num=50';
-  var result = await saFetch(ddgUrl, 10000);
+  var result = await saFetch(ddgUrl, timeoutMs);
   if (!result || !result.content) return [];
-  var usernames: string[] = [];
-  var re1 = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
+  var found: string[] = [];
   var m;
-  while ((m = re1.exec(result.content)) !== null) {
-    if (isValidTT(m[1]) && usernames.indexOf(m[1]) < 0) usernames.push(m[1]);
-  }
-  return usernames;
-}
-
-/* ===== INSTAGRAM: Hashtag pages — extracts followers FREE from page data ===== */
-
-interface IGDiscovered {
-  username: string;
-  followers: number;
-  fullName: string;
-  avatar: string;
-  bio: string;
-  verified: boolean;
-  category: string;
-  postsCount: number;
-}
-
-async function searchIGViaHashtag(tag: string): Promise<IGDiscovered[]> {
-  var result = await saFetch('https://www.instagram.com/explore/tags/' + encodeURIComponent(tag) + '/', 12000);
-  if (!result || !result.content) return [];
-  var found: IGDiscovered[] = [];
-  var seen = new Set<string>();
-  var scripts = result.content.match(/<script[^>]*>([\s\S]*?)<\/script>/gi) || [];
-
-  for (var si = 0; si < scripts.length; si++) {
-    var s = scripts[si];
-    if (s.indexOf('"username"') < 0) continue;
-
-    // Extract owner blocks: look for objects containing both "username" and "edge_followed_by"
-    // Pattern: "username":"X" ... "edge_followed_by":{"count":N}
-    // We find username positions and then look for nearby follower counts
-    var userRe = /"username":"([^"]+)"/g;
-    var um;
-    while ((um = userRe.exec(s)) !== null) {
-      var un = um[1];
-      if (!isValidIG(un) || seen.has(un.toLowerCase())) continue;
-
-      // Look for edge_followed_by count NEAR this username (within 2000 chars after)
-      var afterUser = s.substring(um.index, um.index + 2000);
-      var fMatch = afterUser.match(/"edge_followed_by"\s*:\s*\{\s*"count"\s*:\s*(\d+)/);
-      var followers = fMatch ? parseInt(fMatch[1]) : 0;
-
-      // Also try to extract full_name, profile_pic_url, biography, is_verified, category_name
-      var fullName = (afterUser.match(/"full_name"\s*:\s*"([^"]*)"/) || [])[1] || '';
-      var avatar = (afterUser.match(/"profile_pic_url"\s*:\s*"([^"]+)"/) || [])[1] || '';
-      var bio = (afterUser.match(/"biography"\s*:\s*"((?:[^"\\]|\\.)*)"/) || [])[1] || '';
-      if (bio) bio = bio.replace(/\\n/g, '\n').replace(/\\'/g, "'").replace(/\\"/g, '"');
-      var verified = afterUser.indexOf('"is_verified":true') >= 0;
-      var category = (afterUser.match(/"category_name"\s*:\s*"([^"]+)"/) || [])[1] || '';
-      // Edge count for posts
-      var postMatch = afterUser.match(/"edge_owner_to_timeline_media"\s*:\s*\{\s*"count"\s*:\s*(\d+)/);
-      var posts = postMatch ? parseInt(postMatch[1]) : 0;
-
-      seen.add(un.toLowerCase());
-      found.push({ username: un, followers, fullName, avatar, bio, verified, category, postsCount: posts });
-    }
-    if (found.length >= 80) break;
+  var re = new RegExp(urlPattern.source, urlPattern.flags);
+  while ((m = re.exec(result.content)) !== null) {
+    if (found.indexOf(m[1]) < 0) found.push(m[1]);
   }
   return found;
-}
-
-/* ===== FACEBOOK: DuckDuckGo search for FB pages ===== */
-
-async function searchFBViaDDG(query: string): Promise<string[]> {
-  var ddgUrl = 'https://html.duckduckgo.com/html/?q=' +
-    encodeURIComponent(query) + '&num=50';
-  var result = await saFetch(ddgUrl, 10000);
-  if (!result || !result.content) return [];
-  var pages: string[] = [];
-  var re1 = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})/g;
-  var m;
-  while ((m = re1.exec(result.content)) !== null) {
-    if (isValidFB(m[1]) && pages.indexOf(m[1]) < 0) pages.push(m[1]);
-  }
-  return pages;
 }
 
 /* ===== ENRICH TT profile ===== */
@@ -245,7 +176,7 @@ async function enrichTTProfile(username: string): Promise<any> {
   return { nickname, signature, followers, following, videoCount, avatar, verified };
 }
 
-/* ===== ENRICH IG profile (only for profiles without data from hashtag) ===== */
+/* ===== ENRICH IG profile ===== */
 
 async function enrichIGProfile(username: string): Promise<any> {
   var result = await saFetch('https://www.instagram.com/' + username + '/', 8000);
@@ -314,7 +245,6 @@ async function enrichFBPage(name: string): Promise<any> {
   var result = await saFetch('https://www.facebook.com/' + encodeURIComponent(name) + '/', 8000);
   if (!result || !result.content) return null;
   var c = result.content;
-
   var fullName = '', followers = 0, bio = '', category = '', avatar = '', verified = false;
 
   var titleMatch = c.match(/<title>([^|<]+?)(?:\s*\|\s*Facebook)?<\/title>/i);
@@ -368,19 +298,29 @@ function getTTQueries(): string[] {
   return q;
 }
 
-function getIGHashtags(): string[] {
-  var tags = [
-    'angola', 'angolainfluencer', 'luanda', 'angolamoda',
-    'angolafitness', 'kizombaangola', 'angolacreator',
-    'luandainfluencer', 'angoladance', 'benguela',
-    'angolamusic', 'angolafood', 'cabindaangola',
-    'angolafashion', 'angolaentrepreneur'
+function getIGQueries(): string[] {
+  var q = [
+    'angola influencer instagram site:instagram.com',
+    'angolano instagram creator site:instagram.com',
+    'luanda instagram influencer site:instagram.com',
+    'angola instagram kizomba site:instagram.com',
+    'angola instagram lifestyle site:instagram.com',
+    'angola instagram musica site:instagram.com',
+    'angola instagram moda site:instagram.com',
+    'angola instagram fitness site:instagram.com',
+    'angola instagram comedia site:instagram.com',
+    'benguela instagram site:instagram.com',
+    'angola instagram dance site:instagram.com',
+    'cabinda instagram site:instagram.com',
+    'luanda instagram moda site:instagram.com',
+    'angola instagram entrepreneur site:instagram.com',
+    'angola instagram food site:instagram.com'
   ];
-  for (var i = tags.length - 1; i > 0; i--) {
+  for (var i = q.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
-    var t = tags[i]; tags[i] = tags[j]; tags[j] = t;
+    var t = q[i]; q[i] = q[j]; q[j] = t;
   }
-  return tags;
+  return q;
 }
 
 function getFBQueries(): string[] {
@@ -407,7 +347,7 @@ function getFBQueries(): string[] {
   return q;
 }
 
-/* ===== TIME CHECK HELPER ===== */
+/* ===== TIME CHECK ===== */
 
 function timeLeft(t0: number, limitMs: number): boolean {
   return Date.now() - t0 < limitMs;
@@ -429,22 +369,27 @@ export async function POST(request: any) {
   var doIG = platform === 'all' || platform === 'instagram';
   var doFB = platform === 'all' || platform === 'facebook';
 
-  logs.push('Platform:' + platform + ' TT:' + doTT + ' IG:' + doIG + ' FB:' + doFB);
+  logs.push('Platform:' + platform + ' TT:' + doTT + ' IG:' + doIG + ' FB:' + doFB + ' target:' + target + ' minF:' + minF);
 
   var ttRaw: any[] = [], ttSeen = new Set<string>();
   var igRaw: any[] = [], igSeen = new Set<string>();
   var fbRaw: any[] = [], fbSeen = new Set<string>();
 
   // =============================================
-  // PHASE 1: DISCOVERY — TT (0-12s)
+  // PHASE 1: DISCOVERY — ALL platforms via DDG (0-35s)
+  // DDG is proven reliable for TT, now used for IG too
+  // TT: 0-12s, IG: 12-24s, FB: 24-35s
   // =============================================
+
+  // --- TikTok Discovery (0-12s) ---
   if (doTT) {
     var ttQ = getTTQueries();
+    var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
     for (var qi = 0; qi < ttQ.length && timeLeft(t0, 12000); qi++) {
-      var ttUsers = await searchTTViaDDG(ttQ[qi]);
+      var ttUsers = await searchDDG(ttQ[qi], ttUrlRe, 10000);
       for (var ti = 0; ti < ttUsers.length; ti++) {
         var un = ttUsers[ti];
-        if (!ttSeen.has(un.toLowerCase())) {
+        if (isValidTT(un) && !ttSeen.has(un.toLowerCase())) {
           ttSeen.add(un.toLowerCase());
           ttRaw.push({
             platform: 'tiktok', username: un, fullName: '',
@@ -455,49 +400,40 @@ export async function POST(request: any) {
         }
       }
     }
-    logs.push('TT discovered: ' + ttRaw.length);
+    logs.push('TT DDG: ' + ttRaw.length + ' users');
   }
 
-  // =============================================
-  // PHASE 2: DISCOVERY — IG (12-28s) — gets followers FREE from page data!
-  // =============================================
+  // --- Instagram Discovery via DDG (12-24s) ---
   if (doIG) {
-    var igTags = getIGHashtags();
-    for (var hi = 0; hi < igTags.length && timeLeft(t0, 28000); hi++) {
-      var igDiscovered = await searchIGViaHashtag(igTags[hi]);
-      for (var ii = 0; ii < igDiscovered.length; ii++) {
-        var igD = igDiscovered[ii];
-        if (!igSeen.has(igD.username.toLowerCase())) {
-          igSeen.add(igD.username.toLowerCase());
+    var igQ = getIGQueries();
+    var igUrlRe = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'])/g;
+    for (var iqi = 0; iqi < igQ.length && timeLeft(t0, 24000); iqi++) {
+      var igUsers = await searchDDG(igQ[iqi], igUrlRe, 10000);
+      for (var ii = 0; ii < igUsers.length; ii++) {
+        var igUn = igUsers[ii];
+        if (isValidIG(igUn) && !igSeen.has(igUn.toLowerCase())) {
+          igSeen.add(igUn.toLowerCase());
           igRaw.push({
-            platform: 'instagram', username: igD.username,
-            fullName: igD.fullName || '',
-            followers: igD.followers || 0,
-            following: 0,
-            postsCount: igD.postsCount || 0,
-            bio: igD.bio || '',
-            profileUrl: 'https://instagram.com/' + igD.username,
-            avatarUrl: igD.avatar || '',
-            isVerified: igD.verified || false,
-            category: igD.category || '',
-            _isAngola: true
+            platform: 'instagram', username: igUn, fullName: '',
+            followers: 0, following: 0, postsCount: 0, bio: '',
+            profileUrl: 'https://instagram.com/' + igUn, avatarUrl: '',
+            isVerified: false, category: '', _isAngola: true
           });
         }
       }
     }
-    logs.push('IG discovered: ' + igRaw.length + ' (with followers)');
+    logs.push('IG DDG: ' + igRaw.length + ' users');
   }
 
-  // =============================================
-  // PHASE 3: DISCOVERY — FB (28-38s)
-  // =============================================
+  // --- Facebook Discovery via DDG (24-35s) ---
   if (doFB) {
     var fbQ = getFBQueries();
-    for (var fqi = 0; fqi < fbQ.length && timeLeft(t0, 38000); fqi++) {
-      var fbPages = await searchFBViaDDG(fbQ[fqi]);
+    var fbUrlRe = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})/g;
+    for (var fqi = 0; fqi < fbQ.length && timeLeft(t0, 35000); fqi++) {
+      var fbPages = await searchDDG(fbQ[fqi], fbUrlRe, 10000);
       for (var fpi = 0; fpi < fbPages.length; fpi++) {
         var fp = fbPages[fpi];
-        if (!fbSeen.has(fp.toLowerCase())) {
+        if (isValidFB(fp) && !fbSeen.has(fp.toLowerCase())) {
           fbSeen.add(fp.toLowerCase());
           fbRaw.push({
             platform: 'facebook', username: fp, fullName: '',
@@ -508,11 +444,11 @@ export async function POST(request: any) {
         }
       }
     }
-    logs.push('FB discovered: ' + fbRaw.length);
+    logs.push('FB DDG: ' + fbRaw.length + ' pages');
   }
 
   // =============================================
-  // PHASE 4: Cross-extract from bios (instant)
+  // PHASE 2: Cross-extract from bios (instant)
   // =============================================
   for (var cei = 0; cei < ttRaw.length; cei++) {
     var igFromTT = extractIGFromBio(ttRaw[cei].bio || '');
@@ -553,18 +489,18 @@ export async function POST(request: any) {
       });
     }
   }
+  logs.push('After cross: TT=' + ttRaw.length + ' IG=' + igRaw.length + ' FB=' + fbRaw.length);
 
   // =============================================
-  // PHASE 5: Enrichment (38-55s) — only for profiles WITHOUT data
-  // TT and FB need individual page visits. IG already has data from hashtags.
+  // PHASE 3: Enrichment (35-55s)
+  // Interleave TT, IG, FB — enrich profiles with 0 followers
   // =============================================
   var ttEnriched = 0, igEnriched = 0, fbEnriched = 0;
   var ttIdx = 0, igIdx = 0, fbIdx = 0;
 
   while (timeLeft(t0, 55000)) {
-    var enriched = false;
+    var didEnrich = false;
 
-    // Enrich 1 TT profile (no data yet)
     if (doTT && ttIdx < ttRaw.length && ttRaw[ttIdx].followers === 0) {
       var en = await enrichTTProfile(ttRaw[ttIdx].username);
       if (en) {
@@ -576,13 +512,16 @@ export async function POST(request: any) {
         ttRaw[ttIdx].bio = en.signature || '';
         ttRaw[ttIdx].avatarUrl = en.avatar || '';
         ttRaw[ttIdx].isVerified = en.verified || false;
+        if (isAngola(en.signature || '')) ttRaw[ttIdx]._isAngola = true;
+        if (isAngola(en.nickname || '')) ttRaw[ttIdx]._isAngola = true;
       }
       ttIdx++;
-      enriched = true;
+      didEnrich = true;
     }
 
-    // Enrich 1 IG profile (only those without data from hashtags)
-    if (doIG && igIdx < igRaw.length && igRaw[igIdx].followers === 0 && timeLeft(t0, 55000)) {
+    if (!timeLeft(t0, 55000)) break;
+
+    if (doIG && igIdx < igRaw.length && igRaw[igIdx].followers === 0) {
       var igData = await enrichIGProfile(igRaw[igIdx].username);
       if (igData) {
         igEnriched++;
@@ -594,13 +533,16 @@ export async function POST(request: any) {
         igRaw[igIdx].avatarUrl = igData.avatar || '';
         igRaw[igIdx].isVerified = igData.verified || false;
         igRaw[igIdx].category = igData.category || '';
+        if (isAngola(igData.bio || '')) igRaw[igIdx]._isAngola = true;
+        if (isAngola(igData.fullName || '')) igRaw[igIdx]._isAngola = true;
       }
       igIdx++;
-      enriched = true;
+      didEnrich = true;
     }
 
-    // Enrich 1 FB profile
-    if (doFB && fbIdx < fbRaw.length && fbRaw[fbIdx].followers === 0 && timeLeft(t0, 55000)) {
+    if (!timeLeft(t0, 55000)) break;
+
+    if (doFB && fbIdx < fbRaw.length && fbRaw[fbIdx].followers === 0) {
       var fbData = await enrichFBPage(fbRaw[fbIdx].username);
       if (fbData) {
         fbEnriched++;
@@ -610,21 +552,24 @@ export async function POST(request: any) {
         fbRaw[fbIdx].category = fbData.category || '';
         fbRaw[fbIdx].avatarUrl = fbData.avatar || '';
         fbRaw[fbIdx].isVerified = fbData.verified || false;
+        if (isAngola(fbData.fullName || '')) fbRaw[fbIdx]._isAngola = true;
+        if (isAngola(fbData.bio || '')) fbRaw[fbIdx]._isAngola = true;
       }
       fbIdx++;
-      enriched = true;
+      didEnrich = true;
     }
 
-    if (!enriched) break;
+    if (!didEnrich) break;
   }
 
   logs.push('Enriched TT:' + ttEnriched + ' IG:' + igEnriched + ' FB:' + fbEnriched);
 
   // =============================================
-  // PHASE 6: Filter
-  // Profiles with 0 followers are KEPT (we don't know their count yet)
-  // Profiles with confirmed < minF are excluded
-  // Profiles with confirmed > maxF are excluded
+  // PHASE 4: Filter
+  // - Skip bots and businesses
+  // - Skip profiles with confirmed followers < minF
+  // - Skip profiles with confirmed followers > maxF
+  // - KEEP profiles with 0 followers (not yet enriched — we just don't know)
   // =============================================
   var ttQual: any[] = [], igQual: any[] = [], fbQual: any[] = [];
 
@@ -643,10 +588,10 @@ export async function POST(request: any) {
     for (var igfi = 0; igfi < igRaw.length; igfi++) {
       var ip = igRaw[igfi];
       if (!ip.username || isBot(ip) || isBiz(ip)) continue;
+      if (!ip._isAngola && !isAngola(ip.bio) && !isAngola(ip.fullName) && !isAngola(ip.username)) continue;
       var igF = ip.followers || 0;
       if (igF > maxF) continue;
       if (igF > 0 && igF < minF) continue;
-      if (!ip._isAngola && !isAngola(ip.bio) && !isAngola(ip.fullName) && !isAngola(ip.username)) continue;
       igQual.push(makeProfile(ip, loc));
     }
   }
@@ -654,35 +599,35 @@ export async function POST(request: any) {
     for (var ffi = 0; ffi < fbRaw.length; ffi++) {
       var ffp = fbRaw[ffi];
       if (!ffp.username || isBot(ffp) || isBiz(ffp)) continue;
+      if (!ffp._isAngola && !isAngola(ffp.bio) && !isAngola(ffp.fullName)) continue;
       var fff = ffp.followers || 0;
       if (fff > maxF) continue;
       if (fff > 0 && fff < minF) continue;
-      if (!ffp._isAngola && !isAngola(ffp.bio) && !isAngola(ffp.fullName)) continue;
       fbQual.push(makeProfile(ffp, loc));
     }
   }
   logs.push('Filtered TT:' + ttQual.length + ' IG:' + igQual.length + ' FB:' + fbQual.length);
 
   // =============================================
-  // PHASE 7: Sort — enriched first (by followers desc), then unenriched
+  // PHASE 5: Sort — enriched (with followers) first, unenriched last
   // =============================================
-  function sortByFollowers(a: any, b: any) { return (b.followers || 0) - (a.followers || 0); }
-  ttQual.sort(sortByFollowers);
-  igQual.sort(sortByFollowers);
-  fbQual.sort(sortByFollowers);
+  function sortByData(a: any, b: any) { return (b.followers || 0) - (a.followers || 0); }
+  ttQual.sort(sortByData);
+  igQual.sort(sortByData);
+  fbQual.sort(sortByData);
 
   // =============================================
-  // PHASE 8: Interleave — always reach exactly `target`
+  // PHASE 6: Interleave — MUST reach exactly `target`
   // =============================================
   var qualified: any[] = [];
-  var ttI = 0, igI = 0, fbI = 0;
+  var tI = 0, iI = 0, fI = 0;
   while (qualified.length < target) {
     var added = false;
-    if (doTT && ttI < ttQual.length) { qualified.push(ttQual[ttI]); ttI++; added = true; }
+    if (doTT && tI < ttQual.length) { qualified.push(ttQual[tI]); tI++; added = true; }
     if (qualified.length >= target) break;
-    if (doIG && igI < igQual.length) { qualified.push(igQual[igI]); igI++; added = true; }
+    if (doIG && iI < igQual.length) { qualified.push(igQual[iI]); iI++; added = true; }
     if (qualified.length >= target) break;
-    if (doFB && fbI < fbQual.length) { qualified.push(fbQual[fbI]); fbI++; added = true; }
+    if (doFB && fI < fbQual.length) { qualified.push(fbQual[fI]); fI++; added = true; }
     if (!added) break;
   }
 
@@ -693,7 +638,7 @@ export async function POST(request: any) {
 
   var message = '';
   if (finalProfiles.length === 0) {
-    message = '0 perfis. ' + logs.join(' | ');
+    message = '0 perfis encontrados. Tenta diminuir o minimo de seguidores. ' + logs.join(' | ');
   } else {
     message = ttQual.length + ' TT + ' + igQual.length + ' IG + ' + fbQual.length + ' = ' + finalProfiles.length + ' perfis em ' + elapsed + 's';
   }
