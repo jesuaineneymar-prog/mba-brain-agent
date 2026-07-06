@@ -148,7 +148,7 @@ function extractFBFromBio(bio) {
 /* ===== FETCH WITH TIMEOUT ===== */
 
 function fetchW(url, opts, timeout) {
-  if (!timeout) timeout = 8000;
+  if (!timeout) timeout = 3000;
   var ac = new AbortController();
   var tid = setTimeout(function() { ac.abort(); }, timeout);
   return fetch(url, { ...opts, signal: ac.signal }).then(function(res) {
@@ -173,7 +173,7 @@ function fetchTikTokSearch(query) {
         'x-rapidapi-host': TT_HOST
       }
     },
-    5000
+    3000
   ).then(function(res) {
     if (!res || !res.ok) return null;
     return res.json().then(function(d) { return d; }).catch(function() { return null; });
@@ -206,7 +206,7 @@ function fetchIGSearchCookies(query, sessionid, csrftoken) {
         'X-IG-WWW-Claim': '0'
       }
     },
-    5000
+    3000
   ).then(function(res) {
     if (!res || !res.ok) return null;
     return res.json().then(function(d) { return d; }).catch(function() { return null; });
@@ -235,7 +235,7 @@ function fetchIGProfileCookies(username, sessionid, csrftoken) {
         'X-IG-WWW-Claim': '0'
       }
     },
-    5000
+    3000
   ).then(function(res) {
     if (!res || !res.ok) return null;
     return res.json().then(function(d) { return d; }).catch(function() { return null; });
@@ -251,7 +251,7 @@ function fetchFBSearch(query, token) {
     '&fields=id,name,fan_count,category,link,description' +
     '&limit=25&access_token=' + token,
     { headers: { 'Accept': 'application/json' } },
-    5000
+    3000
   ).then(function(res) {
     if (!res || !res.ok) return null;
     return res.json().then(function(d) { return d; }).catch(function() { return null; });
@@ -262,13 +262,10 @@ function fetchFBSearch(query, token) {
 
 function getTTQueries() {
   var queries = [
-    'angola lifestyle', 'angola influencer', 'angola creator',
+    'angola influencer', 'angola creator', 'angola lifestyle',
     'angola moda', 'angola fitness', 'angola musica',
-    'angola beauty', 'angola kizomba', 'angola dance',
-    'luanda influencer', 'luanda creator', 'luanda moda',
-    'angola comedia', 'angola vlog', 'angola digital creator',
-    'angola content creator', 'benguela lifestyle',
-    'angola afrobeat', 'angola motivacao', 'angola hip hop'
+    'angola kizomba', 'angola dance', 'angola comedia',
+    'luanda influencer'
   ];
   for (var i = queries.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
@@ -279,19 +276,15 @@ function getTTQueries() {
 
 function getIGFBQueries() {
   var base = [
-    'angola lifestyle', 'angola influencer', 'angola creator',
-    'angola moda', 'angola fitness', 'angola musica',
-    'angola beauty', 'angola kizomba', 'angola dance',
-    'angola vlog', 'angola comedia', 'angola hip hop',
-    'luanda influencer', 'luanda creator', 'luanda moda',
-    'angola content creator', 'angola digital creator',
-    'benguela lifestyle', 'cabinda influencer', 'angola makeup'
+    'angola influencer', 'angola creator', 'angola lifestyle',
+    'angola moda', 'angola kizomba', 'luanda influencer',
+    'angola fitness', 'angola musica'
   ];
   for (var i = base.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
     var tmp = base[i]; base[i] = base[j]; base[j] = tmp;
   }
-  return base.slice(0, 8);
+  return base;
 }
 
 function isAngolaQuery(q) {
