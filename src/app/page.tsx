@@ -661,9 +661,6 @@ function ProspectingTab() {
       const d = await res.json().catch(function() { return null; });
       if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); return; }
       setProspectMsg(d.message || '');
-      if (d.status === 'limit_exceeded') {
-        setProspectMsg('!! LIMITE MENSAL APIFY !! Cria nova conta gratis em apify.com e envia a nova API key.');
-      }
       if (d.profiles && d.profiles.length > 0) {
         setResults(d.profiles);
         var saved = getProfiles();
