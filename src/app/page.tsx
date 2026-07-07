@@ -735,13 +735,74 @@ function MessagesTab() {
   const [selProfile, setSelProfile] = useState('');
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
-  const [vpsStatus, setVpsStatus] = useState<any>({ online: false, platforms: null, loading: true });
+  const [blStatus, setBlStatus] = useState<any>({ online: false, loading: true });
+
+  // Login state
+  const [loginPlatform, setLoginPlatform] = useState('instagram');
+  const [loginUser, setLoginUser] = useState('');
+  const [loginPass, setLoginPass] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginResult, setLoginResult] = useState<any>(null);
+  const [loginStatus, setLoginStatus] = useState<Record<string,any>>({
+    instagram: { loggedIn: false, label: '' },
+    tiktok: { loggedIn: false, label: '' },
+    facebook: { loggedIn: false, label: '' }
+  });
 
   useEffect(function() {
     fetch('/api/send-message').then(function(r) { return r.json(); }).then(function(data) {
-      setVpsStatus({ online: !!data.vps && data.vps.online, platforms: data.vps && data.vps.platforms ? data.vps.platforms : null, loading: false });
-    }).catch(function() { setVpsStatus({ online: false, platforms: null, loading: false }); });
+      setBlStatus({ online: !!data.browserless && data.browserless.online, loading: false });
+    }).catch(function() { setBlStatus({ online: false, loading: false }); });
+    // Restore login status from localStorage
+    try {
+      var saved = storeGet('mba_login_status', '');
+      if (saved) { setLoginStatus(JSON.parse(saved)); }
+    } catch(e) {}
   }, []);
+
+  const saveLoginStatus = function(status: any) {
+    setLoginStatus(status);
+    storeSet('mba_login_status', JSON.stringify(status));
+  };
+
+  const doLogin = async function() {
+    if (!loginUser.trim() || !loginPass.trim()) { setLoginResult({ error: 'Preenche username e password' }); return; }
+    setLoginLoading(true);
+    setLoginResult(null);
+    try {
+      var res = await fetch('/api/send-message', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'login', platform: loginPlatform, username: loginUser, password: loginPass })
+      });
+      var data = await res.json();
+      setLoginResult(data);
+      if (data.success) {
+        // Save cookies to localStorage
+        storeSet('mba_cookies_' + loginPlatform, data.cookiesJson || '');
+        storeSet('mba_session_' + loginPlatform, data.sessionid || '');
+        storeSet('mba_csrf_' + loginPlatform, data.csrftoken || '');
+        // Update login status
+        var newStatus = { ...loginStatus };
+        newStatus[loginPlatform] = { loggedIn: true, label: data.message || 'Logado' };
+        saveLoginStatus(newStatus);
+        setLoginUser('');
+        setLoginPass('');
+      }
+    } catch(e) {
+      setLoginResult({ error: 'Erro de conexao: ' + (e as any).message });
+    }
+    setLoginLoading(false);
+  };
+
+  const logoutPlatform = function(platform: string) {
+    storeSet('mba_cookies_' + platform, '');
+    storeSet('mba_session_' + platform, '');
+    storeSet('mba_csrf_' + platform, '');
+    var newStatus = { ...loginStatus };
+    newStatus[platform] = { loggedIn: false, label: '' };
+    saveLoginStatus(newStatus);
+  };
 
   const loadMessages = function() {
     var allProfiles = getProfiles();
@@ -768,7 +829,12 @@ function MessagesTab() {
       var targetProfile = null;
       for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
       if (!targetProfile) { setSending(false); return; }
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) }).catch(function() { return null; });
+      var pf = targetProfile.platform || 'instagram';
+      // Get stored cookies for this platform
+      var cookies = storeGet('mba_cookies_' + pf, '');
+      var sessionid = storeGet('mba_session_' + pf, '');
+      var csrftoken = storeGet('mba_csrf_' + pf, '');
+      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: pf, sentToday: 0, cookies: cookies || undefined, sessionid: sessionid || undefined, csrftoken: csrftoken || undefined }) }).catch(function() { return null; });
       var sd = null;
       if (sr) { sd = await sr.json().catch(function() { return null; }); }
       if (!targetProfile.messages) targetProfile.messages = [];
@@ -783,25 +849,96 @@ function MessagesTab() {
 
   var filtered = messages.filter(function(m) { return subtab === 'all' || m.direction === subtab; });
   var profiles = getProfiles();
+  var platformIcons: Record<string,string> = { instagram: '📸', tiktok: '🎵', facebook: '👤' };
+  var platformNames: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      <div style={{ display:'flex', gap:6, marginBottom:14 }}>
-        {[['all','Todas'],['outbound','Enviadas'],['inbound','Recebidas']].map(function(item) {
-          var k = item[0]; var l = item[1];
-          return <button key={k} onClick={function() { setSubtab(k); }} style={{ padding:'6px 14px', borderRadius:4, border:'1px solid '+(subtab===k?P.red:P.border), background:subtab===k?P.redDim:'transparent', color:subtab===k?P.redB:P.textSec, fontSize:11, cursor:'pointer', fontWeight:600 }}>{l} ({k==='all'?filtered.length:messages.filter(function(m) { return m.direction===k; }).length})</button>;
-        })}
-      </div>
-      <div style={{ padding:'10px 14px', borderRadius:8, border:'1px solid '+(vpsStatus.online ? 'rgba(0,192,99,0.3)' : 'rgba(255,68,68,0.3)'), background: vpsStatus.online ? 'rgba(0,192,99,0.06)' : 'rgba(255,68,68,0.06)', marginBottom:14, display:'flex', alignItems:'center', gap:10 }}>
-        <div style={{ width:8, height:8, borderRadius:'50%', background: vpsStatus.loading ? '#888' : vpsStatus.online ? P.green : '#ff4444', flexShrink:0 }} />
-        <div>
-          <div style={{ fontSize:11, fontWeight:700, color: vpsStatus.online ? P.green : '#ff4444' }}>{vpsStatus.loading ? 'Verificando VPS...' : vpsStatus.online ? 'VPS Online - DMs activos' : 'VPS Offline - DMs nao funcionam'}</div>
-          {vpsStatus.online && vpsStatus.platforms && <div style={{ fontSize:10, color:P.textSec, marginTop:2 }}>
-            IG: {vpsStatus.platforms.instagram && vpsStatus.platforms.instagram.loggedIn ? '✓ Logado' : '✗ Nao logado'} | TT: {vpsStatus.platforms.tiktok && vpsStatus.platforms.tiktok.loggedIn ? '✓ Logado' : '✗ Nao logado'} | FB: {vpsStatus.platforms.facebook && vpsStatus.platforms.facebook.loggedIn ? '✓ Logado' : '✗ Nao logado'}
-          </div>}
-          {!vpsStatus.online && <div style={{ fontSize:10, color:P.textDim, marginTop:2 }}>Configura o VPS para enviar DMs reais</div>}
+      {/* Status bar */}
+      <div style={{ padding:'10px 14px', borderRadius:8, border:'1px solid '+(blStatus.online ? 'rgba(0,192,99,0.3)' : 'rgba(255,68,68,0.3)'), background: blStatus.online ? 'rgba(0,192,99,0.06)' : 'rgba(255,68,68,0.06)', marginBottom:14 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+          <div style={{ width:8, height:8, borderRadius:'50%', background: blStatus.loading ? '#888' : blStatus.online ? P.green : '#ff4444', flexShrink:0 }} />
+          <div style={{ fontSize:11, fontWeight:700, color: blStatus.online ? P.green : '#ff4444' }}>
+            {blStatus.loading ? 'Verificando Browserless...' : blStatus.online ? 'Browserless Online - DMs activos' : 'Browserless Offline'}
+          </div>
         </div>
+        <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
+          {['instagram','tiktok','facebook'].map(function(pf) {
+            var st = loginStatus[pf] || { loggedIn: false };
+            return <div key={pf} style={{ display:'flex', alignItems:'center', gap:5, fontSize:10, color: st.loggedIn ? P.green : P.textDim }}>
+              <span>{platformIcons[pf]} {platformNames[pf]}:</span>
+              <span style={{ fontWeight:700, color: st.loggedIn ? P.green : '#ff4444' }}>{st.loggedIn ? '✓ Logado' : '✗ Nao logado'}</span>
+            </div>;
+          })}
+        </div>
+        {blStatus.online && <div style={{ fontSize:9, color:P.textDim, marginTop:6 }}>Navegador na nuvem via Browserless.io (grátis, sem VPS, sem cartão)</div>}
       </div>
+
+      {/* Login Section */}
+      <Panel style={{ marginBottom:14 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
+          <STitle>Login das Plataformas</STitle>
+          <div style={{ fontSize:9, color:P.textDim }}>Os cookies ficam guardados no teu navegador</div>
+        </div>
+
+        <div style={{ display:'flex', gap:6, marginBottom:12 }}>
+          {['instagram','tiktok','facebook'].map(function(pf) {
+            var st = loginStatus[pf] || { loggedIn: false };
+            var isActive = loginPlatform === pf;
+            return (
+              <button key={pf} onClick={function() { setLoginPlatform(pf); }} style={{
+                padding:'6px 12px', borderRadius:4, border:'1px solid '+(isActive?P.red:P.border),
+                background:isActive?P.redDim:'transparent', color:isActive?P.redB:P.textSec,
+                fontSize:10, cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', gap:4
+              }}>
+                {platformIcons[pf]} {platformNames[pf]}
+                {st.loggedIn && <span style={{ color:P.green, fontSize:9 }}>✓</span>}
+                {st.loggedIn && <span onClick={function(e) { e.stopPropagation(); logoutPlatform(pf); }} style={{ color:'#ff4444', fontSize:10, marginLeft:2, cursor:'pointer' }}>×</span>}
+              </button>
+            );
+          })}
+        </div>
+
+        {(loginStatus[loginPlatform] || {}).loggedIn ? (
+          <div style={{ padding:12, borderRadius:6, background:'rgba(0,192,99,0.08)', border:'1px solid rgba(0,192,99,0.2)', fontSize:11, color:P.green }}>
+            ✓ {platformNames[loginPlatform]} esta logado. Os DMs serao enviados com a tua sessao.
+            <button onClick={function() { logoutPlatform(loginPlatform); }} style={{ marginLeft:12, padding:'4px 10px', borderRadius:4, border:'1px solid #ff4444', background:'transparent', color:'#ff4444', fontSize:10, cursor:'pointer' }}>Terminar sessao</button>
+          </div>
+        ) : (
+          <div>
+            <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+              <div style={{ flex:1 }}>
+                <Lbl style={{ fontSize:10 }}>Username / Email</Lbl>
+                <input value={loginUser} onChange={function(e) { setLoginUser(e.target.value); }} placeholder={"Utilizador do " + platformNames[loginPlatform]} style={INP} />
+              </div>
+              <div style={{ flex:1 }}>
+                <Lbl style={{ fontSize:10 }}>Password</Lbl>
+                <input type="password" value={loginPass} onChange={function(e) { setLoginPass(e.target.value); }} placeholder="Password" style={INP} onKeyDown={function(e) { if ((e as any).key === 'Enter') doLogin(); }} />
+              </div>
+            </div>
+            <Btn onClick={doLogin} disabled={loginLoading || !loginUser.trim() || !loginPass.trim()} style={{ width:'100%' }}>
+              {loginLoading ? 'A fazer login...' : '🔑 Fazer login no ' + platformNames[loginPlatform]}
+            </Btn>
+            <div style={{ fontSize:9, color:P.textDim, marginTop:8, lineHeight:'16px' }}>
+              O login abre um navegador na nuvem (Browserless.io) que entra na tua conta automaticamente.
+              Os cookies ficam guardados no teu navegador para enviar DMs sem precisares de login novamente.
+            </div>
+          </div>
+        )}
+
+        {loginResult && !loginResult.success && (
+          <div style={{ marginTop:8, padding:10, borderRadius:6, background:'rgba(255,68,68,0.08)', border:'1px solid rgba(255,68,68,0.2)', fontSize:10, color:'#ff6b6b' }}>
+            ✗ {loginResult.error || 'Login falhou'}
+          </div>
+        )}
+        {loginResult && loginResult.success && (
+          <div style={{ marginTop:8, padding:10, borderRadius:6, background:'rgba(0,192,99,0.08)', border:'1px solid rgba(0,192,99,0.2)', fontSize:10, color:P.green }}>
+            ✓ {loginResult.message || 'Login realizado!'}
+          </div>
+        )}
+      </Panel>
+
+      {/* Send DM Section */}
       <Panel style={{ marginBottom:14 }}>
         <STitle>Enviar Mensagem</STitle>
         <div style={{ marginBottom:10 }}>
