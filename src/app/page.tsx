@@ -735,6 +735,13 @@ function MessagesTab() {
   const [selProfile, setSelProfile] = useState('');
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
+  const [vpsStatus, setVpsStatus] = useState<any>({ online: false, platforms: null, loading: true });
+
+  useEffect(function() {
+    fetch('/api/send-message').then(function(r) { return r.json(); }).then(function(data) {
+      setVpsStatus({ online: !!data.vps && data.vps.online, platforms: data.vps && data.vps.platforms ? data.vps.platforms : null, loading: false });
+    }).catch(function() { setVpsStatus({ online: false, platforms: null, loading: false }); });
+  }, []);
 
   const loadMessages = function() {
     var allProfiles = getProfiles();
@@ -784,6 +791,16 @@ function MessagesTab() {
           var k = item[0]; var l = item[1];
           return <button key={k} onClick={function() { setSubtab(k); }} style={{ padding:'6px 14px', borderRadius:4, border:'1px solid '+(subtab===k?P.red:P.border), background:subtab===k?P.redDim:'transparent', color:subtab===k?P.redB:P.textSec, fontSize:11, cursor:'pointer', fontWeight:600 }}>{l} ({k==='all'?filtered.length:messages.filter(function(m) { return m.direction===k; }).length})</button>;
         })}
+      </div>
+      <div style={{ padding:'10px 14px', borderRadius:8, border:'1px solid '+(vpsStatus.online ? 'rgba(0,192,99,0.3)' : 'rgba(255,68,68,0.3)'), background: vpsStatus.online ? 'rgba(0,192,99,0.06)' : 'rgba(255,68,68,0.06)', marginBottom:14, display:'flex', alignItems:'center', gap:10 }}>
+        <div style={{ width:8, height:8, borderRadius:'50%', background: vpsStatus.loading ? '#888' : vpsStatus.online ? P.green : '#ff4444', flexShrink:0 }} />
+        <div>
+          <div style={{ fontSize:11, fontWeight:700, color: vpsStatus.online ? P.green : '#ff4444' }}>{vpsStatus.loading ? 'Verificando VPS...' : vpsStatus.online ? 'VPS Online - DMs activos' : 'VPS Offline - DMs nao funcionam'}</div>
+          {vpsStatus.online && vpsStatus.platforms && <div style={{ fontSize:10, color:P.textSec, marginTop:2 }}>
+            IG: {vpsStatus.platforms.instagram && vpsStatus.platforms.instagram.loggedIn ? '✓ Logado' : '✗ Nao logado'} | TT: {vpsStatus.platforms.tiktok && vpsStatus.platforms.tiktok.loggedIn ? '✓ Logado' : '✗ Nao logado'} | FB: {vpsStatus.platforms.facebook && vpsStatus.platforms.facebook.loggedIn ? '✓ Logado' : '✗ Nao logado'}
+          </div>}
+          {!vpsStatus.online && <div style={{ fontSize:10, color:P.textDim, marginTop:2 }}>Configura o VPS para enviar DMs reais</div>}
+        </div>
       </div>
       <Panel style={{ marginBottom:14 }}>
         <STitle>Enviar Mensagem</STitle>

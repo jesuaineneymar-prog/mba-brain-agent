@@ -4,7 +4,11 @@ export var maxDuration = 30;
 
 var MAX_PER_DAY = 30;
 
-/* Default credentials from user */
+/* ===== VPS CONFIG ===== */
+var VPS_URL = 'http://SEU_VPS_IP:3456';  // <-- TROCA PELO IP REAL DO TEU VPS
+var VPS_KEY = 'mba-brain-2024-secret-key';
+
+/* ===== FALLBACK CREDENTIALS (usado so se VPS nao responder) ===== */
 var _igS1 = '22987806071%3AdZfcQqlpEVlzPb%3A17%3AAYh';
 var _igS2 = 'NXm-SkI1Lf16_mMpsfnCYGpcIkKJx0uGdlN6Hpg';
 var DEFAULT_IG_SESSION = _igS1 + _igS2;
@@ -21,22 +25,38 @@ var _m1 = ['EAAd4GmZBcHgoBR67cA1xirkz3e9xZCr1EssTZCUPj5',
   '33TUQZDZD'];
 var DEFAULT_FB_TOKEN = _m1.join('');
 
-function getCreds(platform, body) {
-  if (platform === 'instagram') {
-    var s = body.igSession || DEFAULT_IG_SESSION;
-    var c = body.igCsrf || DEFAULT_IG_CSRF;
-    return { sessionid: s, csrftoken: c };
+/* ===== ENVIAR VIA VPS (browser real) ===== */
+
+async function sendViaVPS(platform, username, message) {
+  var url = VPS_URL + '/send/' + platform;
+  try {
+    var ctrl = new AbortController();
+    var tid = setTimeout(function() { ctrl.abort(); }, 25000);
+
+    var res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-mba-key': VPS_KEY
+      },
+      body: JSON.stringify({ username: username, message: message }),
+      signal: ctrl.signal
+    });
+
+    clearTimeout(tid);
+
+    if (!res.ok) {
+      return { success: false, dmSent: false, deliveryMsg: 'VPS respondeu HTTP ' + res.status };
+    }
+
+    var data = await res.json();
+    return data;
+  } catch (e) {
+    return { success: false, dmSent: false, deliveryMsg: 'VPS inalcancavel: ' + (e.message || 'timeout') };
   }
-  if (platform === 'tiktok') {
-    var ts = body.ttSession || DEFAULT_TT_SESSION;
-    var tc = body.ttCsrf || DEFAULT_TT_CSRF;
-    return { sessionid: ts, csrftoken: tc };
-  }
-  if (platform === 'facebook') {
-    return { token: body.fbToken || DEFAULT_FB_TOKEN };
-  }
-  return null;
 }
+
+/* ===== FALLBACK: tentar directo (so se VPS falhar) ===== */
 
 function attemptInstagramDM(username, message, sessionid, csrftoken) {
   var dsUserId = sessionid.split('%3A')[0] || '';
@@ -159,6 +179,8 @@ function attemptTikTokDM(username, message, sessionid, csrftoken) {
   }).catch(function() { return 'erro de conexao com TikTok'; });
 }
 
+/* ===== MAIN HANDLER ===== */
+
 export async function POST(request) {
   var body = await request.json();
   var username = body.username || '';
@@ -176,59 +198,119 @@ export async function POST(request) {
     });
   }
 
-  var creds = getCreds(platform, body);
+  // === PRIORIDADE 1: Tentar via VPS (browser real) ===
+  var vpsResult = await sendViaVPS(platform, username, message);
+  if (vpsResult.success || vpsResult.dmSent) {
+    return NextResponse.json({
+      success: true, dmSent: true, platform: platform,
+      message: 'DM enviado para @' + username + ' via VPS',
+      deliveryMsg: vpsResult.deliveryMsg || 'DM enviado via VPS',
+      todaySent: sentToday + 1,
+      remainingToday: MAX_PER_DAY - sentToday - 1,
+      source: 'vps'
+    });
+  }
+
+  // === PRIORIDADE 2: Fallback directo (so funciona se cookies validos) ===
+  var creds = null;
+  if (platform === 'instagram') {
+    creds = { sessionid: body.igSession || DEFAULT_IG_SESSION, csrftoken: body.igCsrf || DEFAULT_IG_CSRF };
+  } else if (platform === 'tiktok') {
+    creds = { sessionid: body.ttSession || DEFAULT_TT_SESSION, csrftoken: body.ttCsrf || DEFAULT_TT_CSRF };
+  } else if (platform === 'facebook') {
+    creds = { token: body.fbToken || DEFAULT_FB_TOKEN };
+  }
+
+  var fallbackMsg = '';
 
   if (platform === 'instagram' && creds) {
-    var igResult = await attemptInstagramDM(
-      username, message, creds.sessionid, creds.csrftoken
-    ).catch(function() { return 'erro de conexao'; });
+    var igResult = await attemptInstagramDM(username, message, creds.sessionid, creds.csrftoken).catch(function() { return 'erro'; });
     var igSent = igResult.indexOf('sucesso') >= 0 || igResult.indexOf('enviado') >= 0;
-    return NextResponse.json({
-      success: igSent, dmSent: igSent, platform: platform,
-      message: igSent ? 'DM enviado para @' + username : 'DM FALHOU: ' + igResult,
-      deliveryMsg: igResult,
-      todaySent: sentToday + (igSent ? 1 : 0),
-      remainingToday: MAX_PER_DAY - sentToday - (igSent ? 1 : 0)
-    });
+    fallbackMsg = 'Fallback IG: ' + igResult;
+    if (igSent) {
+      return NextResponse.json({
+        success: true, dmSent: true, platform: platform,
+        message: 'DM enviado para @' + username,
+        deliveryMsg: igResult,
+        todaySent: sentToday + 1,
+        remainingToday: MAX_PER_DAY - sentToday - 1,
+        source: 'fallback'
+      });
+    }
   }
 
   if (platform === 'facebook' && creds) {
-    var fbResult = await attemptFacebookDM(
-      username, message, creds.token
-    ).catch(function() { return 'erro de conexao'; });
+    var fbResult = await attemptFacebookDM(username, message, creds.token).catch(function() { return 'erro'; });
     var fbSent = fbResult.indexOf('sucesso') >= 0 || fbResult.indexOf('enviado') >= 0;
-    return NextResponse.json({
-      success: fbSent, dmSent: fbSent, platform: platform,
-      message: fbSent ? 'DM enviado para ' + username : 'DM FALHOU: ' + fbResult,
-      deliveryMsg: fbResult,
-      todaySent: sentToday + (fbSent ? 1 : 0),
-      remainingToday: MAX_PER_DAY - sentToday - (fbSent ? 1 : 0)
-    });
+    fallbackMsg = 'Fallback FB: ' + fbResult;
+    if (fbSent) {
+      return NextResponse.json({
+        success: true, dmSent: true, platform: platform,
+        message: 'DM enviado para ' + username,
+        deliveryMsg: fbResult,
+        todaySent: sentToday + 1,
+        remainingToday: MAX_PER_DAY - sentToday - 1,
+        source: 'fallback'
+      });
+    }
   }
 
   if (platform === 'tiktok' && creds) {
-    var ttResult = await attemptTikTokDM(
-      username, message, creds.sessionid, creds.csrftoken
-    ).catch(function() { return 'erro de conexao'; });
+    var ttResult = await attemptTikTokDM(username, message, creds.sessionid, creds.csrftoken).catch(function() { return 'erro'; });
     var ttSent = ttResult.indexOf('sucesso') >= 0 || ttResult.indexOf('enviado') >= 0;
-    return NextResponse.json({
-      success: ttSent, dmSent: ttSent, platform: platform,
-      message: ttSent ? 'DM enviado para @' + username : 'DM FALHOU: ' + ttResult,
-      deliveryMsg: ttResult,
-      todaySent: sentToday + (ttSent ? 1 : 0),
-      remainingToday: MAX_PER_DAY - sentToday - (ttSent ? 1 : 0)
-    });
+    fallbackMsg = 'Fallback TT: ' + ttResult;
+    if (ttSent) {
+      return NextResponse.json({
+        success: true, dmSent: true, platform: platform,
+        message: 'DM enviado para @' + username,
+        deliveryMsg: ttResult,
+        todaySent: sentToday + 1,
+        remainingToday: MAX_PER_DAY - sentToday - 1,
+        source: 'fallback'
+      });
+    }
   }
 
+  // === NENHUM FUNCIONOU ===
   return NextResponse.json({
     success: false, dmSent: false, platform: platform,
-    message: 'Sem credenciais para ' + platform,
-    deliveryMsg: 'Credenciais nao configuradas',
+    message: 'DM NAO ENVIADO. VPS: ' + vpsResult.deliveryMsg + (fallbackMsg ? ' | ' + fallbackMsg : ''),
+    deliveryMsg: 'VPS inalcancavel. Configure o VPS primeiro. Erro: ' + vpsResult.deliveryMsg,
     todaySent: sentToday,
     remainingToday: MAX_PER_DAY - sentToday
   });
 }
 
 export async function GET() {
-  return NextResponse.json({ maxPerDay: MAX_PER_DAY, remainingToday: MAX_PER_DAY });
+  // Verificar se o VPS esta online
+  var vpsOnline = false;
+  var vpsStatus = null;
+  try {
+    var ctrl = new AbortController();
+    var tid = setTimeout(function() { ctrl.abort(); }, 5000);
+    var res = await fetch(VPS_URL + '/health', { signal: ctrl.signal });
+    clearTimeout(tid);
+    vpsOnline = res.ok;
+  } catch (e) { vpsOnline = false; }
+
+  // Se online, verificar status das plataformas
+  if (vpsOnline) {
+    try {
+      var ctrl2 = new AbortController();
+      var tid2 = setTimeout(function() { ctrl2.abort(); }, 8000);
+      var sres = await fetch(VPS_URL + '/status?key=' + VPS_KEY, { signal: ctrl2.signal });
+      clearTimeout(tid2);
+      if (sres.ok) vpsStatus = await sres.json();
+    } catch (e) { /* ignore */ }
+  }
+
+  return NextResponse.json({
+    maxPerDay: MAX_PER_DAY,
+    remainingToday: MAX_PER_DAY,
+    vps: {
+      online: vpsOnline,
+      url: VPS_URL,
+      platforms: vpsStatus ? vpsStatus.platforms : null
+    }
+  });
 }
