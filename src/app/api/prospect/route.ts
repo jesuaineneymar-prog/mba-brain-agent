@@ -5,32 +5,67 @@ export var maxDuration = 60;
 var SCRAPINGANT_KEY = '897af2903f4848fba1f603a46273d842';
 var SCRAPINGANT_BASE = 'https://api.scrapingant.com/v1/general';
 
-var LUSO_WORDS = [
+var ANGOLA_WORDS = [
   'angola', 'angolana', 'angolano', 'luanda', 'benguela',
   'huambo', 'lobito', 'cabinda', 'lubango', 'namibe',
   'malanje', 'sumbe', 'soyo', 'dundo', 'huila',
   'cuanza', 'zaire', 'cunene', 'moxico', 'lunda',
   'bie', '_ao', '_angola', '+244', 'angol',
   'luandense', 'benguelense', 'cabindense', 'huambiense',
+  'loanda', 'angolan'
+];
+
+var LUSO_WORDS = [
   'portugal', 'portuguesa', 'portugues', 'lisboa', 'porto',
   'brasil', 'brasileira', 'brasileiro', 'sao paulo', 'brasilia',
   'mozambique', 'moçambicana', 'moçambicano', 'maputo',
   'caboverde', 'cabo verde', 'cabo-verdiano', 'praia',
   'guine-bissau', 'guine bissau', 'bissau',
   'sao tome', 'sao tome e principe', 'timor', 'timor-leste',
-  'lusofono', 'lusofona', 'lusofono',
-  'portugues', 'fala portugues', 'pt-br', 'pt_pt',
-  'dili', 'beira', 'nampula', 'loanda',
-  'angolan', 'mozambican', 'cape verdean'
+  'lusofono', 'lusofona', 'fala portugues', 'pt-br', 'pt_pt',
+  'dili', 'beira', 'nampula', 'mozambican', 'cape verdean'
 ];
 
-function isLuso(text: string): boolean {
-  if (!text) return false;
-  var lower = text.toLowerCase();
-  for (var i = 0; i < LUSO_WORDS.length; i++) {
-    if (lower.indexOf(LUSO_WORDS[i]) >= 0) return true;
+var BLOCK_WORDS = [
+  'nigeria', 'nigerian', 'kenya', 'kenyan', 'ghana', 'ghanaian',
+  'south africa', 'south_africa', 'johannesburg', 'lagos', 'nairobi',
+  'accra', 'ethiopia', 'tanzania', 'uganda', 'cameroon', 'congo (drc)',
+  'kinshasa', 'abidjan', 'dakar', 'casablanca', 'cairo', 'pretoria',
+  'india', 'indian', 'pakistan', 'bangladesh', 'philippines', 'filipino',
+  'mexico', 'mexican', 'colombia', 'colombian', 'argentina', 'argentine',
+  'usa', 'american', 'united states', 'california', 'new york',
+  'london', 'uk ', 'united kingdom', 'dubai', 'paris', 'berlin',
+  'russia', 'russian', 'turkey', 'turkish', 'japan', 'japanese',
+  'china', 'chinese', 'korea', 'korean', 'thailand', 'thai',
+  'modeling agency', 'model agency', 'onlyfans', 'only fans',
+  'promo ', 'promoter', 'crypto trader', 'forex trader',
+  'giveaway', 'free money', 'earn money', 'click here'
+];
+
+function scoreProfile(p: any): number {
+  var score = 0;
+  var bio = (p.bio || '').toLowerCase();
+  var name = (p.fullName || '').toLowerCase();
+  var un = (p.username || '').toLowerCase();
+  var cat = (p.category || '').toLowerCase();
+  var all = bio + ' ' + name + ' ' + un + ' ' + cat;
+
+  // Bloquear perfis de paises claramente nao lusofonos
+  for (var bi = 0; bi < BLOCK_WORDS.length; bi++) {
+    if (all.indexOf(BLOCK_WORDS[bi]) >= 0) return -1;
   }
-  return false;
+
+  // Pontuacao Angola (prioridade maxima)
+  for (var ai = 0; ai < ANGOLA_WORDS.length; ai++) {
+    if (all.indexOf(ANGOLA_WORDS[ai]) >= 0) { score += 50; break; }
+  }
+
+  // Pontuacao outros lusofonos
+  for (var li = 0; li < LUSO_WORDS.length; li++) {
+    if (all.indexOf(LUSO_WORDS[li]) >= 0) { score += 30; break; }
+  }
+
+  return score;
 }
 
 function gid(): string {
@@ -410,7 +445,7 @@ export async function POST(request: any) {
             platform: 'tiktok', username: un, fullName: '',
             followers: 0, following: 0, postsCount: 0, bio: '',
             profileUrl: 'https://tiktok.com/@' + un, avatarUrl: '',
-            isVerified: false, category: ''
+            isVerified: false, category: '', _angolaQuery: true
           });
         }
       }
@@ -431,7 +466,7 @@ export async function POST(request: any) {
             platform: 'instagram', username: igUn, fullName: '',
             followers: 0, following: 0, postsCount: 0, bio: '',
             profileUrl: 'https://instagram.com/' + igUn, avatarUrl: '',
-            isVerified: false, category: ''
+            isVerified: false, category: '', _angolaQuery: true
           });
         }
       }
@@ -452,7 +487,7 @@ export async function POST(request: any) {
             platform: 'facebook', username: fp, fullName: '',
             followers: 0, following: 0, postsCount: 0, bio: '',
             profileUrl: 'https://facebook.com/' + fp, avatarUrl: '',
-            isVerified: false, category: ''
+            isVerified: false, category: '', _angolaQuery: true
           });
         }
       }
@@ -529,66 +564,102 @@ export async function POST(request: any) {
   logs.push('Enriched TT:' + ttEnriched + '/' + ttRaw.length + ' IG:' + igEnriched + '/' + igRaw.length + ' FB:' + fbEnriched + '/' + fbRaw.length);
 
   // =============================================
-  // PHASE 3: Filter — bots, businesses, e seguidores fora do range
+  // PHASE 3: Score + Filter
+  // Scoring: -1 = bloqueado, 0 = sem info, 30 = lusofono, 50 = angola, 80 = angola confirmado
+  // Perfis de queries angolanas com score 0 recebem +10 (provavel angolano)
   // =============================================
-  var ttQual: any[] = [], igQual: any[] = [], fbQual: any[] = [];
+  function scoreAndFilter(rawList: any[]): any[] {
+    var result: any[] = [];
+    for (var i = 0; i < rawList.length; i++) {
+      var p = rawList[i];
+      if (!p.username || isBot(p) || isBiz(p)) continue;
+      var s = scoreProfile(p);
+      if (s < 0) continue; // bloqueado
 
-  if (doTT) {
-    for (var tqi = 0; tqi < ttRaw.length; tqi++) {
-      var tp = ttRaw[tqi];
-      if (!tp.username || isBot(tp) || isBiz(tp)) continue;
-      if (!isLuso(tp.bio) && !isLuso(tp.fullName) && !isLuso(tp.username) && !isLuso(tp.category)) continue;
-      var tf = tp.followers || 0;
-      if (tf > maxF) continue;
-      if (tf > 0 && tf < minF) continue;
-      ttQual.push(makeProfile(tp, loc));
+      // Perfis encontrados via query angolana: bonus de confianca
+      if (p._angolaQuery && s === 0) s = 10; // provavel angolano (encontrado via search angola)
+
+      var f = p.followers || 0;
+      if (f > maxF) continue;
+      if (f > 0 && f < minF) continue;
+
+      var profile = makeProfile(p, loc);
+      profile._lusoScore = s;
+      result.push(profile);
     }
+    return result;
   }
-  if (doIG) {
-    for (var igfi = 0; igfi < igRaw.length; igfi++) {
-      var ip = igRaw[igfi];
-      if (!ip.username || isBot(ip) || isBiz(ip)) continue;
-      if (!isLuso(ip.bio) && !isLuso(ip.fullName) && !isLuso(ip.username) && !isLuso(ip.category)) continue;
-      var igF = ip.followers || 0;
-      if (igF > maxF) continue;
-      if (igF > 0 && igF < minF) continue;
-      igQual.push(makeProfile(ip, loc));
-    }
-  }
-  if (doFB) {
-    for (var ffi = 0; ffi < fbRaw.length; ffi++) {
-      var ffp = fbRaw[ffi];
-      if (!ffp.username || isBot(ffp) || isBiz(ffp)) continue;
-      if (!isLuso(ffp.bio) && !isLuso(ffp.fullName) && !isLuso(ffp.username) && !isLuso(ffp.category)) continue;
-      var fff = ffp.followers || 0;
-      if (fff > maxF) continue;
-      if (fff > 0 && fff < minF) continue;
-      fbQual.push(makeProfile(ffp, loc));
-    }
-  }
+
+  var ttQual = doTT ? scoreAndFilter(ttRaw) : [];
+  var igQual = doIG ? scoreAndFilter(igRaw) : [];
+  var fbQual = doFB ? scoreAndFilter(fbRaw) : [];
   logs.push('Filtered TT:' + ttQual.length + ' IG:' + igQual.length + ' FB:' + fbQual.length);
 
   // =============================================
-  // PHASE 4: Sort — enriched first, unenriched last
+  // PHASE 4: Sort — Angola primeiro, depois lusofonos, depois provaveis, por seguidores
   // =============================================
-  function sortByData(a: any, b: any) { return (b.followers || 0) - (a.followers || 0); }
-  ttQual.sort(sortByData);
-  igQual.sort(sortByData);
-  fbQual.sort(sortByData);
+  function sortByScore(a: any, b: any) {
+    // Angola confirmado (50+) primeiro, depois outros lusofonos (30+), depois provaveis (10)
+    if (b._lusoScore !== a._lusoScore) return (b._lusoScore || 0) - (a._lusoScore || 0);
+    // Dentro do mesmo nivel, mais seguidores primeiro
+    return (b.followers || 0) - (a.followers || 0);
+  }
+  ttQual.sort(sortByScore);
+  igQual.sort(sortByScore);
+  fbQual.sort(sortByScore);
 
   // =============================================
-  // PHASE 5: Interleave — reach exactly `target`
+  // PHASE 5: Interleave — priorizar Angola em cada grupo de 3
   // =============================================
   var qualified: any[] = [];
-  var tI = 0, iI = 0, fI = 0;
-  while (qualified.length < target) {
-    var added = false;
-    if (doTT && tI < ttQual.length) { qualified.push(ttQual[tI]); tI++; added = true; }
+
+  // Primeiro: adicionar todos os perfis com score >= 50 (Angola confirmado) intercalados
+  // Depois: os com score >= 30 (outros lusofonos)
+  // Por fim: os com score >= 10 (provaveis angolanos)
+  var buckets: any[][] = [[], [], []];
+  for (var qi = 0; qi < ttQual.length; qi++) {
+    var s = ttQual[qi]._lusoScore || 0;
+    if (s >= 50) buckets[0].push(ttQual[qi]);
+    else if (s >= 30) buckets[1].push(ttQual[qi]);
+    else buckets[2].push(ttQual[qi]);
+  }
+  for (var qi = 0; qi < igQual.length; qi++) {
+    var s2 = igQual[qi]._lusoScore || 0;
+    if (s2 >= 50) buckets[0].push(igQual[qi]);
+    else if (s2 >= 30) buckets[1].push(igQual[qi]);
+    else buckets[2].push(igQual[qi]);
+  }
+  for (var qi = 0; qi < fbQual.length; qi++) {
+    var s3 = fbQual[qi]._lusoScore || 0;
+    if (s3 >= 50) buckets[0].push(fbQual[qi]);
+    else if (s3 >= 30) buckets[1].push(fbQual[qi]);
+    else buckets[2].push(fbQual[qi]);
+  }
+  logs.push('Buckets - Angola:' + buckets[0].length + ' Lusofono:' + buckets[1].length + ' Provavel:' + buckets[2].length);
+
+  // Preencher do bucket 0 (Angola), depois 1 (Lusofono), depois 2 (Provavel)
+  for (var b = 0; b < 3; b++) {
     if (qualified.length >= target) break;
-    if (doIG && iI < igQual.length) { qualified.push(igQual[iI]); iI++; added = true; }
-    if (qualified.length >= target) break;
-    if (doFB && fI < fbQual.length) { qualified.push(fbQual[fI]); fI++; added = true; }
-    if (!added) break;
+    for (var bi = 0; bi < buckets[b].length && qualified.length < target; bi++) {
+      qualified.push(buckets[b][bi]);
+    }
+  }
+
+  // Se ainda nao chega ao target, aceitar TUDO (excepto bloqueados) com minFollowers=0
+  if (qualified.length < target) {
+    var allRaw = (doTT ? ttRaw : []).concat(doIG ? igRaw : []).concat(doFB ? fbRaw : []);
+    var seenIds = new Set(qualified.map(function(p) { return p.username; }));
+    for (var ri = 0; ri < allRaw.length && qualified.length < target; ri++) {
+      var rp = allRaw[ri];
+      if (seenIds.has(rp.username)) continue;
+      if (!rp.username || isBot(rp) || isBiz(rp)) continue;
+      if (scoreProfile(rp) < 0) continue;
+      seenIds.add(rp.username);
+      var ep = makeProfile(rp, loc);
+      ep._lusoScore = 0;
+      qualified.push(ep);
+    }
+    logs.push('Backfill to ' + qualified.length);
   }
 
   var elapsed = Math.round((Date.now() - t0) / 1000);
