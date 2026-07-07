@@ -44,6 +44,32 @@ function getStoredCredentials() {
   };
 }
 
+/* ===== AUTOMATION CONFIG ===== */
+function getAutoConfig() {
+  try {
+    var raw = storeGet('mba_auto_config', '');
+    if (raw) return JSON.parse(raw);
+  } catch(e) {}
+  return { enabled: false, platform: 'instagram', username: '', password: '' };
+}
+function saveAutoConfig(cfg: any) {
+  storeSet('mba_auto_config', JSON.stringify(cfg));
+}
+function setAutoTrigger(platform: string) {
+  storeSet('mba_auto_trigger', JSON.stringify({ ts: Date.now(), platform: platform }));
+}
+function consumeAutoTrigger(): any {
+  try {
+    var raw = storeGet('mba_auto_trigger', '');
+    if (!raw) return null;
+    var d = JSON.parse(raw);
+    // Only trigger if less than 30 seconds ago (avoid stale triggers)
+    if (Date.now() - d.ts > 30000) { storeSet('mba_auto_trigger', ''); return null; }
+    storeSet('mba_auto_trigger', '');
+    return d;
+  } catch(e) { return null; }
+}
+
 function computeDashboard() {
   var profiles = getProfiles();
   var today = new Date().toISOString().slice(0, 10);
@@ -467,11 +493,84 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
   const [dashData, setDashData] = useState<any>(null);
   const loadDash = function() { setDashData(computeDashboard()); };
   useEffect(function() { loadDash(); }, [refreshKey]);
+
+  // Automation config state
+  const [autoCfg, setAutoCfg] = useState<any>(getAutoConfig());
+  const [showCfg, setShowCfg] = useState(false);
+  const [cfgSaved, setCfgSaved] = useState(false);
+  const platformNames: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
+
   if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="Sem dados" sub="Execute uma prospeccao para ver resultados." /></Panel></div>;
   var d = dashData;
   var o = d.overview || {};
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
+
+      {/* AUTOMATION CONFIG PANEL */}
+      <Panel style={{ marginBottom:14, border: autoCfg.enabled ? '1px solid rgba(0,192,99,0.4)' : undefined, background: autoCfg.enabled ? 'rgba(0,192,99,0.04)' : undefined }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <STitle>Automacao</STitle>
+            {autoCfg.enabled && <span style={{ fontSize:9, padding:'2px 8px', borderRadius:10, background:'rgba(0,192,99,0.15)', color:P.green, fontWeight:700 }}>ACTIVA</span>}
+          </div>
+          <button onClick={function() { setShowCfg(!showCfg); }} style={{ padding:'4px 10px', borderRadius:4, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:10, cursor:'pointer' }}>
+            {showCfg ? 'Fechar' : 'Configurar'}
+          </button>
+        </div>
+
+        {autoCfg.enabled ? (
+          <div style={{ fontSize:11, color:P.green, marginBottom:8 }}>
+            Apos cada prospeccao, o sistema envia DMs automaticamente no {platformNames[autoCfg.platform] || autoCfg.platform}.
+            So precisas de clicar em "Iniciar Prospeccao" — o resto e automatico.
+          </div>
+        ) : (
+          <div style={{ fontSize:11, color:P.textSec, marginBottom:8 }}>
+            Configura as tuas credenciais e activa a automacao para enviar DMs automaticamente apos cada prospeccao.
+          </div>
+        )}
+
+        {showCfg && (
+          <div style={{ marginTop:8, padding:12, borderRadius:6, background:P.surface2, border:'1px solid '+P.border }}>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+              <div>
+                <Lbl style={{ fontSize:10 }}>Plataforma para DMs</Lbl>
+                <select value={autoCfg.platform} onChange={function(e) { setAutoCfg({...autoCfg, platform: e.target.value}); }} style={SEL as any}>
+                  <option value="instagram">Instagram</option>
+                  <option value="tiktok">TikTok</option>
+                  <option value="facebook">Facebook</option>
+                </select>
+              </div>
+              <div style={{ display:'flex', alignItems:'flex-end' }}>
+                <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:11, color: autoCfg.enabled ? P.green : P.textSec, fontWeight:600, padding:'8px 0' }}>
+                  <div onClick={function() { setAutoCfg({...autoCfg, enabled: !autoCfg.enabled}); }} style={{ width:36, height:20, borderRadius:10, background: autoCfg.enabled ? P.green : '#333', position:'relative', transition:'background 0.2s', cursor:'pointer', flexShrink:0 }}>
+                    <div style={{ width:16, height:16, borderRadius:'50%', background:'#fff', position:'absolute', top:2, left: autoCfg.enabled ? 18 : 2, transition:'left 0.2s' }} />
+                  </div>
+                  {autoCfg.enabled ? 'Automacao ON' : 'Automacao OFF'}
+                </label>
+              </div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+              <div>
+                <Lbl style={{ fontSize:10 }}>Username do {platformNames[autoCfg.platform]}</Lbl>
+                <input value={autoCfg.username} onChange={function(e) { setAutoCfg({...autoCfg, username: e.target.value}); }} placeholder="utilizador" style={INP} />
+              </div>
+              <div>
+                <Lbl style={{ fontSize:10 }}>Password</Lbl>
+                <input type="password" value={autoCfg.password} onChange={function(e) { setAutoCfg({...autoCfg, password: e.target.value}); }} placeholder="password" style={INP} />
+              </div>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <Btn onClick={function() { saveAutoConfig(autoCfg); setCfgSaved(true); setTimeout(function() { setCfgSaved(false); }, 2000); }} style={{ flex:1 }}>
+                {cfgSaved ? 'Guardado!' : 'Guardar Configuracao'}
+              </Btn>
+            </div>
+            <div style={{ fontSize:9, color:P.textDim, marginTop:8, lineHeight:'15px' }}>
+              As credenciais ficam guardadas apenas no teu navegador. Apos activar, basta clicar "Iniciar Prospeccao" e o sistema faz o resto: login + envio de DMs automatico.
+            </div>
+          </div>
+        )}
+      </Panel>
+
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Painel Geral</STitle><Btn variant="ghost" size="sm" onClick={onRefresh}>Actualizar</Btn></div>
       <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
         <StatCard label="Total de perfis" value={o.totalProfiles||0} sub="guardados" />
@@ -671,6 +770,25 @@ function ProspectingTab() {
         setProfiles(merged);
         setTotal(merged.length);
         setSelected(new Set());
+
+        // ===== AUTO-DM: trigger automatic sending after prospection =====
+        var autoCfg = getAutoConfig();
+        if (autoCfg.enabled && newOnes.length > 0) {
+          var targetPlatform = autoCfg.platform || 'instagram';
+          // Filter new profiles for the target platform
+          var newForPlatform = newOnes.filter(function(p: any) { return p.platform === targetPlatform; });
+          if (newForPlatform.length > 0) {
+            setProspectMsg('Prospeccao feita! ' + newForPlatform.length + ' novos perfis. A iniciar envio automatico de DMs...');
+            setAutoTrigger(targetPlatform);
+            // Switch to messages tab after a brief delay
+            setTimeout(function() {
+              if (typeof window !== 'undefined') {
+                var evt = new CustomEvent('mba-switch-tab', { detail: 'messages' });
+                window.dispatchEvent(evt);
+              }
+            }, 800);
+          }
+        }
       }
     setLoading(false);
   };
@@ -755,6 +873,29 @@ function MessagesTab() {
   const [autoLog, setAutoLog] = useState<any[]>([]);
   const [autoDone, setAutoDone] = useState(false);
   const autoStopRef = useRef(false);
+
+  // Listen for auto-trigger from ProspectingTab
+  useEffect(function() {
+    var handler = function() {
+      var trigger = consumeAutoTrigger();
+      if (trigger) {
+        var cfg = getAutoConfig();
+        setLoginPlatform(trigger.platform);
+        if (cfg.username && cfg.password) {
+          setLoginUser(cfg.username);
+          setLoginPass(cfg.password);
+          // Auto-send after a tiny delay to let state settle
+          setTimeout(function() { autoSendRef.current(); }, 500);
+        }
+      }
+    };
+    // Check immediately (in case trigger was set before mount)
+    handler();
+    window.addEventListener('mba-auto-trigger', handler);
+    // Also check periodically (polling fallback)
+    var interval = setInterval(handler, 1000);
+    return function() { window.removeEventListener('mba-auto-trigger', handler); clearInterval(interval); };
+  }, []);
 
   useEffect(function() {
     fetch('/api/send-message').then(function(r) { return r.json(); }).then(function(data) {
@@ -854,8 +995,12 @@ function MessagesTab() {
     setSending(false);
   };
 
+  const autoSendRef = useRef<() => Promise<void>>(async function(){});
+
   const autoSend = async function() {
     autoStopRef.current = false;
+    setAutoDone(false);
+    setAutoLog([]);
     var pf = loginPlatform;
 
     // Step 1: Login if not logged in
@@ -1001,6 +1146,9 @@ function MessagesTab() {
     setAutoProgress(null);
     setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Parado pelo utilizador' }]); });
   };
+
+  // Keep ref updated so the trigger useEffect can call it
+  autoSendRef.current = autoSend;
 
   var filtered = messages.filter(function(m) { return subtab === 'all' || m.direction === subtab; });
   var profiles = getProfiles();
@@ -1406,6 +1554,15 @@ export default function MBAApp() {
     var tick = setInterval(function() { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); }, 1000);
     return function() { clearInterval(tick); };
   }, [isAuthenticated]);
+
+  // Listen for tab switch events from auto-trigger
+  useEffect(function() {
+    var handler = function(e: any) {
+      if (e.detail) setActiveTab(e.detail);
+    };
+    window.addEventListener('mba-switch-tab', handler as any);
+    return function() { window.removeEventListener('mba-switch-tab', handler as any); };
+  }, []);
 
   if (!isAuthenticated) return <LoginScreen />;
 
