@@ -22,7 +22,7 @@ async function checkBrowserless() {
     var res = await fetch(BL_HTTP + '/content?token=' + BL_TOKEN, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://example.com', elements: [{ selector: 'h1' }] }),
+      body: JSON.stringify({ url: 'https://example.com' }),
       signal: ctrl.signal
     });
     clearTimeout(tid);
@@ -37,11 +37,11 @@ async function checkBrowserless() {
 async function automateLogin(platform, username, password) {
   var browser = null;
   try {
-    browser = await chromium.connect(BL_WSS, { timeout: 15000 });
+    browser = await chromium.connect(BL_WSS, { timeout: 12000 });
     var context = browser.contexts()[0];
     var page = context.pages()[0] || await context.newPage();
 
-    // Set mobile viewport
+    // Set mobile viewport + anti-detection
     await page.setViewportSize({ width: 375, height: 812 });
     await page.setExtraHTTPHeaders({ 'User-Agent': BL_UA });
 
@@ -54,8 +54,8 @@ async function automateLogin(platform, username, password) {
     var logPrefix = '[LOGIN ' + platform.toUpperCase() + ']';
     console.log(logPrefix + ' Navegando para login...');
 
-    await page.goto(loginUrls[platform], { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await sleep(3000);
+    await page.goto(loginUrls[platform], { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await sleep(2000);
 
     if (platform === 'instagram') {
       return await loginInstagram(page, context, username, password);
@@ -75,40 +75,37 @@ async function automateLogin(platform, username, password) {
   }
 }
 
+/* ===== INSTAGRAM LOGIN ===== */
+
 async function loginInstagram(page, context, username, password) {
   try {
-    // Wait for login form
-    await page.waitForSelector('input[name="username"]', { timeout: 15000 }).catch(function() {});
-    await sleep(1000);
+    await page.waitForSelector('input[name="username"]', { timeout: 10000 }).catch(function() {});
+    await sleep(500);
 
-    // Try to find username and password inputs
     var userInput = await page.$('input[name="username"]') ||
                     await page.$('input[aria-label="Phone number, username, or email"]');
     var passInput = await page.$('input[name="password"]') ||
                     await page.$('input[aria-label="Password"]');
 
     if (!userInput || !passInput) {
-      // Check if already logged in
       var currentUrl = page.url();
       if (currentUrl.indexOf('login') < 0) {
         var cookies = await context.cookies();
         return extractInstagramCookies(cookies, 'Ja esta logado no Instagram');
       }
-      return { success: false, error: 'Campos de login do Instagram nao encontrados. A pagina pode ter mudado.' };
+      return { success: false, error: 'Campos de login nao encontrados. A pagina pode ter mudado.' };
     }
 
-    // Fill credentials
     await userInput.click();
     await userInput.fill('');
-    await userInput.type(username, { delay: 50 + Math.random() * 80 });
-    await sleep(800);
+    await userInput.type(username, { delay: 30 + Math.random() * 40 });
+    await sleep(300);
 
     await passInput.click();
     await passInput.fill('');
-    await passInput.type(password, { delay: 40 + Math.random() * 60 });
-    await sleep(500);
+    await passInput.type(password, { delay: 25 + Math.random() * 35 });
+    await sleep(300);
 
-    // Click login button
     var loginBtn = await page.$('button[type="submit"]') ||
                    await page.$('button:has-text("Log in")') ||
                    await page.$('button:has-text("Log In")') ||
@@ -120,54 +117,52 @@ async function loginInstagram(page, context, username, password) {
     }
 
     console.log('[LOGIN IG] A aguardar redirecionamento...');
-    await sleep(6000);
+    await sleep(4000);
 
-    // Check for "Save Login Info" popup
+    // Dismiss "Save Login Info" popup
     var notNowBtn = await page.$('button:has-text("Not Now")') ||
                     await page.$('button:has-text("Not now")');
     if (notNowBtn) {
       await notNowBtn.click();
-      await sleep(2000);
+      await sleep(800);
     }
 
-    // Check for notifications popup
+    // Dismiss notifications popup
     var notNowBtn2 = await page.$('button:has-text("Not Now")') ||
                      await page.$('button:has-text("Not now")');
     if (notNowBtn2) {
       await notNowBtn2.click();
-      await sleep(1000);
+      await sleep(400);
     }
 
-    // Check if login was successful
     var finalUrl = page.url();
     var loggedIn = finalUrl.indexOf('login') < 0 && finalUrl.indexOf('accounts/login') < 0 && finalUrl.indexOf('challenge') < 0;
 
     if (!loggedIn) {
-      // Check for error messages
       var errorMsg = '';
       var errorEl = await page.$('#slfErrorAlert') || await page.$('[role="alert"]');
       if (errorEl) {
         errorMsg = await errorEl.textContent() || '';
       }
       if (finalUrl.indexOf('challenge') >= 0) {
-        return { success: false, error: 'Verificacao de seguranca requerida. Tenta novamente ou entra em instagram.com no teu telemovel e verifica a conta primeiro.' };
+        return { success: false, error: 'Verificacao de seguranca requerida. Entra em instagram.com no teu telemovel e verifica a conta primeiro.' };
       }
-      return { success: false, error: 'Login falhou. ' + (errorMsg || 'Verifica as tuas credenciais. Pode haver uma verificacao de seguranca activa.') };
+      return { success: false, error: 'Login falhou. ' + (errorMsg || 'Verifica as tuas credenciais.') };
     }
 
-    // Extract cookies
     var cookies = await context.cookies();
     return extractInstagramCookies(cookies, 'Login realizado com sucesso!');
-
   } catch (e) {
     return { success: false, error: 'Erro no login do Instagram: ' + (e.message || 'desconhecido').substring(0, 200) };
   }
 }
 
+/* ===== TIKTOK LOGIN ===== */
+
 async function loginTikTok(page, context, username, password) {
   try {
-    await page.waitForSelector('input[type="text"], input[data-e2e="username-input"]', { timeout: 15000 }).catch(function() {});
-    await sleep(1000);
+    await page.waitForSelector('input[type="text"], input[data-e2e="username-input"]', { timeout: 10000 }).catch(function() {});
+    await sleep(500);
 
     var userInput = await page.$('input[data-e2e="username-input"]') ||
                     await page.$('input[name="username"]') ||
@@ -187,13 +182,13 @@ async function loginTikTok(page, context, username, password) {
 
     await userInput.click();
     await userInput.fill('');
-    await userInput.type(username, { delay: 50 + Math.random() * 80 });
-    await sleep(800);
+    await userInput.type(username, { delay: 30 + Math.random() * 40 });
+    await sleep(300);
 
     await passInput.click();
     await passInput.fill('');
-    await passInput.type(password, { delay: 40 + Math.random() * 60 });
-    await sleep(500);
+    await passInput.type(password, { delay: 25 + Math.random() * 35 });
+    await sleep(300);
 
     var loginBtn = await page.$('button[data-e2e="login-button"]') ||
                    await page.$('button[type="submit"]') ||
@@ -202,27 +197,28 @@ async function loginTikTok(page, context, username, password) {
     else await passInput.press('Enter');
 
     console.log('[LOGIN TT] A aguardar redirecionamento...');
-    await sleep(8000);
+    await sleep(5000);
 
     var finalUrl = page.url();
     var loggedIn = finalUrl.indexOf('login') < 0;
 
     if (!loggedIn) {
-      return { success: false, error: 'Login falhou no TikTok. Verifica as credenciais ou pode haver verificacao de seguranca.' };
+      return { success: false, error: 'Login falhou no TikTok. Verifica as credenciais.' };
     }
 
     var cookies = await context.cookies();
     return extractTikTokCookies(cookies, 'Login realizado com sucesso!');
-
   } catch (e) {
     return { success: false, error: 'Erro no login do TikTok: ' + (e.message || 'desconhecido').substring(0, 200) };
   }
 }
 
+/* ===== FACEBOOK LOGIN ===== */
+
 async function loginFacebook(page, context, username, password) {
   try {
-    await page.waitForSelector('#email', { timeout: 15000 }).catch(function() {});
-    await sleep(1000);
+    await page.waitForSelector('#email', { timeout: 10000 }).catch(function() {});
+    await sleep(500);
 
     var userInput = await page.$('#email') || await page.$('input[name="email"]');
     var passInput = await page.$('#pass') || await page.$('input[name="pass"]');
@@ -238,40 +234,39 @@ async function loginFacebook(page, context, username, password) {
 
     await userInput.click();
     await userInput.fill('');
-    await userInput.type(username, { delay: 50 + Math.random() * 80 });
-    await sleep(500);
+    await userInput.type(username, { delay: 30 + Math.random() * 40 });
+    await sleep(300);
 
     await passInput.click();
     await passInput.fill('');
-    await passInput.type(password, { delay: 40 + Math.random() * 60 });
-    await sleep(500);
+    await passInput.type(password, { delay: 25 + Math.random() * 35 });
+    await sleep(300);
 
     var loginBtn = await page.$('#loginbutton') || await page.$('button[name="login"]');
     if (loginBtn) await loginBtn.click();
     else await passInput.press('Enter');
 
     console.log('[LOGIN FB] A aguardar redirecionamento...');
-    await sleep(6000);
+    await sleep(4000);
 
     var finalUrl = page.url();
     var loggedIn = finalUrl.indexOf('login') < 0 && finalUrl.indexOf('checkpoint') < 0;
 
     if (!loggedIn) {
       if (finalUrl.indexOf('checkpoint') >= 0) {
-        return { success: false, error: 'Verificacao de seguranca do Facebook requerida. Verifica a tua conta primeiro.' };
+        return { success: false, error: 'Verificacao de seguranca do Facebook requerida.' };
       }
       return { success: false, error: 'Login falhou no Facebook. Verifica as credenciais.' };
     }
 
     var cookies = await context.cookies();
     return extractFacebookCookies(cookies, 'Login realizado com sucesso!');
-
   } catch (e) {
     return { success: false, error: 'Erro no login do Facebook: ' + (e.message || 'desconhecido').substring(0, 200) };
   }
 }
 
-/* ===== COOKIE EXTRACTION HELPERS ===== */
+/* ===== COOKIE EXTRACTION ===== */
 
 function extractInstagramCookies(cookies, message) {
   var sessionCookie = cookies.find(function(c) { return c.name === 'sessionid'; });
@@ -279,7 +274,7 @@ function extractInstagramCookies(cookies, message) {
   var dsUserCookie = cookies.find(function(c) { return c.name === 'ds_user_id'; });
 
   if (!sessionCookie || !csrfCookie) {
-    return { success: false, error: 'Cookies de sessao do Instagram nao encontrados. O login pode nao ter sido concluido.' };
+    return { success: false, error: 'Cookies de sessao do Instagram nao encontrados. O login pode nao ter concluido.' };
   }
 
   return {
@@ -321,7 +316,7 @@ function extractFacebookCookies(cookies, message) {
     sessionid: '',
     csrftoken: '',
     cookiesJson: JSON.stringify(cookies.map(function(c) { return { name: c.name, value: c.value, domain: c.domain, path: c.path }; })),
-    note: 'Facebook requer um token de acesso para mensagens. O login foi guardado mas podes precisar de configurar o token do Messenger separadamente.'
+    note: 'Facebook requer token de acesso para mensagens. O login foi guardado.'
   };
 }
 
@@ -330,7 +325,7 @@ function extractFacebookCookies(cookies, message) {
 async function sendDMViaBrowserless(platform, username, message, cookies) {
   var browser = null;
   try {
-    browser = await chromium.connect(BL_WSS, { timeout: 15000 });
+    browser = await chromium.connect(BL_WSS, { timeout: 12000 });
     var context = browser.contexts()[0];
 
     // Load cookies if provided
@@ -369,12 +364,13 @@ async function sendDMViaBrowserless(platform, username, message, cookies) {
   }
 }
 
+/* ===== INSTAGRAM DM ===== */
+
 async function sendIgDM(page, username, message) {
   try {
-    await page.goto('https://www.instagram.com/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await sleep(3000);
+    await page.goto('https://www.instagram.com/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await sleep(1500);
 
-    // Check login
     if (page.url().indexOf('login') >= 0 || page.url().indexOf('accounts/login') >= 0) {
       return { success: false, dmSent: false, deliveryMsg: 'Nao esta logado no Instagram. Faz login primeiro.' };
     }
@@ -387,18 +383,18 @@ async function sendIgDM(page, username, message) {
 
     if (msgBtn) {
       await msgBtn.click();
-      await sleep(3000);
-    } else {
-      // Try direct message URL
-      await page.goto('https://www.instagram.com/direct/new/', { waitUntil: 'domcontentloaded', timeout: 20000 });
       await sleep(2000);
+    } else {
+      // Fallback: try direct new message
+      await page.goto('https://www.instagram.com/direct/new/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await sleep(1500);
       var searchInput = await page.$('input[placeholder*="Search"]') || await page.$('input[placeholder*="search"]') || await page.$('input[aria-label*="Search"]');
       if (searchInput) {
         await searchInput.click();
         await searchInput.fill(username);
-        await sleep(3000);
+        await sleep(2000);
         var result = await page.$('a[href*="/' + username + '"]');
-        if (result) { await result.click(); await sleep(2000); }
+        if (result) { await result.click(); await sleep(1500); }
       }
     }
 
@@ -409,7 +405,6 @@ async function sendIgDM(page, username, message) {
                    await page.$('div[contenteditable="true"][role="textbox"]');
 
     if (!textarea) {
-      // Check if in conversation already
       var content = await page.content();
       if (content.indexOf('/direct/') >= 0) {
         textarea = await page.$('textarea') || await page.$('div[contenteditable="true"]');
@@ -422,15 +417,15 @@ async function sendIgDM(page, username, message) {
 
     await textarea.click();
     await textarea.fill('');
-    await textarea.type(message, { delay: 25 + Math.random() * 45 });
-    await sleep(1000);
+    // Use fill for speed (instant), then a small type for the last chars to trigger send button
+    await textarea.fill(message);
+    await sleep(800);
 
-    // Send
     var sendBtn = await page.$('div[role="button"]:has-text("Send")') || await page.$('button:has-text("Send")');
     if (sendBtn) { await sendBtn.click(); }
     else { await textarea.press('Enter'); }
 
-    await sleep(2000);
+    await sleep(1000);
     return { success: true, dmSent: true, deliveryMsg: 'DM enviado com sucesso via Instagram (Browserless)' };
 
   } catch (e) {
@@ -438,10 +433,12 @@ async function sendIgDM(page, username, message) {
   }
 }
 
+/* ===== TIKTOK DM ===== */
+
 async function sendTtDM(page, username, message) {
   try {
-    await page.goto('https://www.tiktok.com/@' + username, { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await sleep(3000);
+    await page.goto('https://www.tiktok.com/@' + username, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await sleep(2000);
 
     if (page.url().indexOf('login') >= 0) {
       return { success: false, dmSent: false, deliveryMsg: 'Nao esta logado no TikTok. Faz login primeiro.' };
@@ -453,10 +450,10 @@ async function sendTtDM(page, username, message) {
 
     if (msgBtn) {
       await msgBtn.click();
-      await sleep(3000);
-    } else {
-      await page.goto('https://www.tiktok.com/inbox/', { waitUntil: 'domcontentloaded', timeout: 20000 });
       await sleep(2000);
+    } else {
+      await page.goto('https://www.tiktok.com/inbox/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await sleep(1500);
     }
 
     var textarea = await page.$('div[contenteditable="true"]') ||
@@ -469,16 +466,16 @@ async function sendTtDM(page, username, message) {
 
     await textarea.click();
     await textarea.fill('');
-    await textarea.type(message, { delay: 25 + Math.random() * 45 });
-    await sleep(1000);
+    await textarea.fill(message);
+    await sleep(800);
 
-    var sendBtn = await page.$('div[data-ee="send-button"]') ||
+    var sendBtn = await page.$('div[data-e2e="send-button"]') ||
                   await page.$('button:has-text("Send")') ||
                   await page.$('div:has-text("Send"):not(:has(div))');
     if (sendBtn) { await sendBtn.click(); }
     else { await textarea.press('Enter'); }
 
-    await sleep(2000);
+    await sleep(1000);
     return { success: true, dmSent: true, deliveryMsg: 'DM enviado com sucesso via TikTok (Browserless)' };
 
   } catch (e) {
@@ -486,10 +483,12 @@ async function sendTtDM(page, username, message) {
   }
 }
 
+/* ===== FACEBOOK DM ===== */
+
 async function sendFbDM(page, username, message) {
   try {
-    await page.goto('https://www.facebook.com/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 25000 });
-    await sleep(3000);
+    await page.goto('https://www.facebook.com/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 20000 });
+    await sleep(2000);
 
     if (page.url().indexOf('login') >= 0) {
       return { success: false, dmSent: false, deliveryMsg: 'Nao esta logado no Facebook. Faz login primeiro.' };
@@ -501,10 +500,10 @@ async function sendFbDM(page, username, message) {
 
     if (msgBtn) {
       await msgBtn.click();
-      await sleep(3000);
+      await sleep(2000);
     } else {
-      await page.goto('https://www.facebook.com/messages/t/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 20000 });
-      await sleep(3000);
+      await page.goto('https://www.facebook.com/messages/t/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await sleep(2000);
     }
 
     var textarea = await page.$('div[contenteditable="true"][role="textbox"]') ||
@@ -517,10 +516,11 @@ async function sendFbDM(page, username, message) {
 
     await textarea.click();
     await textarea.fill('');
-    await textarea.type(message, { delay: 25 + Math.random() * 45 });
-    await sleep(1000);
+    await textarea.fill(message);
+    await sleep(800);
+
     await textarea.press('Enter');
-    await sleep(2000);
+    await sleep(1000);
 
     return { success: true, dmSent: true, deliveryMsg: 'DM enviado com sucesso via Facebook (Browserless)' };
 
@@ -639,7 +639,6 @@ async function validateCookies(platform, cookiesJson) {
       var csrfCookie = cookies.find(function(c) { return c.name === 'csrftoken'; });
       if (!sessionCookie || !csrfCookie) return { valid: false, error: 'Cookies do Instagram incompletos' };
 
-      // Test the cookies by making a simple API call
       var dsUserId = sessionCookie.value.split('%3A')[0] || '';
       var cookieStr = 'sessionid=' + sessionCookie.value + '; csrftoken=' + csrfCookie.value + '; ds_user_id=' + dsUserId;
       var ctrl = new AbortController();
