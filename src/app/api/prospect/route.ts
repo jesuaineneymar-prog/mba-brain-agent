@@ -645,7 +645,8 @@ export async function POST(request: any) {
     }
   }
 
-  // Se ainda nao chega ao target, aceitar TUDO (excepto bloqueados) com minFollowers=0
+  // Se ainda nao chega ao target, aceitar perfis nao enriquecidos (0 seguidores = "—")
+  // Mas perfis enriquecidos com < minF continuam bloqueados
   if (qualified.length < target) {
     var allRaw = (doTT ? ttRaw : []).concat(doIG ? igRaw : []).concat(doFB ? fbRaw : []);
     var seenIds = new Set(qualified.map(function(p) { return p.username; }));
@@ -654,6 +655,10 @@ export async function POST(request: any) {
       if (seenIds.has(rp.username)) continue;
       if (!rp.username || isBot(rp) || isBiz(rp)) continue;
       if (scoreProfile(rp) < 0) continue;
+      // Bloquear enriquecidos com poucos seguidores, aceitar nao enriquecidos (0 = "—")
+      var rf = rp.followers || 0;
+      if (rf > 0 && rf < minF) continue;
+      if (rf > maxF) continue;
       seenIds.add(rp.username);
       var ep = makeProfile(rp, loc);
       ep._lusoScore = 0;
