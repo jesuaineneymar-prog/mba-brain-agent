@@ -2,9 +2,17 @@ import { NextResponse } from 'next/server';
 
 // ============================================================
 //  MBA BRAIN AGENT — SEND MESSAGE API
-//  Browserless HTTP REST API (/function) — sem WebSocket
-//  Código enviado como async arrow function entre PARÊNTESES
-//  Formato obrigatório: (async ({ browser }) => { ... return r; })
+//  Browserless /function API (HTTP puro, sem WebSocket)
+//
+//  FORMATO OBRIGATÓRIO do código:
+//    export default async function({ page }) { ... return result; }
+//
+//  RESTRIÇÕES do Browserless /function:
+//  - Não recebe "browser", só { page } e { context } (dummy)
+//  - Não tem setViewportSize, addInitScript, addCookies
+//  - Tem evaluateOnNewDocument, page.browserContext() (real)
+//  - UA deve ser override via evaluateOnNewDocument
+//  - Cookies: page.browserContext().cookies() / .setCookie()
 // ============================================================
 
 export var maxDuration = 60;
@@ -14,9 +22,7 @@ var BL_TOKEN = process.env.BROWSERLESS_TOKEN || '2UqMn3vrQPAsFgGd027555e6ef8261d
 var BL_HTTP = 'https://production-sfo.browserless.io';
 var BL_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-function sleep(ms: number) { return new Promise(function(r) { setTimeout(r, ms); }); }
-
-/* ===== CORE: POST código para Browserless executar ===== */
+/* ===== CORE: POST código para Browserless ===== */
 async function runOnBrowserless(code: string, timeoutMs: number = 50000): Promise<any> {
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, timeoutMs);
@@ -29,7 +35,7 @@ async function runOnBrowserless(code: string, timeoutMs: number = 50000): Promis
     });
     clearTimeout(timer);
     var ct = (response.headers.get('content-type') || '').toLowerCase();
-    if (ct.indexOf('text/html') >= 0 || ct.indexOf('text/plain') >= 0) {
+    if (ct.indexOf('text/html') >= 0) {
       var html = await response.text();
       throw new Error('Browserless retornou HTML (HTTP ' + response.status + '): ' + html.substring(0, 150));
     }
@@ -37,8 +43,7 @@ async function runOnBrowserless(code: string, timeoutMs: number = 50000): Promis
       var errBody = await response.text().catch(function() { return ''; });
       throw new Error('Browserless HTTP ' + response.status + ': ' + errBody.substring(0, 300));
     }
-    var data = await response.json();
-    return data;
+    return await response.json();
   } catch (e: any) {
     clearTimeout(timer);
     if (e.name === 'AbortError') throw new Error('Timeout Browserless (' + timeoutMs + 'ms)');
@@ -57,6 +62,9 @@ async function checkBrowserless(): Promise<boolean> {
   } catch (e) { return false; }
 }
 
+/* ===== UA OVERRIDE SNIPPET (injeta antes de cada page load) ===== */
+var UA_OVERRIDE = 'await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, "userAgent", { get: () => ' + JSON.stringify(BL_UA) + ' }); });';
+
 /* ===== DIAGNÓSTICO ===== */
 async function runDiagnostic() {
   var diag: any = { steps: [], browserless: false, functionApi: false, browserNav: false };
@@ -72,77 +80,73 @@ async function runDiagnostic() {
     diag.steps.push({ step: 'HTTP health check', ok: false, error: (e.message || 'timeout').substring(0, 120) });
   }
 
-  // Test: função simples sem browser
   try {
-    var testResult = await runOnBrowserless('(async () => ({ ok: true, ts: Date.now() }))', 15000);
+    var testResult = await runOnBrowserless(
+      'export default async function() { return { ok: true, ts: Date.now() }; }', 15000
+    );
     diag.functionApi = testResult && testResult.ok === true;
-    diag.steps.push({ step: 'Function API (sem browser)', ok: diag.functionApi, result: JSON.stringify(testResult).substring(0, 100) });
+    diag.steps.push({ step: 'Function API (eval)', ok: diag.functionApi, result: JSON.stringify(testResult).substring(0, 100) });
   } catch(e: any) {
-    diag.steps.push({ step: 'Function API (sem browser)', ok: false, error: (e.message || 'unknown').substring(0, 200) });
+    diag.steps.push({ step: 'Function API (eval)', ok: false, error: (e.message || 'unknown').substring(0, 200) });
   }
 
-  // Test: browser real
   try {
-    var ua = JSON.stringify(BL_UA);
-    var navCode = '(async ({ browser }) => {' +
-      'const context = await browser.newContext({ userAgent: ' + ua + ' });' +
-      'const page = await context.newPage();' +
-      'await page.goto("https://example.com", { timeout: 10000 });' +
-      'const title = await page.title();' +
-      'await context.close();' +
-      'return { ok: true, title: title };' +
-    '})';
+    var navCode = 'export default async function({ page }) {\n' +
+      UA_OVERRIDE + '\n' +
+      'await page.goto("https://example.com", { timeout: 10000 });\n' +
+      'var title = await page.title();\n' +
+      'var ua = await page.evaluate(() => navigator.userAgent);\n' +
+      'return { ok: true, title: title, ua: ua.substring(0, 30) };\n' +
+    '}';
     var navResult = await runOnBrowserless(navCode, 25000);
     diag.browserNav = navResult && navResult.ok === true;
-    diag.steps.push({ step: 'Browser navigation', ok: diag.browserNav, title: (navResult && navResult.title) || '' });
+    diag.steps.push({ step: 'Browser + UA override', ok: diag.browserNav, title: (navResult && navResult.title) || '', ua: (navResult && navResult.ua) || '' });
   } catch(e: any) {
-    diag.steps.push({ step: 'Browser navigation', ok: false, error: (e.message || 'unknown').substring(0, 200) });
+    diag.steps.push({ step: 'Browser + UA override', ok: false, error: (e.message || 'unknown').substring(0, 200) });
   }
 
   return diag;
 }
 
-/* ===== HELPERS: gerar código de login por plataforma ===== */
+/* ===== LOGIN CODE GENERATORS ===== */
 function makeLoginCode(platform: string, username: string, password: string): string {
   var u = JSON.stringify(username);
   var p = JSON.stringify(password);
-  var ua = JSON.stringify(BL_UA);
 
   if (platform === 'instagram') {
-    return '(async ({ browser }) => {\n' +
-      'var context = await browser.newContext({ userAgent: ' + ua + ', viewport: { width: 375, height: 812 } });\n' +
-      'var page = await context.newPage();\n' +
-      'await page.goto("https://www.instagram.com/accounts/login/", { timeout: 15000 }).catch(function() {});\n' +
+    return 'export default async function({ page }) {\n' +
+      UA_OVERRIDE + '\n' +
+      'await page.goto("https://www.instagram.com/accounts/login/", { timeout: 15000 });\n' +
       'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
+      'var hasForm = !!(await page.$(\'input[name="username"]\'));\n' +
+      'if (!hasForm) { return { success: false, error: "Instagram nao mostrou formulario de login (possible 429/blocked IP)" }; }\n' +
       'await page.fill(\'input[name="username"]\', ' + u + ');\n' +
       'await page.fill(\'input[name="password"]\', ' + p + ');\n' +
       'await page.click(\'div[role="button"]:has-text("Log in")\');\n' +
       'await new Promise(function(r) { setTimeout(r, 6000); });\n' +
       'var urlNow = page.url();\n' +
       'if (urlNow.indexOf("/accounts/login") >= 0) {\n' +
-      '  await context.close();\n' +
       '  return { success: false, error: "Login falhou - credenciais invalidas ou captcha" };\n' +
       '}\n' +
       'try { await page.click(\'div[role="button"]:has-text("Not Now")\', { timeout: 2000 }); await new Promise(function(r) { setTimeout(r, 500); }); } catch(e) {}\n' +
       'try { await page.click(\'button:has-text("Not Now")\', { timeout: 2000 }); await new Promise(function(r) { setTimeout(r, 500); }); } catch(e) {}\n' +
       'await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      'var cookies = await context.cookies();\n' +
+      'var bc = page.browserContext();\n' +
+      'var cookies = await bc.cookies();\n' +
       'var cookiesJson = JSON.stringify(cookies);\n' +
       'var sessionid = "", csrftoken = "";\n' +
       'for (var i = 0; i < cookies.length; i++) {\n' +
       '  if (cookies[i].name === "sessionid") sessionid = cookies[i].value;\n' +
       '  if (cookies[i].name === "csrftoken") csrftoken = cookies[i].value;\n' +
       '}\n' +
-      'await context.close();\n' +
       'return { success: true, sessionid: sessionid, csrftoken: csrftoken, cookiesJson: cookiesJson, message: "Login Instagram feito com sucesso" };\n' +
-    '})';
+    '}';
   }
 
   if (platform === 'tiktok') {
-    return '(async ({ browser }) => {\n' +
-      'var context = await browser.newContext({ userAgent: ' + ua + ', viewport: { width: 375, height: 812 } });\n' +
-      'var page = await context.newPage();\n' +
-      'await page.goto("https://www.tiktok.com/login", { timeout: 15000 }).catch(function() {});\n' +
+    return 'export default async function({ page }) {\n' +
+      UA_OVERRIDE + '\n' +
+      'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
       'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
       'try { await page.click("text=Use phone / email / username"); } catch(e) {}\n' +
       'await new Promise(function(r) { setTimeout(r, 1000); });\n' +
@@ -150,63 +154,65 @@ function makeLoginCode(platform: string, username: string, password: string): st
       'await page.fill(\'input[type="password"]\', ' + p + ');\n' +
       'try { await page.click(\'button[type="submit"]\'); } catch(e) { try { await page.click(\'div[role="button"]:has-text("Log in")\'); } catch(e2) { await page.keyboard.press("Enter"); } }\n' +
       'await new Promise(function(r) { setTimeout(r, 6000); });\n' +
-      'var cookies = await context.cookies();\n' +
+      'var bc = page.browserContext();\n' +
+      'var cookies = await bc.cookies();\n' +
       'var cookiesJson = JSON.stringify(cookies);\n' +
       'var sessionid = "", csrftoken = "";\n' +
       'for (var i = 0; i < cookies.length; i++) {\n' +
       '  if (cookies[i].name === "sessionid") sessionid = cookies[i].value;\n' +
       '  if (cookies[i].name === "tt_csrf_token") csrftoken = cookies[i].value;\n' +
       '}\n' +
-      'await context.close();\n' +
       'if (sessionid) { return { success: true, sessionid: sessionid, csrftoken: csrftoken, cookiesJson: cookiesJson, message: "Login TikTok feito com sucesso" }; }\n' +
       'return { success: false, error: "Login TikTok falhou - verifica credenciais" };\n' +
-    '})';
+    '}';
   }
 
   if (platform === 'facebook') {
-    return '(async ({ browser }) => {\n' +
-      'var context = await browser.newContext({ userAgent: ' + ua + ', viewport: { width: 375, height: 812 } });\n' +
-      'var page = await context.newPage();\n' +
-      'await page.goto("https://www.facebook.com/login", { timeout: 15000 }).catch(function() {});\n' +
+    return 'export default async function({ page }) {\n' +
+      UA_OVERRIDE + '\n' +
+      'await page.goto("https://www.facebook.com/login", { timeout: 15000 });\n' +
       'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
       'await page.fill(\'input[id="email"]\', ' + u + ');\n' +
       'await page.fill(\'input[id="pass"]\', ' + p + ');\n' +
       'await page.click(\'button[name="login"]\');\n' +
       'await new Promise(function(r) { setTimeout(r, 6000); });\n' +
       'try { await page.click(\'button:has-text("Not Now")\', { timeout: 2000 }); await new Promise(function(r) { setTimeout(r, 500); }); } catch(e) {}\n' +
-      'var cookies = await context.cookies();\n' +
+      'var bc = page.browserContext();\n' +
+      'var cookies = await bc.cookies();\n' +
       'var cookiesJson = JSON.stringify(cookies);\n' +
       'var fbToken = "";\n' +
       'for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === "datr") fbToken = cookies[i].value; }\n' +
-      'await context.close();\n' +
       'return { success: true, fbToken: fbToken, cookiesJson: cookiesJson, message: "Login Facebook feito com sucesso" };\n' +
-    '})';
+    '}';
   }
 
   return '';
 }
 
-/* ===== HELPERS: gerar código de DM por plataforma ===== */
+/* ===== DM CODE GENERATORS ===== */
 function makeDMCode(platform: string, targetUsername: string, message: string, cookiesJson: string, attempt: number): string {
   var target = JSON.stringify(targetUsername);
   var msg = JSON.stringify(message);
-  var ua = JSON.stringify(BL_UA);
   var ck = cookiesJson ? JSON.stringify(cookiesJson) : 'null';
 
   if (platform === 'instagram') {
-    return '(async ({ browser }) => {\n' +
-      'try {\n' +
-      '  var context = await browser.newContext({ userAgent: ' + ua + ', viewport: { width: 375, height: 812 } });\n' +
-      '  if (' + ck + ') { try { await context.addCookies(JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-      '  var page = await context.newPage();\n' +
-      '  await page.goto("https://www.instagram.com/direct/new/", { timeout: 15000 });\n' +
-      '  await new Promise(function(r) { setTimeout(r, 2000); });\n' +
+    return 'export default async function({ page }) {\n' +
+      UA_OVERRIDE + '\n' +
+      'if (' + ck + ') {\n' +
+      '  var bc = page.browserContext();\n' +
+      '  try {\n' +
+      '    var parsed = JSON.parse(' + ck + ');\n' +
+      '    for (var i = 0; i < parsed.length; i++) { await bc.setCookie(parsed[i]); }\n' +
+      '  } catch(e) {}\n' +
+      '}\n' +
+      'await page.goto("https://www.instagram.com/direct/new/", { timeout: 15000 });\n' +
+      'await new Promise(function(r) { setTimeout(r, 2000); });\n' +
+      'var hasSearch = !!(await page.$(\'input[placeholder="Search..."]\'));\n' +
+      'if (hasSearch) {\n' +
       '  await page.fill(\'input[placeholder="Search..."]\', ' + target + ');\n' +
       '  await new Promise(function(r) { setTimeout(r, 2500); });\n' +
-      '  var clicked = false;\n' +
       '  try {\n' +
       '    await page.click(\'div[role="option"]\', { timeout: 3000 });\n' +
-      '    clicked = true;\n' +
       '    await new Promise(function(r) { setTimeout(r, 1000); });\n' +
       '    await page.click(\'div[role="dialog"] button:not([disabled])\');\n' +
       '    await new Promise(function(r) { setTimeout(r, 1000); });\n' +
@@ -214,131 +220,74 @@ function makeDMCode(platform: string, targetUsername: string, message: string, c
       '    await new Promise(function(r) { setTimeout(r, 500); });\n' +
       '    await page.keyboard.press("Enter");\n' +
       '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    await context.close();\n' +
-      '    return { dmSent: true, deliveryMsg: "DM enviado via Browserless (new msg)" };\n' +
-      '  } catch(e) {\n' +
-      '    if (!clicked) {\n' +
-      '      try {\n' +
-      '        await page.goto("https://www.instagram.com/" + ' + target + ' + "/", { timeout: 10000 });\n' +
-      '        await new Promise(function(r) { setTimeout(r, 1500); });\n' +
-      '        var msgBtn = await page.$(\'button:has-text("Message")\');\n' +
-      '        if (!msgBtn) msgBtn = await page.$(\'div[role="button"]:has-text("Message")\');\n' +
-      '        if (msgBtn) {\n' +
-      '          await msgBtn.click();\n' +
-      '          await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '          await page.keyboard.type(' + msg + ');\n' +
-      '          await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '          await page.keyboard.press("Enter");\n' +
-      '          await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '          await context.close();\n' +
-      '          return { dmSent: true, deliveryMsg: "DM enviado via Browserless (profile msg btn)" };\n' +
-      '        }\n' +
-      '      } catch(e2) {}\n' +
-      '    }\n' +
-      '    await context.close();\n' +
-      '    return { dmSent: false, deliveryMsg: "Nao conseguiu abrir conversa IG (tentativa ' + attempt + '): " + (e.message || "").substring(0, 80) };\n' +
-      '  }\n' +
-      '} catch(err) {\n' +
-      '  return { dmSent: false, deliveryMsg: "Erro Browserless (tentativa ' + attempt + '): " + (err.message || "timeout").substring(0, 80) };\n' +
+      '    return { dmSent: true, deliveryMsg: "DM IG enviado via Browserless (new msg)" };\n' +
+      '  } catch(e) {}\n' +
       '}\n' +
-    '})';
-  }
-
-  if (platform === 'tiktok') {
-    return '(async ({ browser }) => {\n' +
+      // METHOD B: Profile message button
       'try {\n' +
-      '  var context = await browser.newContext({ userAgent: ' + ua + ', viewport: { width: 375, height: 812 } });\n' +
-      '  if (' + ck + ') { try { await context.addCookies(JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-      '  var page = await context.newPage();\n' +
-      '  await page.goto("https://www.tiktok.com/@" + ' + target + ', { timeout: 15000 });\n' +
-      '  await new Promise(function(r) { setTimeout(r, 2500); });\n' +
-      '  var msgBtn = await page.$(\'div[data-e2e="profile-message-button"]\');\n' +
+      '  await page.goto("https://www.instagram.com/" + ' + target + ' + "/", { timeout: 10000 });\n' +
+      '  await new Promise(function(r) { setTimeout(r, 1500); });\n' +
+      '  var msgBtn = await page.$(\'button:has-text("Message")\');\n' +
+      '  if (!msgBtn) msgBtn = await page.$(\'div[role="button"]:has-text("Message")\');\n' +
       '  if (msgBtn) {\n' +
       '    await msgBtn.click();\n' +
       '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    var ta = await page.$(\'div[contenteditable="true"]\');\n' +
-      '    if (ta) {\n' +
-      '      await ta.click(); await page.keyboard.type(' + msg + ');\n' +
-      '      await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '      await page.keyboard.press("Enter");\n' +
-      '      await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '      await context.close();\n' +
-      '      return { dmSent: true, deliveryMsg: "DM TikTok enviado (profile btn)" };\n' +
-      '    }\n' +
-      '  }\n' +
-      '  await page.goto("https://www.tiktok.com/@" + ' + target + ', { timeout: 10000 });\n' +
-      '  await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '  var btns = await page.$$("header button");\n' +
-      '  for (var bi = 0; bi < btns.length; bi++) {\n' +
-      '    var txt = await btns[bi].textContent();\n' +
-      '    if (txt && (txt.indexOf("Message") >= 0 || txt.indexOf("Mensagem") >= 0)) {\n' +
-      '      await btns[bi].click();\n' +
-      '      await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '      var ta2 = await page.$(\'div[contenteditable="true"]\');\n' +
-      '      if (ta2) {\n' +
-      '        await ta2.click(); await page.keyboard.type(' + msg + ');\n' +
-      '        await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '        await page.keyboard.press("Enter");\n' +
-      '        await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '        await context.close();\n' +
-      '        return { dmSent: true, deliveryMsg: "DM TikTok enviado (header btn)" };\n' +
-      '      }\n' +
-      '    }\n' +
-      '  }\n' +
-      '  await context.close();\n' +
-      '  return { dmSent: false, deliveryMsg: "Erro ao enviar DM TikTok (tentativa ' + attempt + ')" };\n' +
-      '} catch(err) {\n' +
-      '  return { dmSent: false, deliveryMsg: "Erro Browserless TikTok (tentativa ' + attempt + '): " + (err.message || "").substring(0, 80) };\n' +
-      '}\n' +
-    '})';
-  }
-
-  if (platform === 'facebook') {
-    return '(async ({ browser }) => {\n' +
-      'try {\n' +
-      '  var context = await browser.newContext({ userAgent: ' + ua + ', viewport: { width: 375, height: 812 } });\n' +
-      '  if (' + ck + ') { try { await context.addCookies(JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-      '  var page = await context.newPage();\n' +
-      '  await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 15000 });\n' +
-      '  await new Promise(function(r) { setTimeout(r, 3000); });\n' +
-      '  var msgArea = await page.$(\'div[aria-label="Message"], div[contenteditable="true"][role="textbox"]\');\n' +
-      '  if (msgArea) {\n' +
-      '    await msgArea.click(); await page.keyboard.type(' + msg + ');\n' +
+      '    await page.keyboard.type(' + msg + ');\n' +
       '    await new Promise(function(r) { setTimeout(r, 500); });\n' +
       '    await page.keyboard.press("Enter");\n' +
       '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    await context.close();\n' +
-      '    return { dmSent: true, deliveryMsg: "DM Facebook enviado (direct URL)" };\n' +
+      '    return { dmSent: true, deliveryMsg: "DM IG enviado (profile msg btn)" };\n' +
       '  }\n' +
-      '  await page.goto("https://www.facebook.com/messages/", { timeout: 10000 });\n' +
-      '  await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '  var newMsgBtn = await page.$(\'a[href*="/messages/new/"], div[role="button"]:has-text("New message")\');\n' +
-      '  if (newMsgBtn) {\n' +
-      '    await newMsgBtn.click();\n' +
-      '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    var toField = await page.$(\'input[aria-label*="To"], input[placeholder*="To"]\');\n' +
-      '    if (toField) {\n' +
-      '      await toField.fill(' + target + ');\n' +
-      '      await new Promise(function(r) { setTimeout(r, 2500); });\n' +
-      '      await page.click(\'ul[role="listbox"] li:first-child\', { timeout: 3000 });\n' +
-      '      await new Promise(function(r) { setTimeout(r, 1000); });\n' +
-      '      var msgBox = await page.$(\'div[contenteditable="true"][role="textbox"]\');\n' +
-      '      if (msgBox) {\n' +
-      '        await msgBox.click(); await page.keyboard.type(' + msg + ');\n' +
-      '        await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '        await page.keyboard.press("Enter");\n' +
-      '        await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '        await context.close();\n' +
-      '        return { dmSent: true, deliveryMsg: "DM Facebook enviado (new msg)" };\n' +
-      '      }\n' +
-      '    }\n' +
-      '  }\n' +
-      '  await context.close();\n' +
-      '  return { dmSent: false, deliveryMsg: "Erro ao enviar DM Facebook (tentativa ' + attempt + ')" };\n' +
-      '} catch(err) {\n' +
-      '  return { dmSent: false, deliveryMsg: "Erro Browserless FB (tentativa ' + attempt + '): " + (err.message || "").substring(0, 80) };\n' +
+      '} catch(e2) {}\n' +
+      'return { dmSent: false, deliveryMsg: "Nao conseguiu abrir conversa IG (tentativa ' + attempt + ')" };\n' +
+    '}';
+  }
+
+  if (platform === 'tiktok') {
+    return 'export default async function({ page }) {\n' +
+      UA_OVERRIDE + '\n' +
+      'if (' + ck + ') {\n' +
+      '  var bc = page.browserContext();\n' +
+      '  try { var p = JSON.parse(' + ck + '); for (var i = 0; i < p.length; i++) { await bc.setCookie(p[i]); } } catch(e) {}\n' +
       '}\n' +
-    '})';
+      'await page.goto("https://www.tiktok.com/@" + ' + target + ', { timeout: 15000 });\n' +
+      'await new Promise(function(r) { setTimeout(r, 2500); });\n' +
+      'var msgBtn = await page.$(\'div[data-e2e="profile-message-button"]\');\n' +
+      'if (msgBtn) {\n' +
+      '  await msgBtn.click();\n' +
+      '  await new Promise(function(r) { setTimeout(r, 2000); });\n' +
+      '  var ta = await page.$(\'div[contenteditable="true"]\');\n' +
+      '  if (ta) {\n' +
+      '    await ta.click(); await page.keyboard.type(' + msg + ');\n' +
+      '    await new Promise(function(r) { setTimeout(r, 500); });\n' +
+      '    await page.keyboard.press("Enter");\n' +
+      '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
+      '    return { dmSent: true, deliveryMsg: "DM TikTok enviado (profile btn)" };\n' +
+      '  }\n' +
+      '}\n' +
+      'return { dmSent: false, deliveryMsg: "Erro DM TikTok (tentativa ' + attempt + ')" };\n' +
+    '}';
+  }
+
+  if (platform === 'facebook') {
+    return 'export default async function({ page }) {\n' +
+      UA_OVERRIDE + '\n' +
+      'if (' + ck + ') {\n' +
+      '  var bc = page.browserContext();\n' +
+      '  try { var p = JSON.parse(' + ck + '); for (var i = 0; i < p.length; i++) { await bc.setCookie(p[i]); } } catch(e) {}\n' +
+      '}\n' +
+      'await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 15000 });\n' +
+      'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
+      'var msgArea = await page.$(\'div[aria-label="Message"], div[contenteditable="true"][role="textbox"]\');\n' +
+      'if (msgArea) {\n' +
+      '  await msgArea.click(); await page.keyboard.type(' + msg + ');\n' +
+      '  await new Promise(function(r) { setTimeout(r, 500); });\n' +
+      '  await page.keyboard.press("Enter");\n' +
+      '  await new Promise(function(r) { setTimeout(r, 2000); });\n' +
+      '  return { dmSent: true, deliveryMsg: "DM Facebook enviado (direct URL)" };\n' +
+      '}\n' +
+      'return { dmSent: false, deliveryMsg: "Erro DM Facebook (tentativa ' + attempt + ')" };\n' +
+    '}';
   }
 
   return '';
@@ -349,8 +298,7 @@ async function automateLogin(platform: string, username: string, password: strin
   try {
     var code = makeLoginCode(platform, username, password);
     if (!code) return { success: false, error: 'Plataforma nao suportada: ' + platform };
-    var result = await runOnBrowserless(code, 45000);
-    return result;
+    return await runOnBrowserless(code, 45000);
   } catch (e: any) {
     return { success: false, error: 'Erro Browserless HTTP: ' + (e.message || 'timeout') };
   }
@@ -361,8 +309,7 @@ async function sendDMViaBrowserless(platform: string, targetUsername: string, me
   try {
     var code = makeDMCode(platform, targetUsername, message, cookiesJson, attempt);
     if (!code) return { dmSent: false, deliveryMsg: 'Plataforma nao suportada' };
-    var result = await runOnBrowserless(code, 45000);
-    return result;
+    return await runOnBrowserless(code, 45000);
   } catch (e: any) {
     return { dmSent: false, deliveryMsg: 'Erro Browserless HTTP (tentativa ' + attempt + '): ' + (e.message || 'timeout').substring(0, 80) };
   }
@@ -383,12 +330,8 @@ function attemptInstagramDirectDM(username: string, message: string, sessionid: 
         if (!userId) return { dmSent: false, deliveryMsg: 'User ID nao encontrado' };
         var clientContext = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
         var dmBody = new URLSearchParams({
-          recipient_users: '[[%7B' + userId + '%7D]]',
-          text: message,
-          client_context: clientContext,
-          action: 'send_item',
-          thread_ids: '["0"]',
-          platform: 'android'
+          recipient_users: '[[%7B' + userId + '%7D]]', text: message, client_context: clientContext,
+          action: 'send_item', thread_ids: '["0"]', platform: 'android'
         }).toString();
         var dmHeaders = { 'Cookie': cookies, 'X-CSRFToken': csrftoken, 'X-IG-App-ID': '936619743392459', 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': BL_UA, 'X-Requested-With': 'XMLHttpRequest', 'X-IG-WWW-Claim': '0' };
         return fetch('https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/', { method: 'POST', headers: dmHeaders, body: dmBody })
@@ -396,20 +339,12 @@ function attemptInstagramDirectDM(username: string, message: string, sessionid: 
             if (dmRes.ok) return { dmSent: true, deliveryMsg: 'DM IG enviado (API directa)' };
             return dmRes.text().then(function(txt) {
               return { dmSent: false, deliveryMsg: 'DM IG falhou HTTP ' + dmRes.status + ': ' + txt.substring(0, 120) };
-            }).catch(function() {
-              return { dmSent: false, deliveryMsg: 'DM IG falhou HTTP ' + dmRes.status };
-            });
+            }).catch(function() { return { dmSent: false, deliveryMsg: 'DM IG falhou HTTP ' + dmRes.status }; });
           })
-          .catch(function() {
-            return { dmSent: false, deliveryMsg: 'Erro ao enviar DM IG' };
-          });
-      }).catch(function() {
-        return { dmSent: false, deliveryMsg: 'Erro ao processar perfil IG' };
-      });
+          .catch(function() { return { dmSent: false, deliveryMsg: 'Erro ao enviar DM IG' }; });
+      }).catch(function() { return { dmSent: false, deliveryMsg: 'Erro ao processar perfil IG' }; });
     })
-    .catch(function() {
-      return { dmSent: false, deliveryMsg: 'Erro de conexao com Instagram' };
-    });
+    .catch(function() { return { dmSent: false, deliveryMsg: 'Erro de conexao com Instagram' }; });
 }
 
 /* ===== ROBUST SEND ===== */
@@ -480,5 +415,5 @@ export async function POST(request: any) {
 /* ===== GET ===== */
 export async function GET() {
   var blOnline = await checkBrowserless();
-  return NextResponse.json({ maxPerDay: MAX_PER_DAY, remainingToday: MAX_PER_DAY, browserless: { online: blOnline, mode: 'http-function-esm' } });
+  return NextResponse.json({ maxPerDay: MAX_PER_DAY, remainingToday: MAX_PER_DAY, browserless: { online: blOnline, mode: 'http-function-esm-export-default' } });
 }
