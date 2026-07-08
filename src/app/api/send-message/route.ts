@@ -36,43 +36,30 @@ async function automateLogin(platform, username, password) {
   var browser = null;
   try {
     browser = await chromium.connect(BL_WSS, { timeout: 12000 });
-    var context = browser.contexts()[0];
+    var context = browser.contexts()[0] || await browser.newContext({ userAgent: BL_UA });
     var page = context.pages()[0] || await context.newPage();
 
     await page.setViewportSize({ width: 375, height: 812 });
     await page.setExtraHTTPHeaders({ 'User-Agent': BL_UA });
 
     if (platform === 'instagram') {
-      await page.goto('https://www.instagram.com/accounts/login/', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await sleep(2000);
+      await page.goto('https://www.instagram.com/accounts/login/', { timeout: 15000 }).catch(function() {});
+      await sleep(3000);
 
       await page.fill('input[name="username"]', username);
       await page.fill('input[name="password"]', password);
-      await page.click('button[type="submit"]');
+      await page.click('div[role="button"]:has-text("Log in")');
       await sleep(6000);
 
       var urlNow = page.url();
       if (urlNow.indexOf('/accounts/login') >= 0) {
-        // Check for "save login info" popup and dismiss it
-        try {
-          await page.click('button:has-text("Not Now")', { timeout: 2000 });
-          await sleep(1000);
-        } catch(e) {}
         await browser.close();
         return { success: false, error: 'Login falhou - credenciais invalidas ou captcha' };
       }
 
-      // Dismiss "save login info" popup if it appears
-      try {
-        await page.click('button:has-text("Not Now")', { timeout: 2000 });
-        await sleep(500);
-      } catch(e) {}
-
-      // Dismiss notifications popup
-      try {
-        await page.click('button:has-text("Not Now")', { timeout: 2000 });
-        await sleep(500);
-      } catch(e) {}
+      // Dismiss popups (save login info, notifications) — may be div or button
+      try { await page.click('div[role="button"]:has-text("Not Now")', { timeout: 2000 }); await sleep(500); } catch(e) {}
+      try { await page.click('button:has-text("Not Now")', { timeout: 2000 }); await sleep(500); } catch(e) {}
 
       await sleep(2000);
       var cookies = await context.cookies();
@@ -88,15 +75,20 @@ async function automateLogin(platform, username, password) {
     }
 
     if (platform === 'tiktok') {
-      await page.goto('https://www.tiktok.com/login', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await sleep(2000);
+      await page.goto('https://www.tiktok.com/login', { timeout: 15000 }).catch(function() {});
+      await sleep(3000);
 
       try { await page.click('text=Use phone / email / username'); } catch(e) {}
       await sleep(1000);
 
       await page.fill('input[type="text"]', username);
       await page.fill('input[type="password"]', password);
-      await page.click('button[type="submit"]');
+      // TikTok may use button or div for submit
+      try { await page.click('button[type="submit"]'); } catch(e) {
+        try { await page.click('div[role="button"]:has-text("Log in")'); } catch(e2) {
+          await page.keyboard.press('Enter');
+        }
+      }
       await sleep(6000);
 
       var cookies = await context.cookies();
@@ -115,8 +107,8 @@ async function automateLogin(platform, username, password) {
     }
 
     if (platform === 'facebook') {
-      await page.goto('https://www.facebook.com/login', { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await sleep(2000);
+      await page.goto('https://www.facebook.com/login', { timeout: 15000 }).catch(function() {});
+      await sleep(3000);
 
       await page.fill('input[id="email"]', username);
       await page.fill('input[id="pass"]', password);
@@ -153,7 +145,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
   var browser = null;
   try {
     browser = await chromium.connect(BL_WSS, { timeout: 12000 });
-    var context = browser.contexts()[0];
+    var context = browser.contexts()[0] || await browser.newContext({ userAgent: BL_UA });
     var page = context.pages()[0] || await context.newPage();
 
     await page.setViewportSize({ width: 375, height: 812 });
@@ -166,7 +158,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
 
     if (platform === 'instagram') {
       // METHOD A: Use direct new message flow
-      await page.goto('https://www.instagram.com/direct/new/', { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.goto('https://www.instagram.com/direct/new/', { timeout: 15000 });
       await sleep(2000);
 
       await page.fill('input[placeholder="Search..."]', username);
@@ -190,7 +182,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
         if (!clicked) {
           // METHOD B: Try going directly to user profile and message from there
           try {
-            await page.goto('https://www.instagram.com/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 10000 });
+            await page.goto('https://www.instagram.com/' + username + '/', { timeout: 10000 });
             await sleep(1500);
             // Look for message button on profile
             var msgBtn = await page.$('button:has-text("Message")');
@@ -209,7 +201,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
 
           // METHOD C: Try share/profile message endpoint
           try {
-            await page.goto('https://www.instagram.com/direct/new/', { waitUntil: 'domcontentloaded', timeout: 10000 });
+            await page.goto('https://www.instagram.com/direct/new/', { timeout: 10000 });
             await sleep(1500);
             // Clear and retry search
             var searchInput = await page.$('input[placeholder="Search..."]');
@@ -245,7 +237,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
     }
 
     if (platform === 'tiktok') {
-      await page.goto('https://www.tiktok.com/@' + username, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.goto('https://www.tiktok.com/@' + username, { timeout: 15000 });
       await sleep(2500);
 
       // METHOD A: Profile message button
@@ -269,7 +261,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
 
       // METHOD B: Try direct message URL
       try {
-        await page.goto('https://www.tiktok.com/@' + username, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await page.goto('https://www.tiktok.com/@' + username, { timeout: 10000 });
         await sleep(2000);
         var btns = await page.$$('header button, header div[role="button"]');
         for (var bi = 0; bi < btns.length; bi++) {
@@ -297,7 +289,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
 
     if (platform === 'facebook') {
       // METHOD A: Direct message URL
-      await page.goto('https://www.facebook.com/messages/t/' + username, { waitUntil: 'domcontentloaded', timeout: 15000 });
+      await page.goto('https://www.facebook.com/messages/t/' + username, { timeout: 15000 });
       await sleep(3000);
 
       try {
@@ -316,7 +308,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
 
       // METHOD B: Search for user in messages
       try {
-        await page.goto('https://www.facebook.com/messages/', { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await page.goto('https://www.facebook.com/messages/', { timeout: 10000 });
         await sleep(2000);
         // Try finding new message button
         var newMsgBtn = await page.$('a[href*="/messages/new/"], div[role="button"]:has-text("New message"), div[role="button"]:has-text("Nova mensagem")');
@@ -348,7 +340,7 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson, at
 
       // METHOD C: Go to user profile and message from there
       try {
-        await page.goto('https://www.facebook.com/' + username, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await page.goto('https://www.facebook.com/' + username, { timeout: 10000 });
         await sleep(2000);
         var fbMsgBtn = await page.$('a[href*="/messages/t/"], div[role="button"]:has-text("Message"), div[role="button"]:has-text("Mensagem")');
         if (fbMsgBtn) {
