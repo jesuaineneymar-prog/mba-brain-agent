@@ -226,9 +226,15 @@ function makeLoginCode(platform: string, username: string, password: string): st
       'await evalFill(page, \'input[id="pass"]\', ' + p + ');\n' +
       'await evalClick(page, \'button[name="login"]\');\n' +
       'await evalSleep(7000);\n' +
+      'var urlNow = page.url();\n' +
+      'if (urlNow.indexOf("/login") >= 0) {\n' +
+      '  var errMsg = await page.evaluate(function() { var els = document.querySelectorAll("#login_form .uiBoxRed, ._4rbf, [role=alert]"); return els.length > 0 ? els[0].textContent : ""; }).catch(function() { return ""; });\n' +
+      '  return { success: false, error: "Login FB falhou" + (errMsg ? ": " + errMsg.trim().substring(0, 80) : " - credenciais erradas") };\n' +
+      '}\n' +
       'try { await evalClickText(page, "Not Now"); await evalSleep(500); } catch(e) {}\n' +
+      'try { await evalClickText(page, "Agora nao"); await evalSleep(500); } catch(e) {}\n' +
       'var cookies = await getCookies(page);\n' +
-      'return { success: true, fbToken: getCookieVal(cookies, "datr"), cookiesJson: JSON.stringify(cookies), message: "Login FB feito" };\n' +
+      'return { success: true, fbToken: getCookieVal(cookies, "datr"), cookiesJson: JSON.stringify(cookies), sessionid: getCookieVal(cookies, "sb"), csrftoken: getCookieVal(cookies, "xs"), message: "Login FB feito" };\n' +
     '}';
   }
 
@@ -302,14 +308,69 @@ function makeDMCode(platform: string, targetUsername: string, message: string, c
   if (platform === 'facebook') {
     return pre +
       'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
+      // === METHOD A: Ir a pagina do perfil, clicar Message ===\n' +
+      'await page.goto("https://www.facebook.com/" + ' + target + "/", { timeout: 15000 });\n' +
+      'await evalSleep(4000);\n' +
+      'var clicked = false;\n' +
+      'clicked = await evalClickText(page, "Message");\n' +
+      'if (!clicked) clicked = await evalClickText(page, "Enviar mensagem");\n' +
+      'if (!clicked) clicked = await evalClick(page, "a[aria-label=\"Send message\"]");\n' +
+      'if (!clicked) clicked = await evalClick(page, "a[aria-label=\"Message\"]");\n' +
+      'if (!clicked) clicked = await evalClick(page, "div[role=\"button\"] a[href*=\"/messages/t/\"]");\n' +
+      'if (clicked) {\n' +
+      '  await evalSleep(3000);\n' +
+      '  var hasBox = await evalExists(page, "div[contenteditable=\"true\"]");\n' +
+      '  if (!hasBox) hasBox = await evalExists(page, "div[role=\"textbox\"]");\n' +
+      '  if (!hasBox) hasBox = await evalExists(page, "div[data-lexical-editor=\"true\"]");\n' +
+      '  if (hasBox) {\n' +
+      '    await evalClick(page, "div[contenteditable=\"true\"]");\n' +
+      '    await evalSleep(500);\n' +
+      '    await evalType(page, ' + msg + ');\n' +
+      '    await evalSleep(1000);\n' +
+      '    await evalPressEnter(page);\n' +
+      '    await evalSleep(2500);\n' +
+      '    return { dmSent: true, deliveryMsg: "DM FB enviado (profile)" };\n' +
+      '  }\n' +
+      '}\n' +
+      // === METHOD B: Compor nova mensagem ===\n' +
+      'await page.goto("https://www.facebook.com/messages/compose/", { timeout: 15000 });\n' +
+      'await evalSleep(4000);\n' +
+      'var hasTo = await evalExists(page, "input[aria-label=\"To\"]");\n' +
+      'if (!hasTo) hasTo = await evalExists(page, "input[name=\"query\"]");\n' +
+      'if (hasTo) {\n' +
+      '  await evalFill(page, "input[aria-label=\"To\"]", ' + target + ');\n' +
+      '  await evalSleep(3000);\n' +
+      '  var clickedItem = await evalClick(page, "ul[role=\"listbox\"] li");\n' +
+      '  if (!clickedItem) clickedItem = await evalClick(page, "div[role=\"option\"]");\n' +
+      '  if (clickedItem) {\n' +
+      '    await evalSleep(2000);\n' +
+      '    var hasMsg = await evalExists(page, "div[contenteditable=\"true\"]");\n' +
+      '    if (hasMsg) {\n' +
+      '      await evalClick(page, "div[contenteditable=\"true\"]");\n' +
+      '      await evalSleep(500);\n' +
+      '      await evalType(page, ' + msg + ');\n' +
+      '      await evalSleep(1000);\n' +
+      '      await evalPressEnter(page);\n' +
+      '      await evalSleep(2500);\n' +
+      '      return { dmSent: true, deliveryMsg: "DM FB enviado (compose)" };\n' +
+      '    }\n' +
+      '  }\n' +
+      '}\n' +
+      // === METHOD C: URL directa messages/t/ ===\n' +
       'await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 15000 });\n' +
-      'await evalSleep(3500);\n' +
-      'var msgOk = await evalClick(page, \'div[aria-label="Message"], div[contenteditable=true][role="textbox"]\');\n' +
-      'if (msgOk) {\n' +
+      'await evalSleep(4000);\n' +
+      'var hasDirect = await evalExists(page, "div[contenteditable=\"true\"]");\n' +
+      'if (!hasDirect) hasDirect = await evalExists(page, "div[role=\"textbox\"]");\n' +
+      'if (!hasDirect) hasDirect = await evalExists(page, "div[data-lexical-editor=\"true\"]");\n' +
+      'if (!hasDirect) hasDirect = await evalExists(page, "textarea");\n' +
+      'if (hasDirect) {\n' +
+      '  await evalClick(page, "div[contenteditable=\"true\"]");\n' +
+      '  await evalSleep(500);\n' +
       '  await evalType(page, ' + msg + ');\n' +
+      '  await evalSleep(1000);\n' +
       '  await evalPressEnter(page);\n' +
       '  await evalSleep(2500);\n' +
-      '  return { dmSent: true, deliveryMsg: "DM FB enviado" };\n' +
+      '  return { dmSent: true, deliveryMsg: "DM FB enviado (direct)" };\n' +
       '}\n' +
       'return { dmSent: false, deliveryMsg: "Falha DM FB (tentativa ' + attempt + ')" };\n' +
     '}';
