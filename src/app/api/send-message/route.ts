@@ -144,6 +144,32 @@ function makeLoginCode(platform: string, username: string, password: string): st
   }
 
   if (platform === 'tiktok') {
+    // Se nao tem password, tentar login por email (envia codigo)
+    if (!password) {
+      return 'export default async function({ page }) {\n' +
+        UA_OVERRIDE + '\n' +
+        'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
+        'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
+        'try { await page.click("text=Use phone / email / username"); } catch(e) {}\n' +
+        'await new Promise(function(r) { setTimeout(r, 1500); });\n' +
+        'var emailTab = await page.$("text=Email");\n' +
+        'if (emailTab) { await emailTab.click(); await new Promise(function(r) { setTimeout(r, 1000); }); }\n' +
+        'await page.fill(\'input[type="text"]\', ' + u + ');\n' +
+        'await new Promise(function(r) { setTimeout(r, 500); });\n' +
+        'try { await page.click(\'button[type="submit"]\'); } catch(e) { try { await page.click(\'div[role="button"]:has-text("Send code")\'); } catch(e2) { await page.keyboard.press("Enter"); } }\n' +
+        'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
+        'var codeInput = await page.$(\'input[data-e2e="verify-code-input"]\');\n' +
+        'if (codeInput) { return { success: false, needsCode: true, error: "TikTok envio codigo de verificacao para o teu email. Login automatico nao e possivel sem password.\n\nSolucao: Define uma password no TikTok (Settings > Account > Password) para poder automatizar o login." }; }\n' +
+        'var bc = page.browserContext();\n' +
+        'var cookies = await bc.cookies();\n' +
+        'var cookiesJson = JSON.stringify(cookies);\n' +
+        'var sessionid = "";\n' +
+        'for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === "sessionid") sessionid = cookies[i].value; }\n' +
+        'if (sessionid) { return { success: true, sessionid: sessionid, cookiesJson: cookiesJson, message: "Login TikTok feito com sucesso" }; }\n' +
+        'return { success: false, needsCode: true, error: "TikTok login por email requer verificacao. Define uma password nas definicoes da tua conta TikTok para automatizar." };\n' +
+      '}';
+    }
+    // Com password - login normal
     return 'export default async function({ page }) {\n' +
       UA_OVERRIDE + '\n' +
       'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
@@ -397,8 +423,9 @@ export async function POST(request: any) {
 
   if (body.action === 'login') {
     var platform = body.platform || 'instagram';
-    if (!body.username || !body.password) return NextResponse.json({ success: false, error: 'Username e password obrigatorios' });
-    return NextResponse.json(await automateLogin(platform, body.username, body.password));
+    if (!body.username) return NextResponse.json({ success: false, error: 'Username obrigatorio' });
+    if (!body.password && platform !== 'tiktok') return NextResponse.json({ success: false, error: 'Password obrigatoria para ' + platform });
+    return NextResponse.json(await automateLogin(platform, body.username, body.password || ''));
   }
 
   var dmUsername = body.username || '';

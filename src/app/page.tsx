@@ -718,9 +718,9 @@ function MessagesTab() {
     for (var i = 0; i < ALL_PLATFORMS.length; i++) {
       var pf = ALL_PLATFORMS[i];
       var pc = cfg.platforms && cfg.platforms[pf];
-      if (pc && pc.enabled && pc.username && pc.password) {
+      if (pc && pc.enabled && pc.username && (pc.password || pf === 'tiktok')) {
         if (autoStopRef.current) break;
-        var ok = await doLoginForPlatform(pf, pc.username, pc.password);
+        var ok = await doLoginForPlatform(pf, pc.username, pc.password || '');
         if (ok) loggedInPlats.push(pf);
       }
     }
@@ -796,10 +796,10 @@ function MessagesTab() {
         if (autoStopRef.current) break;
         var rpf = loggedInPlats[ri];
         var rpc = cfg.platforms && cfg.platforms[rpf];
-        if (rpc && rpc.username && rpc.password) {
+        if (rpc && rpc.username && (rpc.password || rpf === 'tiktok')) {
           var resetSt = JSON.parse(JSON.stringify(loginStatus)); resetSt[rpf] = { loggedIn: false };
           setLoginStatus(resetSt);
-          await doLoginForPlatform(rpf, rpc.username, rpc.password);
+          await doLoginForPlatform(rpf, rpc.username, rpc.password || '');
         }
       }
 
