@@ -422,74 +422,84 @@ export async function POST(request: any) {
   var fbRaw: any[] = [], fbSeen = new Set<string>();
 
   // =============================================
-  // PHASE 1: DISCOVERY — DDG para TODAS as plataformas
-  // Temos 60s total. Budget: IG 21s, FB 14s, TT 7s, Enrichment 14s, Buffer 4s
+  // PHASE 1: DISCOVERY — DDG em PARALELO para todas as plataformas
+  // Cada plataforma tem o seu proprio timeout (5s por query)
+  // IG: 4 queries, FB: 3 queries, TT: 2 queries = ~20s total em paralelo
   // =============================================
 
+  var discoveryPromises: Promise<void>[] = [];
+
   if (doIG) {
-    var igQ = getIGQueries();
-    var igUrlRe = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'])/g;
-    for (var iqi = 0; iqi < igQ.length && timeLeft(t0, 21000); iqi++) {
-      var igUsers = await searchDDG(igQ[iqi], igUrlRe, 7000);
-      for (var ii = 0; ii < igUsers.length; ii++) {
-        var igUn = igUsers[ii];
-        if (isValidIG(igUn) && !igSeen.has(igUn.toLowerCase())) {
-          igSeen.add(igUn.toLowerCase());
-          igRaw.push({
-            platform: 'instagram', username: igUn, fullName: '',
-            followers: 0, following: 0, postsCount: 0, bio: '',
-            profileUrl: 'https://instagram.com/' + igUn, avatarUrl: '',
-            isVerified: false, category: '', _angolaQuery: true
-          });
+    discoveryPromises.push((async function() {
+      var igQ = getIGQueries();
+      var igUrlRe = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'])/g;
+      var maxQ = Math.min(igQ.length, 4);
+      for (var iqi = 0; iqi < maxQ && timeLeft(t0, 25000); iqi++) {
+        var igUsers = await searchDDG(igQ[iqi], igUrlRe, 5000);
+        for (var ii = 0; ii < igUsers.length; ii++) {
+          var igUn = igUsers[ii];
+          if (isValidIG(igUn) && !igSeen.has(igUn.toLowerCase())) {
+            igSeen.add(igUn.toLowerCase());
+            igRaw.push({
+              platform: 'instagram', username: igUn, fullName: '',
+              followers: 0, following: 0, postsCount: 0, bio: '',
+              profileUrl: 'https://instagram.com/' + igUn, avatarUrl: '',
+              isVerified: false, category: '', _angolaQuery: true
+            });
+          }
         }
       }
-    }
-    logs.push('IG DDG: ' + igRaw.length + ' users');
+    })());
   }
 
   if (doFB) {
-    var fbQ = getFBQueries();
-    var fbUrlRe = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})/g;
-    for (var fqi = 0; fqi < fbQ.length && timeLeft(t0, 35000); fqi++) {
-      var fbPages = await searchDDG(fbQ[fqi], fbUrlRe, 7000);
-      for (var fpi = 0; fpi < fbPages.length; fpi++) {
-        var fp = fbPages[fpi];
-        if (isValidFB(fp) && !fbSeen.has(fp.toLowerCase())) {
-          fbSeen.add(fp.toLowerCase());
-          fbRaw.push({
-            platform: 'facebook', username: fp, fullName: '',
-            followers: 0, following: 0, postsCount: 0, bio: '',
-            profileUrl: 'https://facebook.com/' + fp, avatarUrl: '',
-            isVerified: false, category: '', _angolaQuery: true
-          });
+    discoveryPromises.push((async function() {
+      var fbQ = getFBQueries();
+      var fbUrlRe = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})/g;
+      var maxQ = Math.min(fbQ.length, 3);
+      for (var fqi = 0; fqi < maxQ && timeLeft(t0, 25000); fqi++) {
+        var fbPages = await searchDDG(fbQ[fqi], fbUrlRe, 5000);
+        for (var fpi = 0; fpi < fbPages.length; fpi++) {
+          var fp = fbPages[fpi];
+          if (isValidFB(fp) && !fbSeen.has(fp.toLowerCase())) {
+            fbSeen.add(fp.toLowerCase());
+            fbRaw.push({
+              platform: 'facebook', username: fp, fullName: '',
+              followers: 0, following: 0, postsCount: 0, bio: '',
+              profileUrl: 'https://facebook.com/' + fp, avatarUrl: '',
+              isVerified: false, category: '', _angolaQuery: true
+            });
+          }
         }
       }
-    }
-    logs.push('FB DDG: ' + fbRaw.length + ' pages');
+    })());
   }
 
   if (doTT) {
-    var ttQ = getTTQueries();
-    var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
-    for (var qi = 0; qi < ttQ.length && timeLeft(t0, 42000); qi++) {
-      var ttUsers = await searchDDG(ttQ[qi], ttUrlRe, 7000);
-      for (var ti = 0; ti < ttUsers.length; ti++) {
-        var ttUn = ttUsers[ti];
-        if (isValidTT(ttUn) && !ttSeen.has(ttUn.toLowerCase())) {
-          ttSeen.add(ttUn.toLowerCase());
-          ttRaw.push({
-            platform: 'tiktok', username: ttUn, fullName: '',
-            followers: 0, following: 0, postsCount: 0, bio: '',
-            profileUrl: 'https://tiktok.com/@' + ttUn, avatarUrl: '',
-            isVerified: false, category: '', _angolaQuery: true
-          });
+    discoveryPromises.push((async function() {
+      var ttQ = getTTQueries();
+      var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
+      var maxQ = Math.min(ttQ.length, 2);
+      for (var qi = 0; qi < maxQ && timeLeft(t0, 25000); qi++) {
+        var ttUsers = await searchDDG(ttQ[qi], ttUrlRe, 5000);
+        for (var ti = 0; ti < ttUsers.length; ti++) {
+          var ttUn = ttUsers[ti];
+          if (isValidTT(ttUn) && !ttSeen.has(ttUn.toLowerCase())) {
+            ttSeen.add(ttUn.toLowerCase());
+            ttRaw.push({
+              platform: 'tiktok', username: ttUn, fullName: '',
+              followers: 0, following: 0, postsCount: 0, bio: '',
+              profileUrl: 'https://tiktok.com/@' + ttUn, avatarUrl: '',
+              isVerified: false, category: '', _angolaQuery: true
+            });
+          }
         }
       }
-    }
-    logs.push('TT DDG: ' + ttRaw.length + ' users');
+    })());
   }
 
-  logs.push('After discovery: TT=' + ttRaw.length + ' IG=' + igRaw.length + ' FB=' + fbRaw.length);
+  await Promise.all(discoveryPromises);
+  logs.push('Discovery parallel: TT=' + ttRaw.length + ' IG=' + igRaw.length + ' FB=' + fbRaw.length);
 
   // =============================================
   // PHASE 2: Enrichment (28-57s) — ~29s para enriquecer
@@ -648,6 +658,7 @@ export async function POST(request: any) {
   // Se ainda nao chega ao target, aceitar perfis nao enriquecidos (0 seguidores = "—")
   // Mas perfis enriquecidos com < minF continuam bloqueados
   // PRIORIDADE no backfill: IG > FB > TT
+  // NAO adicionar perfis com 0 seguidores (nao enriquecidos) — so adiciona se tem seguidores validos
   if (qualified.length < target) {
     var allRaw = (doIG ? igRaw : []).concat(doFB ? fbRaw : []).concat(doTT ? ttRaw : []);
     var seenIds = new Set(qualified.map(function(p) { return p.username; }));
@@ -656,9 +667,8 @@ export async function POST(request: any) {
       if (seenIds.has(rp.username)) continue;
       if (!rp.username || isBot(rp) || isBiz(rp)) continue;
       if (scoreProfile(rp) < 0) continue;
-      // Bloquear enriquecidos com poucos seguidores, aceitar nao enriquecidos (0 = "—")
       var rf = rp.followers || 0;
-      if (rf > 0 && rf < minF) continue;
+      if (rf < minF) continue; // Bloqueia 0 seguidores E < minF
       if (rf > maxF) continue;
       seenIds.add(rp.username);
       var ep = makeProfile(rp, loc);

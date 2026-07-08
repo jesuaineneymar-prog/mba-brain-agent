@@ -191,16 +191,30 @@ function makeLoginCode(platform: string, username: string, password: string): st
     return pre +
       'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
       'await evalSleep(3000);\n' +
-      'await evalClickText(page, "Use phone / email / username");\n' +
-      'await evalSleep(1000);\n' +
+      // Tentar varias formas de clicar no login por email/user
+      'var clickedTab = await evalClickText(page, "Use phone / email / username");\n' +
+      'if (!clickedTab) { await evalClick(page, "div[data-e2e=login-tab-item]"); await evalSleep(1000); }\n' +
+      'await evalSleep(1500);\n' +
+      // Tentar encontrar o input de email/username
+      'var hasInput = await evalExists(page, \'input[type="text"]\');\n' +
+      'if (!hasInput) { hasInput = await evalExists(page, "input[name=username]"); }\n' +
+      'if (!hasInput) return { success: false, error: "TT nao mostrou campo de login. Tenta novamente." };\n' +
       'await evalFill(page, \'input[type="text"]\', ' + u + ');\n' +
-      'await evalFill(page, \'input[type="password"]\', ' + p + ');\n' +
+      // Se ha campo de password
+      'var hasPass = await evalExists(page, \'input[type="password"]\');\n' +
+      'if (hasPass) { await evalFill(page, \'input[type="password"]\', ' + p + '); }\n' +
       'await evalPressEnter(page);\n' +
       'await evalSleep(7000);\n' +
       'var cookies = await getCookies(page);\n' +
       'var sid = getCookieVal(cookies, "sessionid");\n' +
       'if (sid) return { success: true, sessionid: sid, csrftoken: getCookieVal(cookies, "tt_csrf_token"), cookiesJson: JSON.stringify(cookies), message: "Login TT feito" };\n' +
-      'return { success: false, error: "Login TT falhou - verifica credenciais" };\n' +
+      'var urlNow = page.url();\n' +
+      'if (urlNow.indexOf("login") < 0) {\n' +
+      '  cookies = await getCookies(page);\n' +
+      '  sid = getCookieVal(cookies, "sessionid");\n' +
+      '  if (sid) return { success: true, sessionid: sid, csrftoken: getCookieVal(cookies, "tt_csrf_token"), cookiesJson: JSON.stringify(cookies), message: "Login TT feito" };\n' +
+      '}\n' +
+      'return { success: false, error: "Login TT falhou - credenciais erradas ou captcha" };\n' +
     '}';
   }
 
