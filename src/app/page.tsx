@@ -580,8 +580,8 @@ function MessagesTab() {
   }, []);
 
   useEffect(function() {
-    fetch('/api/send-message', { headers:{'x-mba-session':'active'} }).then(function(r) { return r.json(); }).then(function(data) {
-      setBlStatus({ online: !!data.browserless && data.browserless.online, loading: false });
+    fetch('/api/send-message', { headers:{'x-mba-session':'active'} }).then(function(r) { return r.json().catch(function() { return null; }); }).then(function(data) {
+      setBlStatus({ online: !!data && data.browserless && data.browserless.online, loading: false });
     }).catch(function() { setBlStatus({ online: false, loading: false }); });
     // Restore login status
     try { var saved = storeGet('mba_login_status', ''); if (saved) setLoginStatus(JSON.parse(saved)); } catch(e) {}
@@ -858,7 +858,7 @@ function MessagesTab() {
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
           <div style={{ width:8, height:8, borderRadius:'50%', background: blStatus.loading ? '#888' : blStatus.online ? P.green : '#ff4444', flexShrink:0 }} />
           <div style={{ fontSize:11, fontWeight:700, color: blStatus.online ? P.green : '#ff4444' }}>{blStatus.loading ? 'Verificando...' : blStatus.online ? 'Browserless Online - DMs activos' : 'Browserless Offline'}</div>
-          {!blStatus.loading && <button onClick={async function() { setDiagRunning(true); setDiagResult(null); try { var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'diagnostic' }) }); var d = await r.json(); setDiagResult(d); } catch(e) { setDiagResult({ error: (e as any).message }); } setDiagRunning(false); }} style={{ padding:'2px 8px', borderRadius:4, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:9, cursor:'pointer', marginLeft:'auto' }}>{diagRunning ? '...' : 'Diag'}</button>}
+          {!blStatus.loading && <button onClick={async function() { setDiagRunning(true); setDiagResult(null); try { var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'diagnostic' }) }); var d = await r.json().catch(function() { return { error: 'Resposta nao e JSON (HTML error page?)' }; }); setDiagResult(d); } catch(e) { setDiagResult({ error: (e as any).message }); } setDiagRunning(false); }} style={{ padding:'2px 8px', borderRadius:4, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:9, cursor:'pointer', marginLeft:'auto' }}>{diagRunning ? '...' : 'Diag'}</button>}
         </div>
         <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
           {ALL_PLATFORMS.map(function(pf) {
