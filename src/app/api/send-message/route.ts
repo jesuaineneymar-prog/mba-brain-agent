@@ -372,24 +372,44 @@ async function sendDMViaBrowserless(platform: string, targetUsername: string, me
 function attemptInstagramDirectDM(username: string, message: string, sessionid: string, csrftoken: string) {
   var dsUserId = sessionid.split('%3A')[0] || '';
   var cookies = 'sessionid=' + sessionid + '; csrftoken=' + csrftoken + '; ds_user_id=' + dsUserId;
-  return fetch('https://www.instagram.com/api/v1/users/web_profile_info/?username=' + username, {
-    headers: { 'Cookie': cookies, 'X-IG-App-ID': '936619743392459', 'X-CSRFToken': csrftoken, 'User-Agent': BL_UA, 'X-Requested-With': 'XMLHttpRequest' }
-  }).then(function(profileRes) {
-    if (!profileRes.ok) return { dmSent: false, deliveryMsg: 'Perfil IG nao encontrado (HTTP ' + profileRes.status + ')' };
-    return profileRes.json().then(function(profileData) {
-      var userData = profileData.data && profileData.data.user;
-      var userId = userData && (userData.pk || userData.id);
-      if (!userId) return { dmSent: false, deliveryMsg: 'User ID nao encontrado' };
-      var clientContext = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
-      return fetch('https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/', {
-        method: 'POST',
-        headers: { 'Cookie': cookies, 'X-CSRFToken': csrftoken, 'X-IG-App-ID': '936619743392459', 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': BL_UA, 'X-Requested-With': 'XMLHttpRequest', 'X-IG-WWW-Claim': '0' },
-        body: new URLSearchParams({ recipient_users: '[[%7B' + userId + '%7D]]', text: message, client_context: clientContext, action: 'send_item', thread_ids: '["0"]', platform: 'android' }).toString()
-      }).then(function(dmRes) {
-        if (dmRes.ok) return { dmSent: true, deliveryMsg: 'DM IG enviado (API directa)' };
-        return dmRes.text().then(function(txt) { return { dmSent: false, deliveryMsg: 'DM IG falhou HTTP ' + dmRes.status + ': ' + txt.substring(0, 120) }; }).catch(function() { return { dmSent: false, deliveryMsg: 'DM IG falhou HTTP ' + dmRes.status }; });
-    }).catch(function() { return { dmSent: false, deliveryMsg: 'Erro ao processar perfil IG' }; });
-  }).catch(function() { return { dmSent: false, deliveryMsg: 'Erro de conexao com Instagram' }; });
+  var igHeaders = { 'Cookie': cookies, 'X-IG-App-ID': '936619743392459', 'X-CSRFToken': csrftoken, 'User-Agent': BL_UA, 'X-Requested-With': 'XMLHttpRequest' };
+
+  return fetch('https://www.instagram.com/api/v1/users/web_profile_info/?username=' + username, { headers: igHeaders })
+    .then(function(profileRes) {
+      if (!profileRes.ok) return { dmSent: false, deliveryMsg: 'Perfil IG nao encontrado (HTTP ' + profileRes.status + ')' };
+      return profileRes.json().then(function(profileData) {
+        var userData = profileData.data && profileData.data.user;
+        var userId = userData && (userData.pk || userData.id);
+        if (!userId) return { dmSent: false, deliveryMsg: 'User ID nao encontrado' };
+        var clientContext = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
+        var dmBody = new URLSearchParams({
+          recipient_users: '[[%7B' + userId + '%7D]]',
+          text: message,
+          client_context: clientContext,
+          action: 'send_item',
+          thread_ids: '["0"]',
+          platform: 'android'
+        }).toString();
+        var dmHeaders = { 'Cookie': cookies, 'X-CSRFToken': csrftoken, 'X-IG-App-ID': '936619743392459', 'Content-Type': 'application/x-www-form-urlencoded', 'User-Agent': BL_UA, 'X-Requested-With': 'XMLHttpRequest', 'X-IG-WWW-Claim': '0' };
+        return fetch('https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/', { method: 'POST', headers: dmHeaders, body: dmBody })
+          .then(function(dmRes) {
+            if (dmRes.ok) return { dmSent: true, deliveryMsg: 'DM IG enviado (API directa)' };
+            return dmRes.text().then(function(txt) {
+              return { dmSent: false, deliveryMsg: 'DM IG falhou HTTP ' + dmRes.status + ': ' + txt.substring(0, 120) };
+            }).catch(function() {
+              return { dmSent: false, deliveryMsg: 'DM IG falhou HTTP ' + dmRes.status };
+            });
+          })
+          .catch(function() {
+            return { dmSent: false, deliveryMsg: 'Erro ao enviar DM IG' };
+          });
+      }).catch(function() {
+        return { dmSent: false, deliveryMsg: 'Erro ao processar perfil IG' };
+      });
+    })
+    .catch(function() {
+      return { dmSent: false, deliveryMsg: 'Erro de conexao com Instagram' };
+    });
 }
 
 /* ===== ROBUST SEND ===== */
