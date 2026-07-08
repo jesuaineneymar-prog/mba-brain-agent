@@ -557,6 +557,10 @@ function MessagesTab() {
   const [diagRunning, setDiagRunning] = useState(false);
 
   // Auto-send state
+  const [igCookieSession, setIgCookieSession] = useState('');
+  const [igCookieCsrf, setIgCookieCsrf] = useState('');
+  const [igCookieLoading, setIgCookieLoading] = useState(false);
+  const [igCookieMsg, setIgCookieMsg] = useState('');
   const [autoSending, setAutoSending] = useState(false);
   const [autoProgress, setAutoProgress] = useState<any>(null);
   const [autoLog, setAutoLog] = useState<any[]>([]);
@@ -875,6 +879,42 @@ function MessagesTab() {
             return <div key={i} style={{ color: s.ok ? P.green : '#ff4444' }}>{s.ok ? '\u2713' : '\u2717'} {s.step}: {s.ok ? 'OK' + (s.status ? ' (HTTP '+s.status+')' : '') + (s.url ? ' url='+s.url : '') + (s.hasForm !== undefined ? ' form='+s.hasForm : '') : (s.error || 'falhou')}</div>;
           }) : <div style={{ color:'#ff4444' }}>Erro: {JSON.stringify(diagResult)}</div>}
         </div>}
+      </div>
+
+      {/* IG Cookies Manual (bypass captcha) */}
+      <div style={{ padding:'10px 14px', borderRadius:8, border:'1px solid rgba(59,130,246,0.3)', background:'rgba(59,130,246,0.06)', marginBottom:14 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+          <span style={{ fontSize:13 }}>📸</span>
+          <span style={{ fontSize:11, fontWeight:700, color:'#3B82F6' }}>Colar Cookies IG (bypass captcha)</span>
+        </div>
+        <div style={{ fontSize:9, color:P.textSec, marginBottom:6, lineHeight:'14px' }}>
+          1. Abre instagram.com no teu browser &gt; F12 &gt; Application &gt; Cookies &gt; copia <b>sessionid</b> e <b>csrftoken</b>
+        </div>
+        <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
+          <input placeholder="sessionid=..." value={igCookieSession || ''} onChange={function(e) { setIgCookieSession(e.target.value); }} style={{ ...INP, flex:2, minWidth:120, fontSize:10, padding:'6px 8px' }} />
+          <input placeholder="csrftoken=..." value={igCookieCsrf || ''} onChange={function(e) { setIgCookieCsrf(e.target.value); }} style={{ ...INP, flex:2, minWidth:120, fontSize:10, padding:'6px 8px' }} />
+          <button onClick={async function() {
+            if (!igCookieSession || !igCookieCsrf) return;
+            setIgCookieLoading(true);
+            try {
+              var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'set-cookies', platform:'instagram', sessionid: igCookieSession, csrftoken: igCookieCsrf }) });
+              var d = await r.json();
+              if (d.success) {
+                storeSet('mba_cookies_instagram', d.cookiesJson || '');
+                storeSet('mba_session_instagram', d.sessionid || '');
+                storeSet('mba_csrf_instagram', d.csrftoken || '');
+                var newSt = { ...loginStatus }; newSt.instagram = { loggedIn: true, label: d.message || 'Cookies OK' }; saveLoginStatus(newSt);
+                setIgCookieMsg(d.message || 'Cookies validas!');
+              } else {
+                setIgCookieMsg('Erro: ' + (d.error || 'invalidas'));
+              }
+            } catch(e) { setIgCookieMsg('Erro: ' + ((e as any).message || '')); }
+            setIgCookieLoading(false);
+          }} disabled={igCookieLoading || !igCookieSession || !igCookieCsrf} style={{ padding:'6px 12px', borderRadius:6, border:'none', background: igCookieLoading ? '#333' : '#3B82F6', color:'#fff', fontSize:10, cursor: igCookieLoading ? 'wait' : 'pointer', fontWeight:700 }}>
+            {igCookieLoading ? '...' : 'Validar'}
+          </button>
+        </div>
+        {igCookieMsg && <div style={{ marginTop:6, fontSize:9, color: igCookieMsg.indexOf('Erro') >= 0 ? '#ff4444' : P.green }}>{igCookieMsg}</div>}
       </div>
 
       {/* AUTO-SEND PANEL */}
