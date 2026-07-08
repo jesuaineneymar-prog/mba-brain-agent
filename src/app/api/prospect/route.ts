@@ -581,7 +581,7 @@ export async function POST(request: any) {
 
       var f = p.followers || 0;
       if (f > maxF) continue;
-      if (f > 0 && f < minF) continue;
+      if (f < minF) continue;
 
       var profile = makeProfile(p, loc);
       profile._lusoScore = s;
