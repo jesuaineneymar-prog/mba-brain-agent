@@ -609,9 +609,9 @@ function MessagesTab() {
     saveProfiles(saved); setMsgText(PROPOSTA); loadMessages(); setSending(false);
   };
 
-  /* ===== AUTO-SEND WITH 3x RETRY ===== */
-  const MAX_RETRIES = 3;
-  const RETRY_DELAY = 3000;
+  /* ===== AUTO-SEND WITH 5x RETRY + SECOND PASS ===== */
+  const MAX_RETRIES = 5;
+  const RETRY_DELAY = 4000;
 
   const autoSendRef = useRef<() => Promise<void>>(async function(){});
 
@@ -643,14 +643,31 @@ function MessagesTab() {
     var cookies = storeGet('mba_cookies_' + platform, '');
     var sessionid = storeGet('mba_session_' + platform, '');
     var csrftoken = storeGet('mba_csrf_' + platform, '');
+    var cfg = getAutoConfig();
+    var pc = cfg.platforms && cfg.platforms[platform];
 
     for (var attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       if (autoStopRef.current) return { ok: false, msg: 'Parado pelo utilizador' };
+
+      // Every 3rd attempt, force a fresh re-login to get new cookies
+      if (attempt > 1 && attempt % 3 === 1 && pc && pc.username && pc.password) {
+        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Re-login preventivo (tentativa ' + attempt + ')...' }]); });
+        var prevSt = JSON.parse(JSON.stringify(loginStatus)); prevSt[platform] = { loggedIn: false }; setLoginStatus(prevSt);
+        var reOk = await doLoginForPlatform(platform, pc.username, pc.password);
+        if (reOk) {
+          cookies = storeGet('mba_cookies_' + platform, '');
+          sessionid = storeGet('mba_session_' + platform, '');
+          csrftoken = storeGet('mba_csrf_' + platform, '');
+        }
+      }
 
       var body: any = { username: username, message: message, platform: platform, sentToday: sentCount };
       if (cookies) body.cookies = cookies;
       if (sessionid) body.sessionid = sessionid;
       if (csrftoken) body.csrftoken = csrftoken;
+      // Pass credentials so API can re-login internally if needed
+      if (pc && pc.username) body.loginUsername = pc.username;
+      if (pc && pc.password) body.loginPassword = pc.password;
 
       var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).catch(function() { return null; });
       var sd = sr ? await sr.json().catch(function() { return null; }) : null;
@@ -667,17 +684,14 @@ function MessagesTab() {
         setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '@' + username + ' tentativa ' + attempt + '/' + MAX_RETRIES + ' falhou (' + errMsg.substring(0, 60) + '). A tentar novamente...' }]); });
         await new Promise(function(r) { setTimeout(r, RETRY_DELAY); });
 
-        // If it looks like session expired, try re-login
-        if (errMsg.indexOf('Nao esta logado') >= 0 || errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('HTTP 401') >= 0 || errMsg.indexOf('HTTP 403') >= 0) {
-          var cfg = getAutoConfig();
-          var pc = cfg.platforms && cfg.platforms[platform];
+        // If it looks like session expired, try re-login immediately
+        if (errMsg.indexOf('Nao esta logado') >= 0 || errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('HTTP 401') >= 0 || errMsg.indexOf('HTTP 403') >= 0 || errMsg.indexOf('login') >= 0) {
           if (pc && pc.username && pc.password) {
             setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Sessao expirou. A fazer re-login...' }]); });
             var reLoggedIn = await doLoginForPlatform(platform, pc.username, pc.password);
             if (!reLoggedIn) {
               return { ok: false, msg: '@' + username + ' Re-login falhou. Impossivel enviar.' };
             }
-            // Refresh cookies after re-login
             cookies = storeGet('mba_cookies_' + platform, '');
             sessionid = storeGet('mba_session_' + platform, '');
             csrftoken = storeGet('mba_csrf_' + platform, '');
@@ -721,7 +735,7 @@ function MessagesTab() {
       if (!activePlatSet.has(p.platform)) return false;
       if (p.status === 'contacted' || p.status === 'replied' || p.status === 'accepted') return false;
       var msgs = p.messages || [];
-      for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].direction === 'outbound' && msgs[mi].sendAttempted) return false; }
+      for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].direction === 'outbound' && msgs[mi].sendAttempted && msgs[mi].delivered) return false; }
       return true;
     });
 
@@ -733,9 +747,11 @@ function MessagesTab() {
     var dailySent = parseInt(storeGet(todayKey, '0') || '0') || 0;
     var batch = prospects.slice(0, LIMIT_DIARIO - dailySent);
     var sent = 0; var failed = 0;
+    var failedProfiles: any[] = []; // Track failed for second pass
 
     setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: batch.length + ' perfis para contactar (' + dailySent + '/' + LIMIT_DIARIO + ' usados hoje)' }]); });
 
+    // ===== FIRST PASS =====
     for (var idx = 0; idx < batch.length; idx++) {
       if (autoStopRef.current) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Parado pelo utilizador' }]); }); break; }
       var p = batch[idx];
@@ -748,6 +764,8 @@ function MessagesTab() {
       for (var j = 0; j < saved.length; j++) { if (saved[j].id === p.id) { target = saved[j]; break; } }
       if (target) {
         if (!target.messages) target.messages = [];
+        // Remove previous failed attempts for this batch (clean slate for second pass)
+        target.messages = target.messages.filter(function(m: any) { return !(m.direction === 'outbound' && m.type === 'auto' && !m.delivered && m._secondPass); });
         target.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto', sendAttempted: true, delivered: result.ok, deliveryMsg: result.msg });
         if (result.ok && target.status === 'prospect') target.status = 'contacted';
         saveProfiles(saved);
@@ -758,11 +776,66 @@ function MessagesTab() {
         setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: result.msg }]); });
       } else {
         failed++;
+        failedProfiles.push(p);
         setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: result.msg }]); });
       }
       storeSet(todayKey, String(dailySent));
       loadMessages();
       if (idx < batch.length - 1) await new Promise(function(r) { setTimeout(r, 2500); });
+    }
+
+    // ===== SECOND PASS: Retry ALL failed profiles =====
+    if (failedProfiles.length > 0 && !autoStopRef.current) {
+      setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '--- SEGUNDA PASSAGEM: ' + failedProfiles.length + ' perfis falhados, a tentar novamente ---' }]); });
+      await new Promise(function(r) { setTimeout(r, 3000); }); // Pause before second pass
+
+      // Re-login to all platforms for fresh sessions
+      for (var ri = 0; ri < loggedInPlats.length; ri++) {
+        if (autoStopRef.current) break;
+        var rpf = loggedInPlats[ri];
+        var rpc = cfg.platforms && cfg.platforms[rpf];
+        if (rpc && rpc.username && rpc.password) {
+          var resetSt = JSON.parse(JSON.stringify(loginStatus)); resetSt[rpf] = { loggedIn: false };
+          setLoginStatus(resetSt);
+          await doLoginForPlatform(rpf, rpc.username, rpc.password);
+        }
+      }
+
+      for (var fi = 0; fi < failedProfiles.length; fi++) {
+        if (autoStopRef.current) break;
+        var fp = failedProfiles[fi];
+        // Check if we still have daily quota
+        if (dailySent >= LIMIT_DIARIO) {
+          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Limite diario atingido. ' + (failedProfiles.length - fi) + ' perfis ficaram pendentes.' }]); });
+          break;
+        }
+        setAutoProgress({ step: 'sending', current: fi + 1, total: failedProfiles.length, username: fp.username, platform: fp.platform, sent: sent, failed: failed, secondPass: true });
+
+        var retryResult = await sendDMWithRetry(fp.username, msgText, fp.platform, dailySent + sent);
+
+        // Update profile
+        var saved2 = getProfiles(); var target2 = null;
+        for (var k = 0; k < saved2.length; k++) { if (saved2[k].id === fp.id) { target2 = saved2[k]; break; } }
+        if (target2) {
+          if (!target2.messages) target2.messages = [];
+          target2.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto', sendAttempted: true, delivered: retryResult.ok, deliveryMsg: '[2a passagem] ' + retryResult.msg, _secondPass: true });
+          if (retryResult.ok) {
+            if (target2.status === 'prospect') target2.status = 'contacted';
+            failed--; // Decrement failed count
+          }
+          saveProfiles(saved2);
+        }
+
+        if (retryResult.ok) {
+          sent++; dailySent++;
+          setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: '[2a passagem] ' + retryResult.msg }]); });
+        } else {
+          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '[2a passagem] ' + retryResult.msg }]); });
+        }
+        storeSet(todayKey, String(dailySent));
+        loadMessages();
+        if (fi < failedProfiles.length - 1) await new Promise(function(r) { setTimeout(r, 3000); });
+      }
     }
 
     setAutoProgress({ step: 'done', sent: sent, failed: failed, total: batch.length });

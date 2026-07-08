@@ -53,9 +53,26 @@ async function automateLogin(platform, username, password) {
 
       var urlNow = page.url();
       if (urlNow.indexOf('/accounts/login') >= 0) {
+        // Check for "save login info" popup and dismiss it
+        try {
+          await page.click('button:has-text("Not Now")', { timeout: 2000 });
+          await sleep(1000);
+        } catch(e) {}
         await browser.close();
         return { success: false, error: 'Login falhou - credenciais invalidas ou captcha' };
       }
+
+      // Dismiss "save login info" popup if it appears
+      try {
+        await page.click('button:has-text("Not Now")', { timeout: 2000 });
+        await sleep(500);
+      } catch(e) {}
+
+      // Dismiss notifications popup
+      try {
+        await page.click('button:has-text("Not Now")', { timeout: 2000 });
+        await sleep(500);
+      } catch(e) {}
 
       await sleep(2000);
       var cookies = await context.cookies();
@@ -106,6 +123,12 @@ async function automateLogin(platform, username, password) {
       await page.click('button[name="login"]');
       await sleep(6000);
 
+      // Handle potential "save device" popup
+      try {
+        await page.click('button:has-text("Not Now")', { timeout: 2000 });
+        await sleep(500);
+      } catch(e) {}
+
       var cookies = await context.cookies();
       var cookiesJson = JSON.stringify(cookies);
       var fbToken = '';
@@ -125,8 +148,8 @@ async function automateLogin(platform, username, password) {
   }
 }
 
-/* ===== SEND DM VIA BROWSERLESS ===== */
-async function sendDMViaBrowserless(platform, username, message, cookiesJson) {
+/* ===== SEND DM VIA BROWSERLESS (with internal retry) ===== */
+async function sendDMViaBrowserless(platform, username, message, cookiesJson, attempt) {
   var browser = null;
   try {
     browser = await chromium.connect(BL_WSS, { timeout: 12000 });
@@ -142,14 +165,18 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson) {
     }
 
     if (platform === 'instagram') {
+      // METHOD A: Use direct new message flow
       await page.goto('https://www.instagram.com/direct/new/', { waitUntil: 'domcontentloaded', timeout: 15000 });
       await sleep(2000);
 
       await page.fill('input[placeholder="Search..."]', username);
-      await sleep(2000);
+      await sleep(2500);
 
+      // Try clicking on the user result
+      var clicked = false;
       try {
         await page.click('div[role="option"]', { timeout: 3000 });
+        clicked = true;
         await sleep(1000);
         await page.click('div[role="dialog"] button:not([disabled])');
         await sleep(1000);
@@ -158,55 +185,197 @@ async function sendDMViaBrowserless(platform, username, message, cookiesJson) {
         await page.keyboard.press('Enter');
         await sleep(2000);
         await browser.close();
-        return { dmSent: true, deliveryMsg: 'DM enviado via Browserless' };
+        return { dmSent: true, deliveryMsg: 'DM enviado via Browserless (new msg)' };
       } catch(e) {
+        if (!clicked) {
+          // METHOD B: Try going directly to user profile and message from there
+          try {
+            await page.goto('https://www.instagram.com/' + username + '/', { waitUntil: 'domcontentloaded', timeout: 10000 });
+            await sleep(1500);
+            // Look for message button on profile
+            var msgBtn = await page.$('button:has-text("Message")');
+            if (!msgBtn) msgBtn = await page.$('div[role="button"]:has-text("Message")');
+            if (msgBtn) {
+              await msgBtn.click();
+              await sleep(2000);
+              await page.keyboard.type(message);
+              await sleep(500);
+              await page.keyboard.press('Enter');
+              await sleep(2000);
+              await browser.close();
+              return { dmSent: true, deliveryMsg: 'DM enviado via Browserless (profile msg btn)' };
+            }
+          } catch(e2) {}
+
+          // METHOD C: Try share/profile message endpoint
+          try {
+            await page.goto('https://www.instagram.com/direct/new/', { waitUntil: 'domcontentloaded', timeout: 10000 });
+            await sleep(1500);
+            // Clear and retry search
+            var searchInput = await page.$('input[placeholder="Search..."]');
+            if (searchInput) {
+              await searchInput.click();
+              await searchInput.fill('');
+              await sleep(500);
+              await searchInput.fill(username);
+              await sleep(3000);
+              // Try clicking first result
+              await page.click('div[role="listbox"] div[role="option"]', { timeout: 3000 });
+              await sleep(1000);
+              await page.click('button:has-text("Next"), button:has-text("Chat")', { timeout: 2000 });
+              await sleep(1000);
+              var textarea = await page.$('textarea[placeholder]');
+              if (!textarea) textarea = await page.$('div[contenteditable="true"]');
+              if (textarea) {
+                await textarea.click();
+                await page.keyboard.type(message);
+                await sleep(500);
+                await page.keyboard.press('Enter');
+                await sleep(2000);
+                await browser.close();
+                return { dmSent: true, deliveryMsg: 'DM enviado via Browserless (alt search)' };
+              }
+            }
+          } catch(e3) {}
+        }
+
         await browser.close();
-        return { dmSent: false, deliveryMsg: 'Nao conseguiu abrir conversa: ' + (e.message || '') };
+        return { dmSent: false, deliveryMsg: 'Nao conseguiu abrir conversa IG (tentativa ' + attempt + '): ' + (e.message || '').substring(0, 80) };
       }
     }
 
     if (platform === 'tiktok') {
       await page.goto('https://www.tiktok.com/@' + username, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await sleep(2000);
+      await sleep(2500);
 
+      // METHOD A: Profile message button
       try {
         var msgBtn = await page.$('div[data-e2e="profile-message-button"]');
-        if (msgBtn) await msgBtn.click();
+        if (msgBtn) {
+          await msgBtn.click();
+          await sleep(2000);
+          var ta = await page.$('div[contenteditable="true"]');
+          if (ta) {
+            await ta.click();
+            await page.keyboard.type(message);
+            await sleep(500);
+            await page.keyboard.press('Enter');
+            await sleep(2000);
+            await browser.close();
+            return { dmSent: true, deliveryMsg: 'DM TikTok enviado via Browserless (profile btn)' };
+          }
+        }
+      } catch(e) {}
+
+      // METHOD B: Try direct message URL
+      try {
+        await page.goto('https://www.tiktok.com/@' + username, { waitUntil: 'domcontentloaded', timeout: 10000 });
         await sleep(2000);
-        await page.keyboard.type(message);
-        await sleep(500);
-        await page.keyboard.press('Enter');
-        await sleep(2000);
-        await browser.close();
-        return { dmSent: true, deliveryMsg: 'DM TikTok enviado via Browserless' };
-      } catch(e) {
-        await browser.close();
-        return { dmSent: false, deliveryMsg: 'Erro ao enviar DM TikTok: ' + (e.message || '') };
-      }
+        var btns = await page.$$('header button, header div[role="button"]');
+        for (var bi = 0; bi < btns.length; bi++) {
+          var txt = await btns[bi].textContent();
+          if (txt && (txt.indexOf('Message') >= 0 || txt.indexOf('Mensagem') >= 0)) {
+            await btns[bi].click();
+            await sleep(2000);
+            var ta2 = await page.$('div[contenteditable="true"]');
+            if (ta2) {
+              await ta2.click();
+              await page.keyboard.type(message);
+              await sleep(500);
+              await page.keyboard.press('Enter');
+              await sleep(2000);
+              await browser.close();
+              return { dmSent: true, deliveryMsg: 'DM TikTok enviado via Browserless (header btn)' };
+            }
+          }
+        }
+      } catch(e2) {}
+
+      await browser.close();
+      return { dmSent: false, deliveryMsg: 'Erro ao enviar DM TikTok (tentativa ' + attempt + ')' };
     }
 
     if (platform === 'facebook') {
+      // METHOD A: Direct message URL
       await page.goto('https://www.facebook.com/messages/t/' + username, { waitUntil: 'domcontentloaded', timeout: 15000 });
-      await sleep(2000);
+      await sleep(3000);
 
       try {
-        await page.keyboard.type(message);
-        await sleep(500);
-        await page.keyboard.press('Enter');
+        // Look for message input
+        var msgArea = await page.$('div[aria-label="Message"], div[contenteditable="true"][role="textbox"]');
+        if (msgArea) {
+          await msgArea.click();
+          await page.keyboard.type(message);
+          await sleep(500);
+          await page.keyboard.press('Enter');
+          await sleep(2000);
+          await browser.close();
+          return { dmSent: true, deliveryMsg: 'DM Facebook enviado via Browserless (direct URL)' };
+        }
+      } catch(e) {}
+
+      // METHOD B: Search for user in messages
+      try {
+        await page.goto('https://www.facebook.com/messages/', { waitUntil: 'domcontentloaded', timeout: 10000 });
         await sleep(2000);
-        await browser.close();
-        return { dmSent: true, deliveryMsg: 'DM Facebook enviado via Browserless' };
-      } catch(e) {
-        await browser.close();
-        return { dmSent: false, deliveryMsg: 'Erro ao enviar DM Facebook: ' + (e.message || '') };
-      }
+        // Try finding new message button
+        var newMsgBtn = await page.$('a[href*="/messages/new/"], div[role="button"]:has-text("New message"), div[role="button"]:has-text("Nova mensagem")');
+        if (newMsgBtn) {
+          await newMsgBtn.click();
+          await sleep(2000);
+          // Type username in "To" field
+          var toField = await page.$('input[aria-label*="To"], input[placeholder*="para"], input[placeholder*="To"]');
+          if (toField) {
+            await toField.fill(username);
+            await sleep(2500);
+            // Click on first result
+            await page.click('ul[role="listbox"] li:first-child, div[role="option"]:first-child', { timeout: 3000 });
+            await sleep(1000);
+            // Type message
+            var msgBox = await page.$('div[contenteditable="true"][role="textbox"], div[aria-label="Message"]');
+            if (msgBox) {
+              await msgBox.click();
+              await page.keyboard.type(message);
+              await sleep(500);
+              await page.keyboard.press('Enter');
+              await sleep(2000);
+              await browser.close();
+              return { dmSent: true, deliveryMsg: 'DM Facebook enviado via Browserless (new msg)' };
+            }
+          }
+        }
+      } catch(e2) {}
+
+      // METHOD C: Go to user profile and message from there
+      try {
+        await page.goto('https://www.facebook.com/' + username, { waitUntil: 'domcontentloaded', timeout: 10000 });
+        await sleep(2000);
+        var fbMsgBtn = await page.$('a[href*="/messages/t/"], div[role="button"]:has-text("Message"), div[role="button"]:has-text("Mensagem")');
+        if (fbMsgBtn) {
+          await fbMsgBtn.click();
+          await sleep(2500);
+          var fbMsgArea = await page.$('div[contenteditable="true"][role="textbox"], div[aria-label="Message"]');
+          if (fbMsgArea) {
+            await fbMsgArea.click();
+            await page.keyboard.type(message);
+            await sleep(500);
+            await page.keyboard.press('Enter');
+            await sleep(2000);
+            await browser.close();
+            return { dmSent: true, deliveryMsg: 'DM Facebook enviado via Browserless (profile)' };
+          }
+        }
+      } catch(e3) {}
+
+      await browser.close();
+      return { dmSent: false, deliveryMsg: 'Erro ao enviar DM Facebook (tentativa ' + attempt + ')' };
     }
 
     await browser.close();
     return { dmSent: false, deliveryMsg: 'Plataforma nao suportada' };
   } catch (e) {
     if (browser) { try { browser.close(); } catch(ex) {} }
-    return { dmSent: false, deliveryMsg: 'Erro Browserless: ' + (e.message || 'timeout') };
+    return { dmSent: false, deliveryMsg: 'Erro Browserless (tentativa ' + attempt + '): ' + (e.message || 'timeout').substring(0, 80) };
   }
 }
 
@@ -254,6 +423,77 @@ function attemptInstagramDirectDM(username, message, sessionid, csrftoken) {
   }).catch(function() { return { dmSent: false, deliveryMsg: 'Erro de conexao com Instagram' }; });
 }
 
+/* ===== ROBUST SEND WITH INTERNAL RETRY ===== */
+async function robustSend(platform, username, message, cookies, sessionid, csrftoken, loginUsername, loginPassword, sentToday) {
+  var lastError = '';
+  var METHODS = [];
+
+  // Build method list based on platform
+  if (platform === 'instagram' && sessionid && csrftoken) {
+    METHODS.push({ name: 'IG API Direct', fn: function() { return attemptInstagramDirectDM(username, message, sessionid, csrftoken); } });
+  }
+  METHODS.push({ name: 'Browserless', fn: function(attempt) { return sendDMViaBrowserless(platform, username, message, cookies, attempt); } });
+
+  // Try each method, with up to 2 Browserless attempts per method cycle
+  for (var cycle = 0; cycle < 2; cycle++) {
+    for (var mi = 0; mi < METHODS.length; mi++) {
+      var method = METHODS[mi];
+
+      // For Browserless, do 2 attempts per cycle
+      var maxAttempts = method.name === 'Browserless' ? 2 : 1;
+      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          var result;
+          if (method.name === 'Browserless') {
+            result = await sendDMViaBrowserless(platform, username, message, cookies, cycle * 2 + attempt);
+          } else {
+            result = await method.fn();
+          }
+
+          if (result.dmSent) {
+            return { success: true, dmSent: true, deliveryMsg: result.deliveryMsg, source: method.name.toLowerCase().replace(/ /g, '-'), remainingToday: MAX_PER_DAY - sentToday - 1 };
+          }
+
+          lastError = result.deliveryMsg || 'Metodo falhou';
+        } catch(e) {
+          lastError = method.name + ' excecao: ' + (e.message || '').substring(0, 60);
+        }
+      }
+    }
+
+    // After first cycle, try re-login if credentials provided
+    if (cycle === 0 && loginUsername && loginPassword) {
+      try {
+        var loginResult = await automateLogin(platform, loginUsername, loginPassword);
+        if (loginResult.success) {
+          // Update cookies for next cycle
+          cookies = loginResult.cookiesJson || cookies;
+          sessionid = loginResult.sessionid || sessionid;
+          csrftoken = loginResult.csrftoken || csrftoken;
+          // If IG got new session, re-add API method
+          if (platform === 'instagram' && sessionid && csrftoken) {
+            METHODS.unshift({ name: 'IG API Direct (re-login)', fn: function() { return attemptInstagramDirectDM(username, message, sessionid, csrftoken); } });
+          }
+        } else {
+          lastError = 'Re-login falhou: ' + (loginResult.error || '');
+        }
+      } catch(e) {
+        lastError = 'Re-login erro: ' + (e.message || '');
+      }
+    }
+
+    if (sentToday >= MAX_PER_DAY) {
+      return { success: false, dmSent: false, deliveryMsg: 'Limite diario atingido', remainingToday: 0 };
+    }
+  }
+
+  return {
+    success: false, dmSent: false,
+    deliveryMsg: 'Todos os metodos falharam: ' + lastError,
+    remainingToday: MAX_PER_DAY - sentToday
+  };
+}
+
 /* ===== MAIN POST HANDLER ===== */
 export async function POST(request) {
   var body = await request.json();
@@ -270,11 +510,13 @@ export async function POST(request) {
     return NextResponse.json(loginResult);
   }
 
-  // === ACTION: SEND DM ===
+  // === ACTION: SEND DM (with robust retry) ===
   var dmUsername = body.username || '';
   var dmMessage = body.message || '';
   var dmPlatform = body.platform || 'instagram';
   var sentToday = body.sentToday || 0;
+  var loginUsername = body.loginUsername || '';
+  var loginPassword = body.loginPassword || '';
 
   if (!dmUsername) {
     return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'Username nao fornecido', remainingToday: MAX_PER_DAY - sentToday });
@@ -290,29 +532,10 @@ export async function POST(request) {
   var csrftoken = body.csrftoken || '';
   var fbToken = body.fbToken || '';
 
-  // === PRIORIDADE 1: API Directa (so Instagram, instantaneo) ===
-  if (dmPlatform === 'instagram' && sessionid && csrftoken) {
-    try {
-      var directResult = await attemptInstagramDirectDM(dmUsername, dmMessage, sessionid, csrftoken);
-      if (directResult.dmSent) {
-        return NextResponse.json({ success: true, dmSent: true, deliveryMsg: directResult.deliveryMsg, source: 'api-direct', remainingToday: MAX_PER_DAY - sentToday - 1 });
-      }
-      // API falhou, tenta browserless como fallback
-    } catch(e) { /* fallback to browserless */ }
-  }
+  // Use robust send with internal retry + re-login capability
+  var result = await robustSend(dmPlatform, dmUsername, dmMessage, cookies, sessionid, csrftoken, loginUsername, loginPassword, sentToday);
 
-  // === PRIORIDADE 2: Browserless (todas as plataformas) ===
-  var blResult = await sendDMViaBrowserless(dmPlatform, dmUsername, dmMessage, cookies || undefined);
-  if (blResult.dmSent) {
-    return NextResponse.json({ success: true, dmSent: true, deliveryMsg: blResult.deliveryMsg, source: 'browserless', remainingToday: MAX_PER_DAY - sentToday - 1 });
-  }
-
-  // === NENHUM FUNCIONOU ===
-  return NextResponse.json({
-    success: false, dmSent: false,
-    deliveryMsg: blResult.deliveryMsg || 'Todos os metodos falharam',
-    remainingToday: MAX_PER_DAY - sentToday
-  });
+  return NextResponse.json(result);
 }
 
 /* ===== GET: STATUS / HEALTH CHECK ===== */
