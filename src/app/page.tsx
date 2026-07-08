@@ -626,12 +626,9 @@ function MessagesTab() {
     setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' A fazer login no ' + PLAT_NAMES[pf] + '...' }]); });
     setAutoProgress({ step: 'login', text: 'Login ' + PLAT_NAMES[pf] + '...', platform: pf });
     try {
-      var res = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'login', platform: pf, username: username, password: password }) });
+      var res = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'login', platform: pf }) });
       var data = await res.json().catch(function() { return { success:false, error:'Erro de conexao' }; });
       if (data.success) {
-        storeSet('mba_cookies_' + pf, data.cookiesJson || '');
-        storeSet('mba_session_' + pf, data.sessionid || '');
-        storeSet('mba_csrf_' + pf, data.csrftoken || '');
         var newSt = { ...loginStatus }; newSt[pf] = { loggedIn: true, label: data.message || 'Logado' }; saveLoginStatus(newSt);
         setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: PLAT_ICONS[pf] + ' Login ' + PLAT_NAMES[pf] + ' feito!' }]); });
         return true;
@@ -646,42 +643,27 @@ function MessagesTab() {
   };
 
   const sendDMWithRetry = async function(username: string, message: string, platform: string, sentCount: number): Promise<{ ok: boolean; msg: string }> {
-    var cookies = storeGet('mba_cookies_' + platform, '');
-    var sessionid = storeGet('mba_session_' + platform, '');
-    var csrftoken = storeGet('mba_csrf_' + platform, '');
     var cfg = getAutoConfig();
     var pc = cfg.platforms && cfg.platforms[platform];
 
     for (var attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       if (autoStopRef.current) return { ok: false, msg: 'Parado pelo utilizador' };
 
-      // Every 3rd attempt, force a fresh re-login to get new cookies
-      if (attempt > 1 && attempt % 3 === 1 && pc && pc.username && pc.password) {
+      // Every 3rd attempt, force a fresh re-login
+      if (attempt > 1 && attempt % 3 === 1) {
         setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Re-login preventivo (tentativa ' + attempt + ')...' }]); });
         var prevSt = JSON.parse(JSON.stringify(loginStatus)); prevSt[platform] = { loggedIn: false }; setLoginStatus(prevSt);
-        var reOk = await doLoginForPlatform(platform, pc.username, pc.password);
-        if (reOk) {
-          cookies = storeGet('mba_cookies_' + platform, '');
-          sessionid = storeGet('mba_session_' + platform, '');
-          csrftoken = storeGet('mba_csrf_' + platform, '');
-        }
+        await doLoginForPlatform(platform, '', '');
       }
 
       var body: any = { username: username, message: message, platform: platform, sentToday: sentCount };
-      if (cookies) body.cookies = cookies;
-      if (sessionid) body.sessionid = sessionid;
-      if (csrftoken) body.csrftoken = csrftoken;
-      // Pass credentials so API can re-login internally if needed
-      if (pc && pc.username) body.loginUsername = pc.username;
-      if (pc && pc.password) body.loginPassword = pc.password;
 
       var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(body) }).catch(function() { return null; });
       var sd = sr ? await sr.json().catch(function() { return null; }) : null;
       var dmOk = !!(sd && sd.dmSent);
 
       if (dmOk) {
-        var source = (sd && sd.source) || '';
-        return { ok: true, msg: '@' + username + ' DM enviado (tentativa ' + attempt + '/' + MAX_RETRIES + ', ' + source + ')' };
+        return { ok: true, msg: '@' + username + ' DM enviado (tentativa ' + attempt + '/' + MAX_RETRIES + ', DM Service)' };
       }
 
       // If failed and not last attempt, wait and retry
@@ -690,17 +672,12 @@ function MessagesTab() {
         setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '@' + username + ' tentativa ' + attempt + '/' + MAX_RETRIES + ' falhou (' + errMsg.substring(0, 60) + '). A tentar novamente...' }]); });
         await new Promise(function(r) { setTimeout(r, RETRY_DELAY); });
 
-        // If it looks like session expired, try re-login immediately
-        if (errMsg.indexOf('Nao esta logado') >= 0 || errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('HTTP 401') >= 0 || errMsg.indexOf('HTTP 403') >= 0 || errMsg.indexOf('login') >= 0) {
-          if (pc && pc.username && pc.password) {
-            setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Sessao expirou. A fazer re-login...' }]); });
-            var reLoggedIn = await doLoginForPlatform(platform, pc.username, pc.password);
-            if (!reLoggedIn) {
-              return { ok: false, msg: '@' + username + ' Re-login falhou. Impossivel enviar.' };
-            }
-            cookies = storeGet('mba_cookies_' + platform, '');
-            sessionid = storeGet('mba_session_' + platform, '');
-            csrftoken = storeGet('mba_csrf_' + platform, '');
+        // If session expired, try re-login
+        if (errMsg.indexOf('Nao esta logado') >= 0 || errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('needLogin') >= 0 || errMsg.indexOf('Login falhou') >= 0) {
+          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Sessao expirou. A fazer re-login...' }]); });
+          var reLoggedIn = await doLoginForPlatform(platform, '', '');
+          if (!reLoggedIn) {
+            return { ok: false, msg: '@' + username + ' Re-login falhou. Impossivel enviar.' };
           }
         }
         continue;
