@@ -423,14 +423,14 @@ export async function POST(request: any) {
 
   // =============================================
   // PHASE 1: DISCOVERY — DDG para TODAS as plataformas
-  // PRIORIDADE: IG primeiro (0-22s), FB segundo (22-35s), TT ultimo (35-42s)
+  // Temos 60s total. Budget: IG 21s, FB 14s, TT 7s, Enrichment 14s, Buffer 4s
   // =============================================
 
   if (doIG) {
     var igQ = getIGQueries();
     var igUrlRe = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'])/g;
-    for (var iqi = 0; iqi < igQ.length && timeLeft(t0, 30000); iqi++) {
-      var igUsers = await searchDDG(igQ[iqi], igUrlRe, 8000);
+    for (var iqi = 0; iqi < igQ.length && timeLeft(t0, 21000); iqi++) {
+      var igUsers = await searchDDG(igQ[iqi], igUrlRe, 7000);
       for (var ii = 0; ii < igUsers.length; ii++) {
         var igUn = igUsers[ii];
         if (isValidIG(igUn) && !igSeen.has(igUn.toLowerCase())) {
@@ -450,8 +450,8 @@ export async function POST(request: any) {
   if (doFB) {
     var fbQ = getFBQueries();
     var fbUrlRe = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})/g;
-    for (var fqi = 0; fqi < fbQ.length && timeLeft(t0, 45000); fqi++) {
-      var fbPages = await searchDDG(fbQ[fqi], fbUrlRe, 8000);
+    for (var fqi = 0; fqi < fbQ.length && timeLeft(t0, 35000); fqi++) {
+      var fbPages = await searchDDG(fbQ[fqi], fbUrlRe, 7000);
       for (var fpi = 0; fpi < fbPages.length; fpi++) {
         var fp = fbPages[fpi];
         if (isValidFB(fp) && !fbSeen.has(fp.toLowerCase())) {
@@ -471,8 +471,8 @@ export async function POST(request: any) {
   if (doTT) {
     var ttQ = getTTQueries();
     var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
-    for (var qi = 0; qi < ttQ.length && timeLeft(t0, 55000); qi++) {
-      var ttUsers = await searchDDG(ttQ[qi], ttUrlRe, 8000);
+    for (var qi = 0; qi < ttQ.length && timeLeft(t0, 42000); qi++) {
+      var ttUsers = await searchDDG(ttQ[qi], ttUrlRe, 7000);
       for (var ti = 0; ti < ttUsers.length; ti++) {
         var ttUn = ttUsers[ti];
         if (isValidTT(ttUn) && !ttSeen.has(ttUn.toLowerCase())) {
