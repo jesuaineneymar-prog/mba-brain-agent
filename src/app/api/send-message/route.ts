@@ -306,73 +306,78 @@ function makeDMCode(platform: string, targetUsername: string, message: string, c
   }
 
   if (platform === 'facebook') {
+    var method = ((attempt - 1) % 3) + 1;
+    if (method === 1) {
+      // === METHOD A: Ir ao perfil, clicar Message ===
+      return pre +
+        'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
+        'await page.goto("https://www.facebook.com/" + ' + target + ', { timeout: 12000 });\n' +
+        'await evalSleep(3000);\n' +
+        'var clicked = await evalClickText(page, "Message");\n' +
+        'if (!clicked) clicked = await evalClickText(page, "Enviar mensagem");\n' +
+        'if (clicked) {\n' +
+        '  await evalSleep(3000);\n' +
+        '  var hasBox = await evalExists(page, "div[contenteditable=true]");\n' +
+        '  if (!hasBox) hasBox = await evalExists(page, "div[role=textbox]");\n' +
+        '  if (hasBox) {\n' +
+        '    await evalClick(page, "div[contenteditable=true]");\n' +
+        '    await evalSleep(500);\n' +
+        '    await evalType(page, ' + msg + ');\n' +
+        '    await evalSleep(800);\n' +
+        '    await evalPressEnter(page);\n' +
+        '    await evalSleep(2000);\n' +
+        '    return { dmSent: true, deliveryMsg: "DM FB enviado (profile)" };\n' +
+        '  }\n' +
+        '}\n' +
+        'return { dmSent: false, deliveryMsg: "Falha DM FB M.A (tentativa ' + attempt + ')" };\n' +
+      '}';
+    }
+    if (method === 2) {
+      // === METHOD B: Compor nova mensagem ===
+      return pre +
+        'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
+        'await page.goto("https://www.facebook.com/messages/compose/", { timeout: 12000 });\n' +
+        'await evalSleep(3000);\n' +
+        'var hasTo = await evalExists(page, "input");\n' +
+        'if (hasTo) {\n' +
+        '  await evalFill(page, "input", ' + target + ');\n' +
+        '  await evalSleep(3000);\n' +
+        '  var clickedItem = await evalClick(page, "ul li");\n' +
+        '  if (clickedItem) {\n' +
+        '    await evalSleep(2000);\n' +
+        '    var hasMsg = await evalExists(page, "div[contenteditable=true]");\n' +
+        '    if (hasMsg) {\n' +
+        '      await evalClick(page, "div[contenteditable=true]");\n' +
+        '      await evalSleep(500);\n' +
+        '      await evalType(page, ' + msg + ');\n' +
+        '      await evalSleep(800);\n' +
+        '      await evalPressEnter(page);\n' +
+        '      await evalSleep(2000);\n' +
+        '      return { dmSent: true, deliveryMsg: "DM FB enviado (compose)" };\n' +
+        '    }\n' +
+        '  }\n' +
+        '}\n' +
+        'return { dmSent: false, deliveryMsg: "Falha DM FB M.B (tentativa ' + attempt + ')" };\n' +
+      '}';
+    }
+    // === METHOD C: URL directa messages/t/ ===
     return pre +
       'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-      // === METHOD A: Ir a pagina do perfil, clicar Message ===\n' +
-      'await page.goto("https://www.facebook.com/" + ' + target + ', { timeout: 15000 });\n' +
-      'await evalSleep(4000);\n' +
-      'var clicked = false;\n' +
-      'clicked = await evalClickText(page, "Message");\n' +
-      'if (!clicked) clicked = await evalClickText(page, "Enviar mensagem");\n' +
-      'if (!clicked) clicked = await evalClick(page, "a[aria-label=\"Send message\"]");\n' +
-      'if (!clicked) clicked = await evalClick(page, "a[aria-label=\"Message\"]");\n' +
-      'if (!clicked) clicked = await evalClick(page, "div[role=\"button\"] a[href*=\"/messages/t/\"]");\n' +
-      'if (clicked) {\n' +
-      '  await evalSleep(3000);\n' +
-      '  var hasBox = await evalExists(page, "div[contenteditable=\"true\"]");\n' +
-      '  if (!hasBox) hasBox = await evalExists(page, "div[role=\"textbox\"]");\n' +
-      '  if (!hasBox) hasBox = await evalExists(page, "div[data-lexical-editor=\"true\"]");\n' +
-      '  if (hasBox) {\n' +
-      '    await evalClick(page, "div[contenteditable=\"true\"]");\n' +
-      '    await evalSleep(500);\n' +
-      '    await evalType(page, ' + msg + ');\n' +
-      '    await evalSleep(1000);\n' +
-      '    await evalPressEnter(page);\n' +
-      '    await evalSleep(2500);\n' +
-      '    return { dmSent: true, deliveryMsg: "DM FB enviado (profile)" };\n' +
-      '  }\n' +
-      '}\n' +
-      // === METHOD B: Compor nova mensagem ===\n' +
-      'await page.goto("https://www.facebook.com/messages/compose/", { timeout: 15000 });\n' +
-      'await evalSleep(4000);\n' +
-      'var hasTo = await evalExists(page, "input[aria-label=\"To\"]");\n' +
-      'if (!hasTo) hasTo = await evalExists(page, "input[name=\"query\"]");\n' +
-      'if (hasTo) {\n' +
-      '  await evalFill(page, "input[aria-label=\"To\"]", ' + target + ');\n' +
-      '  await evalSleep(3000);\n' +
-      '  var clickedItem = await evalClick(page, "ul[role=\"listbox\"] li");\n' +
-      '  if (!clickedItem) clickedItem = await evalClick(page, "div[role=\"option\"]");\n' +
-      '  if (clickedItem) {\n' +
-      '    await evalSleep(2000);\n' +
-      '    var hasMsg = await evalExists(page, "div[contenteditable=\"true\"]");\n' +
-      '    if (hasMsg) {\n' +
-      '      await evalClick(page, "div[contenteditable=\"true\"]");\n' +
-      '      await evalSleep(500);\n' +
-      '      await evalType(page, ' + msg + ');\n' +
-      '      await evalSleep(1000);\n' +
-      '      await evalPressEnter(page);\n' +
-      '      await evalSleep(2500);\n' +
-      '      return { dmSent: true, deliveryMsg: "DM FB enviado (compose)" };\n' +
-      '    }\n' +
-      '  }\n' +
-      '}\n' +
-      // === METHOD C: URL directa messages/t/ ===\n' +
-      'await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 15000 });\n' +
-      'await evalSleep(4000);\n' +
-      'var hasDirect = await evalExists(page, "div[contenteditable=\"true\"]");\n' +
-      'if (!hasDirect) hasDirect = await evalExists(page, "div[role=\"textbox\"]");\n' +
-      'if (!hasDirect) hasDirect = await evalExists(page, "div[data-lexical-editor=\"true\"]");\n' +
-      'if (!hasDirect) hasDirect = await evalExists(page, "textarea");\n' +
-      'if (hasDirect) {\n' +
-      '  await evalClick(page, "div[contenteditable=\"true\"]");\n' +
+      'await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 12000 });\n' +
+      'await evalSleep(3000);\n' +
+      'var hasBox = await evalExists(page, "div[contenteditable=true]");\n' +
+      'if (!hasBox) hasBox = await evalExists(page, "div[role=textbox]");\n' +
+      'if (!hasBox) hasBox = await evalExists(page, "textarea");\n' +
+      'if (hasBox) {\n' +
+      '  await evalClick(page, "div[contenteditable=true]");\n' +
       '  await evalSleep(500);\n' +
       '  await evalType(page, ' + msg + ');\n' +
-      '  await evalSleep(1000);\n' +
+      '  await evalSleep(800);\n' +
       '  await evalPressEnter(page);\n' +
-      '  await evalSleep(2500);\n' +
+      '  await evalSleep(2000);\n' +
       '  return { dmSent: true, deliveryMsg: "DM FB enviado (direct)" };\n' +
       '}\n' +
-      'return { dmSent: false, deliveryMsg: "Falha DM FB (tentativa ' + attempt + ')" };\n' +
+      'return { dmSent: false, deliveryMsg: "Falha DM FB M.C (tentativa ' + attempt + ')" };\n' +
     '}';
   }
 
