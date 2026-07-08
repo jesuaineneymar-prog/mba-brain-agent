@@ -578,7 +578,7 @@ function MessagesTab() {
   }, []);
 
   useEffect(function() {
-    fetch('/api/send-message').then(function(r) { return r.json(); }).then(function(data) {
+    fetch('/api/send-message', { headers:{'x-mba-session':'active'} }).then(function(r) { return r.json(); }).then(function(data) {
       setBlStatus({ online: !!data.browserless && data.browserless.online, loading: false });
     }).catch(function() { setBlStatus({ online: false, loading: false }); });
     // Restore login status
@@ -620,7 +620,7 @@ function MessagesTab() {
     setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' A fazer login no ' + PLAT_NAMES[pf] + '...' }]); });
     setAutoProgress({ step: 'login', text: 'Login ' + PLAT_NAMES[pf] + '...', platform: pf });
     try {
-      var res = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'login', platform: pf, username: username, password: password }) });
+      var res = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'login', platform: pf, username: username, password: password }) });
       var data = await res.json().catch(function() { return { success:false, error:'Erro de conexao' }; });
       if (data.success) {
         storeSet('mba_cookies_' + pf, data.cookiesJson || '');
@@ -669,7 +669,7 @@ function MessagesTab() {
       if (pc && pc.username) body.loginUsername = pc.username;
       if (pc && pc.password) body.loginPassword = pc.password;
 
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).catch(function() { return null; });
+      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(body) }).catch(function() { return null; });
       var sd = sr ? await sr.json().catch(function() { return null; }) : null;
       var dmOk = !!(sd && sd.dmSent);
 
@@ -1034,10 +1034,10 @@ export default function MBAApp() {
       <div style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
         {TABS.map(function(t) { return <button key={t.id} onClick={function() { setActiveTab(t.id); }} style={{ padding:'10px 16px', border:'none', borderBottom:activeTab===t.id?'2px solid '+P.red:'2px solid transparent', background:'transparent', color:activeTab===t.id?P.redB:P.textDim, fontSize:11, fontWeight:activeTab===t.id?700:500, cursor:'pointer', whiteSpace:'nowrap', letterSpacing:'.5px', transition:'all .15s' }}>{t.label}</button>; })}
       </div>
-      <div style={{ flex:1, overflow:'hidden' }}>
+      <div style={{ flex:1, overflow:'hidden', position:'relative' }}>
         {activeTab === 'dashboard' && <DashboardTab key={dashKey} refreshKey={dashKey} onRefresh={function() { setDashKey(dashKey + 1); }} />}
         {activeTab === 'prospecting' && <ProspectingTab />}
-        {activeTab === 'messages' && <MessagesTab />}
+        <div style={{ display: activeTab === 'messages' ? 'block' : 'none', position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: activeTab === 'messages' ? 1 : -1 }}><MessagesTab /></div>
         {activeTab === 'followups' && <FollowUpsTab />}
         {activeTab === 'agent' && <AgentChat />}
       </div>

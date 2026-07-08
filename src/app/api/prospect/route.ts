@@ -638,8 +638,14 @@ export async function POST(request: any) {
   logs.push('Buckets - Angola:' + buckets[0].length + ' Lusofono:' + buckets[1].length + ' Provavel:' + buckets[2].length);
 
   // Preencher do bucket 0 (Angola), depois 1 (Lusofono), depois 2 (Provavel)
+  // DENTRO de cada bucket: IG primeiro, TT segundo, FB terceiro (prioridade)
+  var platOrder: Record<string, number> = { instagram: 0, tiktok: 1, facebook: 2 };
   for (var b = 0; b < 3; b++) {
     if (qualified.length >= target) break;
+    // Sort bucket by platform priority (IG > TT > FB)
+    buckets[b].sort(function(a: any, b2: any) {
+      return (platOrder[a.platform] || 9) - (platOrder[b2.platform] || 9);
+    });
     for (var bi = 0; bi < buckets[b].length && qualified.length < target; bi++) {
       qualified.push(buckets[b][bi]);
     }
@@ -648,7 +654,7 @@ export async function POST(request: any) {
   // Se ainda nao chega ao target, aceitar perfis nao enriquecidos (0 seguidores = "—")
   // Mas perfis enriquecidos com < minF continuam bloqueados
   if (qualified.length < target) {
-    var allRaw = (doTT ? ttRaw : []).concat(doIG ? igRaw : []).concat(doFB ? fbRaw : []);
+    var allRaw = (doIG ? igRaw : []).concat(doTT ? ttRaw : []).concat(doFB ? fbRaw : []);
     var seenIds = new Set(qualified.map(function(p) { return p.username; }));
     for (var ri = 0; ri < allRaw.length && qualified.length < target; ri++) {
       var rp = allRaw[ri];
