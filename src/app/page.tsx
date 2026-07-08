@@ -553,6 +553,8 @@ function MessagesTab() {
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
   const [blStatus, setBlStatus] = useState<any>({ online: false, loading: true });
+  const [diagResult, setDiagResult] = useState<any>(null);
+  const [diagRunning, setDiagRunning] = useState(false);
 
   // Auto-send state
   const [autoSending, setAutoSending] = useState(false);
@@ -856,6 +858,7 @@ function MessagesTab() {
         <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
           <div style={{ width:8, height:8, borderRadius:'50%', background: blStatus.loading ? '#888' : blStatus.online ? P.green : '#ff4444', flexShrink:0 }} />
           <div style={{ fontSize:11, fontWeight:700, color: blStatus.online ? P.green : '#ff4444' }}>{blStatus.loading ? 'Verificando...' : blStatus.online ? 'Browserless Online - DMs activos' : 'Browserless Offline'}</div>
+          {!blStatus.loading && <button onClick={async function() { setDiagRunning(true); setDiagResult(null); try { var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'diagnostic' }) }); var d = await r.json(); setDiagResult(d); } catch(e) { setDiagResult({ error: (e as any).message }); } setDiagRunning(false); }} style={{ padding:'2px 8px', borderRadius:4, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:9, cursor:'pointer', marginLeft:'auto' }}>{diagRunning ? '...' : 'Diag'}</button>}
         </div>
         <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
           {ALL_PLATFORMS.map(function(pf) {
@@ -866,6 +869,12 @@ function MessagesTab() {
             </div>;
           })}
         </div>
+        {diagResult && <div style={{ marginTop:8, padding:8, borderRadius:6, background:P.surface2, fontSize:9, fontFamily:"'JetBrains Mono',monospace", lineHeight:'16px' }}>
+          <div style={{ fontWeight:700, marginBottom:4, color:P.textSec }}>Diagnostico:</div>
+          {diagResult.steps ? diagResult.steps.map(function(s: any, i: number) {
+            return <div key={i} style={{ color: s.ok ? P.green : '#ff4444' }}>{s.ok ? '\u2713' : '\u2717'} {s.step}: {s.ok ? 'OK' + (s.status ? ' (HTTP '+s.status+')' : '') + (s.url ? ' url='+s.url : '') + (s.hasForm !== undefined ? ' form='+s.hasForm : '') : (s.error || 'falhou')}</div>;
+          }) : <div style={{ color:'#ff4444' }}>Erro: {JSON.stringify(diagResult)}</div>}
+        </div>}
       </div>
 
       {/* AUTO-SEND PANEL */}

@@ -540,6 +540,12 @@ async function robustSend(platform, username, message, cookies, sessionid, csrft
 export async function POST(request) {
   var body = await request.json();
 
+  // === ACTION: DIAGNOSTIC ===
+  if (body.action === 'diagnostic') {
+    var diag = await runDiagnostic();
+    return NextResponse.json(diag);
+  }
+
   // === ACTION: LOGIN ===
   if (body.action === 'login') {
     var platform = body.platform || 'instagram';
@@ -581,12 +587,7 @@ export async function POST(request) {
 }
 
 /* ===== GET: STATUS / HEALTH CHECK ===== */
-export async function GET(request: any) {
-  var url = new URL(request.url);
-  if (url.searchParams.get('diag') === '1') {
-    var diag = await runDiagnostic();
-    return NextResponse.json(diag);
-  }
+export async function GET() {
   var blOnline = await checkBrowserless();
   return NextResponse.json({
     maxPerDay: MAX_PER_DAY,
