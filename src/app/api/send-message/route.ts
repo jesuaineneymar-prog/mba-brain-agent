@@ -309,7 +309,7 @@ function makeDMCode(platform: string, targetUsername: string, message: string, c
     return pre +
       'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
       // === METHOD A: Ir a pagina do perfil, clicar Message ===\n' +
-      'await page.goto("https://www.facebook.com/" + ' + target + "/", { timeout: 15000 });\n' +
+      'await page.goto("https://www.facebook.com/" + ' + target + ', { timeout: 15000 });\n' +
       'await evalSleep(4000);\n' +
       'var clicked = false;\n' +
       'clicked = await evalClickText(page, "Message");\n' +
