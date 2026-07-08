@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
 
 // ============================================================
-//  MBA BRAIN AGENT — SEND MESSAGE API
-//  Browserless /function API (HTTP, sem WebSocket)
-//  APENAS: page.goto, page.evaluate, page.title, page.url, page.browserContext
-//  NAO USA: page.fill, page.click, page.$, page.keyboard
+//  MBA BRAIN AGENT — SEND MESSAGE API (SIMPLIFICADO)
+//  IG: API directa (sem browser) — RAPIDO
+//  FB/TT: Via n8n (Puppeteer real) — webhook
+//  Browserless: Apenas para login/diagnostic
 // ============================================================
 
 export var maxDuration = 60;
@@ -57,7 +57,7 @@ async function checkBrowserless(): Promise<boolean> {
 /* ===== UA OVERRIDE ===== */
 var UA_OVERRIDE = 'await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, "userAgent", { get: () => ' + JSON.stringify(BL_UA) + ' }); });';
 
-/* ===== BROWSERLESS HELPERS (injectados em cada code block) ===== */
+/* ===== BROWSERLESS HELPERS ===== */
 var BH = [
 'var evalFill = async function(pg, sel, val) {',
 '  return await pg.evaluate(function(a) {',
@@ -84,26 +84,6 @@ var BH = [
 'var evalExists = async function(pg, sel) {',
 '  return await pg.evaluate(function(s) { return !!document.querySelector(s); }, sel);',
 '};',
-'var evalType = async function(pg, txt) {',
-'  return await pg.evaluate(function(t) {',
-'    var el = document.activeElement;',
-'    if (el && el.contentEditable === "true") { el.focus(); document.execCommand("insertText",false,t); return true; }',
-'    if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) {',
-'      var pr = el.tagName === "TEXTAREA" ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;',
-'      var d = Object.getOwnPropertyDescriptor(pr, "value"); if (d && d.set) d.set.call(el, t); else el.value = t;',
-'      el.dispatchEvent(new Event("input", {bubbles:true})); return true;',
-'    }',
-'    return false;',
-'  }, txt);',
-'};',
-'var evalPressEnter = async function(pg) {',
-'  await pg.evaluate(function() {',
-'    var el = document.activeElement; if (!el) return;',
-'    el.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",keyCode:13,bubbles:true}));',
-'    el.dispatchEvent(new KeyboardEvent("keypress",{key:"Enter",code:"Enter",keyCode:13,bubbles:true}));',
-'    el.dispatchEvent(new KeyboardEvent("keyup",{key:"Enter",code:"Enter",keyCode:13,bubbles:true}));',
-'  });',
-'};',
 'var evalSleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };',
 'var getCookies = async function(pg) { var bc = pg.browserContext(); return await bc.cookies(); };',
 'var setCookies = async function(pg, cks) { var bc = pg.browserContext(); for (var i = 0; i < cks.length; i++) { await bc.setCookie(cks[i]); } };',
@@ -129,14 +109,6 @@ async function runDiagnostic() {
     diag.steps.push({ step: 'Function API (eval)', ok: diag.functionApi, result: JSON.stringify(testResult).substring(0, 100) });
   } catch(e: any) {
     diag.steps.push({ step: 'Function API (eval)', ok: false, error: (e.message || 'unknown').substring(0, 200) });
-  }
-  try {
-    var navCode = 'export default async function({ page }) {\n' + UA_OVERRIDE + '\nawait page.goto("https://example.com", { timeout: 10000 });\nvar title = await page.title();\nvar ua = await page.evaluate(() => navigator.userAgent);\nreturn { ok: true, title: title, ua: ua.substring(0, 30) };\n}';
-    var navResult = await runOnBrowserless(navCode, 25000);
-    diag.browserNav = navResult && navResult.ok === true;
-    diag.steps.push({ step: 'Browser + UA override', ok: diag.browserNav, title: (navResult && navResult.title) || '', ua: (navResult && navResult.ua) || '' });
-  } catch(e: any) {
-    diag.steps.push({ step: 'Browser + UA override', ok: false, error: (e.message || 'unknown').substring(0, 200) });
   }
   return diag;
 }
@@ -173,51 +145,6 @@ function makeLoginCode(platform: string, username: string, password: string): st
     '}';
   }
 
-  if (platform === 'tiktok') {
-    if (!password) {
-      return pre +
-        'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
-        'await evalSleep(3000);\n' +
-        'await evalClickText(page, "Use phone / email / username");\n' +
-        'await evalSleep(1500);\n' +
-        'await evalClickText(page, "Email");\n' +
-        'await evalSleep(1000);\n' +
-        'await evalFill(page, \'input[type="text"]\', ' + u + ');\n' +
-        'await evalPressEnter(page);\n' +
-        'await evalSleep(3000);\n' +
-        'return { success: false, needsCode: true, error: "TikTok requer codigo. Define password nas definicoes." };\n' +
-      '}';
-    }
-    return pre +
-      'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
-      'await evalSleep(3000);\n' +
-      // Tentar varias formas de clicar no login por email/user
-      'var clickedTab = await evalClickText(page, "Use phone / email / username");\n' +
-      'if (!clickedTab) { await evalClick(page, "div[data-e2e=login-tab-item]"); await evalSleep(1000); }\n' +
-      'await evalSleep(1500);\n' +
-      // Tentar encontrar o input de email/username
-      'var hasInput = await evalExists(page, \'input[type="text"]\');\n' +
-      'if (!hasInput) { hasInput = await evalExists(page, "input[name=username]"); }\n' +
-      'if (!hasInput) return { success: false, error: "TT nao mostrou campo de login. Tenta novamente." };\n' +
-      'await evalFill(page, \'input[type="text"]\', ' + u + ');\n' +
-      // Se ha campo de password
-      'var hasPass = await evalExists(page, \'input[type="password"]\');\n' +
-      'if (hasPass) { await evalFill(page, \'input[type="password"]\', ' + p + '); }\n' +
-      'await evalPressEnter(page);\n' +
-      'await evalSleep(7000);\n' +
-      'var cookies = await getCookies(page);\n' +
-      'var sid = getCookieVal(cookies, "sessionid");\n' +
-      'if (sid) return { success: true, sessionid: sid, csrftoken: getCookieVal(cookies, "tt_csrf_token"), cookiesJson: JSON.stringify(cookies), message: "Login TT feito" };\n' +
-      'var urlNow = page.url();\n' +
-      'if (urlNow.indexOf("login") < 0) {\n' +
-      '  cookies = await getCookies(page);\n' +
-      '  sid = getCookieVal(cookies, "sessionid");\n' +
-      '  if (sid) return { success: true, sessionid: sid, csrftoken: getCookieVal(cookies, "tt_csrf_token"), cookiesJson: JSON.stringify(cookies), message: "Login TT feito" };\n' +
-      '}\n' +
-      'return { success: false, error: "Login TT falhou - credenciais erradas ou captcha" };\n' +
-    '}';
-  }
-
   if (platform === 'facebook') {
     return pre +
       'await page.goto("https://www.facebook.com/login", { timeout: 15000 });\n' +
@@ -228,156 +155,34 @@ function makeLoginCode(platform: string, username: string, password: string): st
       'await evalSleep(7000);\n' +
       'var urlNow = page.url();\n' +
       'if (urlNow.indexOf("/login") >= 0) {\n' +
-      '  var errMsg = await page.evaluate(function() { var els = document.querySelectorAll("#login_form .uiBoxRed, ._4rbf, [role=alert]"); return els.length > 0 ? els[0].textContent : ""; }).catch(function() { return ""; });\n' +
-      '  return { success: false, error: "Login FB falhou" + (errMsg ? ": " + errMsg.trim().substring(0, 80) : " - credenciais erradas") };\n' +
+      '  return { success: false, error: "Login FB falhou - credenciais erradas" };\n' +
       '}\n' +
-      'try { await evalClickText(page, "Not Now"); await evalSleep(500); } catch(e) {}\n' +
-      'try { await evalClickText(page, "Agora nao"); await evalSleep(500); } catch(e) {}\n' +
       'var cookies = await getCookies(page);\n' +
       'return { success: true, fbToken: getCookieVal(cookies, "datr"), cookiesJson: JSON.stringify(cookies), sessionid: getCookieVal(cookies, "sb"), csrftoken: getCookieVal(cookies, "xs"), message: "Login FB feito" };\n' +
     '}';
   }
 
-  return '';
-}
-
-/* ===== DM CODE GENERATORS ===== */
-function makeDMCode(platform: string, targetUsername: string, message: string, cookiesJson: string, attempt: number): string {
-  var target = JSON.stringify(targetUsername);
-  var msg = JSON.stringify(message);
-  var ck = cookiesJson ? JSON.stringify(cookiesJson) : 'null';
-  var pre = 'export default async function({ page }) {\n' + BH + '\n' + UA_OVERRIDE + '\n';
-
-  if (platform === 'instagram') {
-    return pre +
-      'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-      // METHOD A: New message
-      'await page.goto("https://www.instagram.com/direct/new/", { timeout: 15000 });\n' +
-      'await evalSleep(2500);\n' +
-      'var hasSearch = await evalExists(page, \'input[placeholder="Search..."]\');\n' +
-      'if (hasSearch) {\n' +
-      '  await evalFill(page, \'input[placeholder="Search..."]\', ' + target + ');\n' +
-      '  await evalSleep(3000);\n' +
-      '  var clicked = await evalClick(page, "div[role=option]");\n' +
-      '  if (clicked) {\n' +
-      '    await evalSleep(1000);\n' +
-      '    await evalClick(page, "div[role=dialog] button:not([disabled])");\n' +
-      '    await evalSleep(1500);\n' +
-      '    await evalType(page, ' + msg + ');\n' +
-      '    await evalPressEnter(page);\n' +
-      '    await evalSleep(2500);\n' +
-      '    return { dmSent: true, deliveryMsg: "DM IG enviado (new msg)" };\n' +
-      '  }\n' +
-      '}\n' +
-      // METHOD B: Profile
-      'try {\n' +
-      '  await page.goto("https://www.instagram.com/" + ' + target + ' + "/", { timeout: 10000 });\n' +
-      '  await evalSleep(2000);\n' +
-      '  var msgOk = await evalClickText(page, "Message");\n' +
-      '  if (msgOk) {\n' +
-      '    await evalSleep(2500);\n' +
-      '    await evalType(page, ' + msg + ');\n' +
-      '    await evalPressEnter(page);\n' +
-      '    await evalSleep(2500);\n' +
-      '    return { dmSent: true, deliveryMsg: "DM IG enviado (profile)" };\n' +
-      '  }\n' +
-      '} catch(e2) {}\n' +
-      'return { dmSent: false, deliveryMsg: "Falha DM IG (tentativa ' + attempt + ')" };\n' +
-    '}';
-  }
-
   if (platform === 'tiktok') {
     return pre +
-      'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-      'await page.goto("https://www.tiktok.com/@" + ' + target + ', { timeout: 15000 });\n' +
+      'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
       'await evalSleep(3000);\n' +
-      'var msgOk = await evalClick(page, "div[data-e2e=profile-message-button]");\n' +
-      'if (msgOk) {\n' +
-      '  await evalSleep(2500);\n' +
-      '  await evalClick(page, "div[contenteditable=true]");\n' +
-      '  await evalSleep(500);\n' +
-      '  await evalType(page, ' + msg + ');\n' +
-      '  await evalPressEnter(page);\n' +
-      '  await evalSleep(2500);\n' +
-      '  return { dmSent: true, deliveryMsg: "DM TT enviado" };\n' +
+      'var clickedTab = await evalClickText(page, "Use phone / email / username");\n' +
+      'if (!clickedTab) { await evalClick(page, "div[data-e2e=login-tab-item]"); await evalSleep(1000); }\n' +
+      'await evalSleep(1500);\n' +
+      'var hasInput = await evalExists(page, \'input[type="text"]\');\n' +
+      'if (!hasInput) return { success: false, error: "TT nao mostrou campo de login" };\n' +
+      'await evalFill(page, \'input[type="text"]\', ' + u + ');\n' +
+      'if (' + p + ') {\n' +
+      '  var hasPass = await evalExists(page, \'input[type="password"]\');\n' +
+      '  if (hasPass) { await evalFill(page, \'input[type="password"]\', ' + p + '); }\n' +
       '}\n' +
-      'return { dmSent: false, deliveryMsg: "Falha DM TT (tentativa ' + attempt + ')" };\n' +
-    '}';
-  }
-
-  if (platform === 'facebook') {
-    var method = ((attempt - 1) % 3) + 1;
-    if (method === 1) {
-      // === METHOD A: Ir ao perfil, clicar Message ===
-      return pre +
-        'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-        'await page.goto("https://www.facebook.com/" + ' + target + ', { timeout: 12000 });\n' +
-        'await evalSleep(3000);\n' +
-        'var clicked = await evalClickText(page, "Message");\n' +
-        'if (!clicked) clicked = await evalClickText(page, "Enviar mensagem");\n' +
-        'if (clicked) {\n' +
-        '  await evalSleep(3000);\n' +
-        '  var hasBox = await evalExists(page, "div[contenteditable=true]");\n' +
-        '  if (!hasBox) hasBox = await evalExists(page, "div[role=textbox]");\n' +
-        '  if (hasBox) {\n' +
-        '    await evalClick(page, "div[contenteditable=true]");\n' +
-        '    await evalSleep(500);\n' +
-        '    await evalType(page, ' + msg + ');\n' +
-        '    await evalSleep(800);\n' +
-        '    await evalPressEnter(page);\n' +
-        '    await evalSleep(2000);\n' +
-        '    return { dmSent: true, deliveryMsg: "DM FB enviado (profile)" };\n' +
-        '  }\n' +
-        '}\n' +
-        'return { dmSent: false, deliveryMsg: "Falha DM FB M.A (tentativa ' + attempt + ')" };\n' +
-      '}';
-    }
-    if (method === 2) {
-      // === METHOD B: Compor nova mensagem ===
-      return pre +
-        'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-        'await page.goto("https://www.facebook.com/messages/compose/", { timeout: 12000 });\n' +
-        'await evalSleep(3000);\n' +
-        'var hasTo = await evalExists(page, "input");\n' +
-        'if (hasTo) {\n' +
-        '  await evalFill(page, "input", ' + target + ');\n' +
-        '  await evalSleep(3000);\n' +
-        '  var clickedItem = await evalClick(page, "ul li");\n' +
-        '  if (clickedItem) {\n' +
-        '    await evalSleep(2000);\n' +
-        '    var hasMsg = await evalExists(page, "div[contenteditable=true]");\n' +
-        '    if (hasMsg) {\n' +
-        '      await evalClick(page, "div[contenteditable=true]");\n' +
-        '      await evalSleep(500);\n' +
-        '      await evalType(page, ' + msg + ');\n' +
-        '      await evalSleep(800);\n' +
-        '      await evalPressEnter(page);\n' +
-        '      await evalSleep(2000);\n' +
-        '      return { dmSent: true, deliveryMsg: "DM FB enviado (compose)" };\n' +
-        '    }\n' +
-        '  }\n' +
-        '}\n' +
-        'return { dmSent: false, deliveryMsg: "Falha DM FB M.B (tentativa ' + attempt + ')" };\n' +
-      '}';
-    }
-    // === METHOD C: URL directa messages/t/ ===
-    return pre +
-      'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n' +
-      'await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 12000 });\n' +
-      'await evalSleep(3000);\n' +
-      'var hasBox = await evalExists(page, "div[contenteditable=true]");\n' +
-      'if (!hasBox) hasBox = await evalExists(page, "div[role=textbox]");\n' +
-      'if (!hasBox) hasBox = await evalExists(page, "textarea");\n' +
-      'if (hasBox) {\n' +
-      '  await evalClick(page, "div[contenteditable=true]");\n' +
-      '  await evalSleep(500);\n' +
-      '  await evalType(page, ' + msg + ');\n' +
-      '  await evalSleep(800);\n' +
-      '  await evalPressEnter(page);\n' +
-      '  await evalSleep(2000);\n' +
-      '  return { dmSent: true, deliveryMsg: "DM FB enviado (direct)" };\n' +
-      '}\n' +
-      'return { dmSent: false, deliveryMsg: "Falha DM FB M.C (tentativa ' + attempt + ')" };\n' +
+      'await evalSleep(500);\n' +
+      'await page.evaluate(function() { var el = document.activeElement; if (el) el.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",keyCode:13,bubbles:true})); });\n' +
+      'await evalSleep(7000);\n' +
+      'var cookies = await getCookies(page);\n' +
+      'var sid = getCookieVal(cookies, "sessionid");\n' +
+      'if (sid) return { success: true, sessionid: sid, csrftoken: getCookieVal(cookies, "tt_csrf_token"), cookiesJson: JSON.stringify(cookies), message: "Login TT feito" };\n' +
+      'return { success: false, error: "Login TT falhou" };\n' +
     '}';
   }
 
@@ -395,18 +200,7 @@ async function automateLogin(platform: string, username: string, password: strin
   }
 }
 
-/* ===== SEND DM VIA BROWSERLESS ===== */
-async function sendDMViaBrowserless(platform: string, targetUsername: string, message: string, cookiesJson: string, attempt: number) {
-  try {
-    var code = makeDMCode(platform, targetUsername, message, cookiesJson, attempt);
-    if (!code) return { dmSent: false, deliveryMsg: 'Plataforma nao suportada' };
-    return await runOnBrowserless(code, 50000);
-  } catch (e: any) {
-    return { dmSent: false, deliveryMsg: 'Erro Browserless (tentativa ' + attempt + '): ' + (e.message || 'timeout').substring(0, 80) };
-  }
-}
-
-/* ===== IG API DIRECT DM (sem browser, HTTP puro) ===== */
+/* ===== IG API DIRECT DM (sem browser, HTTP puro) — MAIS RAPIDO E FIÁVEL ===== */
 function attemptInstagramDirectDM(username: string, message: string, sessionid: string, csrftoken: string) {
   var dsUserId = sessionid.split('%3A')[0] || '';
   var cookies = 'sessionid=' + sessionid + '; csrftoken=' + csrftoken + '; ds_user_id=' + dsUserId;
@@ -435,42 +229,107 @@ function attemptInstagramDirectDM(username: string, message: string, sessionid: 
 /* ===== ROBUST SEND ===== */
 async function robustSend(platform: string, username: string, message: string, cookies: string, sessionid: string, csrftoken: string, loginUsername: string, loginPassword: string, sentToday: number) {
   var lastError = '';
-  var METHODS: Array<{ name: string; fn: Function }> = [];
-  if (platform === 'instagram' && sessionid && csrftoken) {
-    METHODS.push({ name: 'IG API Direct', fn: function() { return attemptInstagramDirectDM(username, message, sessionid, csrftoken); } });
-  }
-  METHODS.push({ name: 'Browserless', fn: function(attempt: number) { return sendDMViaBrowserless(platform, username, message, cookies, attempt); } });
 
-  for (var cycle = 0; cycle < 2; cycle++) {
-    for (var mi = 0; mi < METHODS.length; mi++) {
-      var method = METHODS[mi];
-      var maxAttempts = method.name === 'Browserless' ? 2 : 1;
-      for (var attempt = 1; attempt <= maxAttempts; attempt++) {
-        try {
-          var result = method.name === 'Browserless'
-            ? await sendDMViaBrowserless(platform, username, message, cookies, cycle * 2 + attempt)
-            : await method.fn();
-          if (result.dmSent) return { success: true, dmSent: true, deliveryMsg: result.deliveryMsg, source: method.name.toLowerCase().replace(/ /g, '-'), remainingToday: MAX_PER_DAY - sentToday - 1 };
-          lastError = result.deliveryMsg || 'Metodo falhou';
-        } catch(e: any) { lastError = method.name + ' excecao: ' + (e.message || '').substring(0, 60); }
-      }
-    }
-    if (cycle === 0 && loginUsername && loginPassword) {
+  // === INSTAGRAM: API directa primeiro (sem browser) ===
+  if (platform === 'instagram' && sessionid && csrftoken) {
+    try {
+      var igResult = await attemptInstagramDirectDM(username, message, sessionid, csrftoken);
+      if (igResult.dmSent) return { success: true, dmSent: true, deliveryMsg: igResult.deliveryMsg, source: 'ig-api-direct', remainingToday: MAX_PER_DAY - sentToday - 1 };
+      lastError = igResult.deliveryMsg;
+    } catch(e: any) { lastError = 'IG API: ' + (e.message || '').substring(0, 80); }
+
+    // Re-login se falhou
+    if (loginUsername && loginPassword) {
       try {
-        var loginResult = await automateLogin(platform, loginUsername, loginPassword);
-        if (loginResult.success) {
-          cookies = loginResult.cookiesJson || cookies;
-          sessionid = loginResult.sessionid || sessionid;
-          csrftoken = loginResult.csrftoken || csrftoken;
-          if (platform === 'instagram' && sessionid && csrftoken) {
-            METHODS.unshift({ name: 'IG API Direct (re-login)', fn: function() { return attemptInstagramDirectDM(username, message, sessionid, csrftoken); } });
-          }
+        var loginResult = await automateLogin('instagram', loginUsername, loginPassword);
+        if (loginResult.success && loginResult.sessionid && loginResult.csrftoken) {
+          sessionid = loginResult.sessionid;
+          csrftoken = loginResult.csrftoken;
+          try {
+            var igRetry = await attemptInstagramDirectDM(username, message, sessionid, csrftoken);
+            if (igRetry.dmSent) return { success: true, dmSent: true, deliveryMsg: igRetry.deliveryMsg, source: 'ig-api-relogin', remainingToday: MAX_PER_DAY - sentToday - 1 };
+            lastError = igRetry.deliveryMsg;
+          } catch(e2: any) { lastError = 'IG API retry: ' + (e2.message || '').substring(0, 80); }
         } else { lastError = 'Re-login falhou: ' + (loginResult.error || ''); }
       } catch(e: any) { lastError = 'Re-login erro: ' + (e.message || ''); }
     }
-    if (sentToday >= MAX_PER_DAY) return { success: false, dmSent: false, deliveryMsg: 'Limite diario atingido', remainingToday: 0 };
   }
-  return { success: false, dmSent: false, deliveryMsg: 'Todos os metodos falharam: ' + lastError, remainingToday: MAX_PER_DAY - sentToday };
+
+  // === FACEBOOK e TIKTOK: Recomendar n8n ===
+  if (platform === 'facebook' || platform === 'tiktok') {
+    if (!sessionid && !cookies) {
+      return {
+        success: false, dmSent: false,
+        deliveryMsg: 'DM ' + platform + ': Faz login primeiro. Para automacao completa, usa o n8n.',
+        n8nRecommended: true,
+        platform: platform,
+        remainingToday: MAX_PER_DAY - sentToday
+      };
+    }
+    // Tentar via Browserless como fallback (1 metodo simples)
+    try {
+      var target = JSON.stringify(username);
+      var msg = JSON.stringify(message);
+      var ck = cookies ? JSON.stringify(cookies) : 'null';
+      var dmCode = 'export default async function({ page }) {\n' + BH + '\n' + UA_OVERRIDE + '\n';
+      if (platform === 'facebook') {
+        dmCode += 'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n';
+        dmCode += 'await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 12000 });\n';
+        dmCode += 'await evalSleep(3000);\n';
+        dmCode += 'var hasBox = await evalExists(page, "div[contenteditable=true]");\n';
+        dmCode += 'if (hasBox) {\n';
+        dmCode += '  await page.evaluate(function(m) { var el = document.querySelector("div[contenteditable=true]"); if (el) { el.focus(); document.execCommand("insertText",false,m); } }, ' + msg + ');\n';
+        dmCode += '  await evalSleep(500);\n';
+        dmCode += '  await page.evaluate(function() { var el = document.activeElement; if (el) el.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",keyCode:13,bubbles:true})); });\n';
+        dmCode += '  await evalSleep(2000);\n';
+        dmCode += '  return { dmSent: true, deliveryMsg: "DM FB enviado" };\n';
+        dmCode += '}\n';
+        dmCode += 'return { dmSent: false, deliveryMsg: "FB: Caixa de mensagem nao encontrada. Recomendado: n8n" };\n';
+      } else {
+        dmCode += 'if (' + ck + ') { try { await setCookies(page, JSON.parse(' + ck + ')); } catch(e) {} }\n';
+        dmCode += 'await page.goto("https://www.tiktok.com/@" + ' + target + ', { timeout: 15000 });\n';
+        dmCode += 'await evalSleep(3000);\n';
+        dmCode += 'var msgOk = await evalClick(page, "div[data-e2e=profile-message-button]");\n';
+        dmCode += 'if (msgOk) {\n';
+        dmCode += '  await evalSleep(2500);\n';
+        dmCode += '  var hasBox = await evalExists(page, "div[contenteditable=true]");\n';
+        dmCode += '  if (hasBox) {\n';
+        dmCode += '    await page.evaluate(function(m) { var el = document.querySelector("div[contenteditable=true]"); if (el) { el.focus(); document.execCommand("insertText",false,m); } }, ' + msg + ');\n';
+        dmCode += '    await evalSleep(500);\n';
+        dmCode += '    await page.evaluate(function() { var el = document.activeElement; if (el) el.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",code:"Enter",keyCode:13,bubbles:true})); });\n';
+        dmCode += '    await evalSleep(2500);\n';
+        dmCode += '    return { dmSent: true, deliveryMsg: "DM TT enviado" };\n';
+        dmCode += '  }\n';
+        dmCode += '}\n';
+        dmCode += 'return { dmSent: false, deliveryMsg: "TT: Botao mensagem nao encontrado. Recomendado: n8n" };\n';
+      }
+      dmCode += '}';
+
+      var blResult = await runOnBrowserless(dmCode, 45000);
+      if (blResult && blResult.dmSent) {
+        return { success: true, dmSent: true, deliveryMsg: blResult.deliveryMsg, source: 'browserless-fallback', remainingToday: MAX_PER_DAY - sentToday - 1 };
+      }
+      lastError = (blResult && blResult.deliveryMsg) || 'Browserless falhou';
+    } catch(e: any) { lastError = 'Browserless: ' + (e.message || 'timeout').substring(0, 80); }
+  }
+
+  // === INSTAGRAM sem sessionid ===
+  if (platform === 'instagram' && (!sessionid || !csrftoken)) {
+    if (loginUsername && loginPassword) {
+      try {
+        var loginResult = await automateLogin('instagram', loginUsername, loginPassword);
+        if (loginResult.success && loginResult.sessionid && loginResult.csrftoken) {
+          var igAfterLogin = await attemptInstagramDirectDM(username, message, loginResult.sessionid, loginResult.csrftoken);
+          if (igAfterLogin.dmSent) return { success: true, dmSent: true, deliveryMsg: igAfterLogin.deliveryMsg, source: 'ig-api-after-login', remainingToday: MAX_PER_DAY - sentToday - 1 };
+          lastError = igAfterLogin.deliveryMsg;
+        } else { lastError = 'Login falhou: ' + (loginResult.error || ''); }
+      } catch(e: any) { lastError = 'Login erro: ' + (e.message || ''); }
+    } else {
+      lastError = 'IG: Faz login primeiro ou configura credenciais';
+    }
+  }
+
+  return { success: false, dmSent: false, deliveryMsg: 'Falha: ' + lastError, remainingToday: MAX_PER_DAY - sentToday };
 }
 
 /* ===== POST HANDLER ===== */
@@ -501,5 +360,5 @@ export async function POST(request: any) {
 /* ===== GET ===== */
 export async function GET() {
   var blOnline = await checkBrowserless();
-  return NextResponse.json({ maxPerDay: MAX_PER_DAY, remainingToday: MAX_PER_DAY, browserless: { online: blOnline, mode: 'http-function-eval-only' } });
+  return NextResponse.json({ maxPerDay: MAX_PER_DAY, remainingToday: MAX_PER_DAY, browserless: { online: blOnline, mode: 'ig-api-direct + browserless-fallback' }, n8n: { recommended: true, webhookUrl: '/api/webhook' } });
 }

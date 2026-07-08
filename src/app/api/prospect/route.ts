@@ -4,6 +4,8 @@ export var maxDuration = 60;
 
 var SCRAPINGANT_KEY = '897af2903f4848fba1f603a46273d842';
 var SCRAPINGANT_BASE = 'https://api.scrapingant.com/v1/general';
+var SERPER_KEY = process.env.SERPER_API_KEY || '';
+var SERPER_BASE = 'https://google.serper.dev/search';
 
 var ANGOLA_WORDS = [
   'angola', 'angolana', 'angolano', 'luanda', 'benguela',
@@ -107,8 +109,9 @@ function isValidTT(un: string): boolean {
   return true;
 }
 
-/* ===== FETCH com duplo fallback ===== */
+/* ===== FETCH com multi-fallback ===== */
 async function fetchHtml(url: string, timeoutMs: number): Promise<string | null> {
+  // Metodo 1: ScrapingAnt proxy
   try {
     var ctrl = new AbortController();
     var tid = setTimeout(function() { ctrl.abort(); }, timeoutMs);
@@ -117,6 +120,7 @@ async function fetchHtml(url: string, timeoutMs: number): Promise<string | null>
     clearTimeout(tid);
     if (res.ok) { var data = await res.json(); if (data && data.content && data.content.length > 200) return data.content; }
   } catch(e) {}
+  // Metodo 2: Direct fetch
   try {
     var ctrl2 = new AbortController();
     var tid2 = setTimeout(function() { ctrl2.abort(); }, Math.min(timeoutMs, 10000));
@@ -127,14 +131,51 @@ async function fetchHtml(url: string, timeoutMs: number): Promise<string | null>
   return null;
 }
 
+/* ===== SERPER: Google Search API ===== */
+async function serperSearch(query: string, num: number): Promise<string[]> {
+  var urls: string[] = [];
+  if (!SERPER_KEY) return urls;
+  try {
+    var ctrl = new AbortController();
+    var tid = setTimeout(function() { ctrl.abort(); }, 8000);
+    var res = await fetch(SERPER_BASE, {
+      method: 'POST',
+      headers: { 'X-API-KEY': SERPER_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ q: query, num: num, gl: 'ao', hl: 'pt' }),
+      signal: ctrl.signal
+    });
+    clearTimeout(tid);
+    if (!res.ok) return urls;
+    var data = await res.json();
+    var org = data.organic || [];
+    for (var i = 0; i < org.length; i++) { if (org[i].link) urls.push(org[i].link); }
+    // Tambem knowledge graph
+    if (data.knowledgeGraph && data.knowledgeGraph.website) urls.push(data.knowledgeGraph.website);
+  } catch(e) {}
+  return urls;
+}
+
+/* ===== Extrair usernames de URLs ===== */
+function extractUsernamesFromUrls(urls: string[], plat: string): string[] {
+  var found: string[] = [];
+  var re: RegExp;
+  if (plat === 'instagram') re = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'<>?])/;
+  else if (plat === 'facebook') re = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})(?:\/|$|[\s"'<>?])/;
+  else re = /tiktok\.com\/@([a-zA-Z0-9_.]{2,24})(?:\/|$|[\s"'<>?])/;
+  var validFn = plat === 'instagram' ? isValidIG : plat === 'facebook' ? isValidFB : isValidTT;
+  for (var i = 0; i < urls.length; i++) {
+    var m = urls[i].match(re);
+    if (m && validFn(m[1]) && found.indexOf(m[1]) < 0) found.push(m[1]);
+  }
+  return found;
+}
+
 /* ===== Extrair usernames de qualquer HTML ===== */
 function extractUsernames(html: string, re: RegExp): string[] {
   var found: string[] = [];
   var m;
-  // Busca directa no HTML
   var r = new RegExp(re.source, re.flags);
   while ((m = r.exec(html)) !== null) { if (found.indexOf(m[1]) < 0) found.push(m[1]); }
-  // Busca nos href= attributes (captura URLs encoded)
   var hrefRe = /href=["']([^"']+)["']/gi;
   var hm;
   while ((hm = hrefRe.exec(html)) !== null) {
@@ -220,13 +261,55 @@ function shuffle(arr: string[]): string[] {
   var a = arr.slice(); for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a;
 }
 function getTTQueries(): string[] {
-  return shuffle(['angola influencer tiktok site:tiktok.com','angolano tiktok creator site:tiktok.com','luanda tiktok influencer site:tiktok.com','angola tiktok kizomba site:tiktok.com','angola tiktok lifestyle site:tiktok.com','angola tiktok musica site:tiktok.com','angola tiktok moda site:tiktok.com','angola tiktok fitness site:tiktok.com','influenciador angolano tiktok site:tiktok.com','angola tiktok dance site:tiktok.com','angola tiktok comedy site:tiktok.com','angola tiktok food blogger site:tiktok.com','benguela tiktok angola site:tiktok.com','angola tiktok vlog site:tiktok.com','angola tiktok photographer site:tiktok.com']);
+  return shuffle([
+    'angola influencer site:tiktok.com', 'angolano creator site:tiktok.com',
+    'luanda influencer site:tiktok.com', 'angola kizomba site:tiktok.com',
+    'angola lifestyle site:tiktok.com', 'angola musica site:tiktok.com',
+    'influenciador angolano site:tiktok.com', 'angola dance site:tiktok.com',
+    'angola comedy site:tiktok.com', 'benguela angola site:tiktok.com',
+    'angola moda site:tiktok.com', 'angola fitness site:tiktok.com',
+    'angola vlog site:tiktok.com', 'angola food blogger site:tiktok.com',
+    'angola photography site:tiktok.com'
+  ]);
 }
 function getIGQueries(): string[] {
-  return shuffle(['angola influencer instagram site:instagram.com','angolano instagram creator site:instagram.com','luanda instagram influencer site:instagram.com','angola instagram kizomba site:instagram.com','angola instagram lifestyle site:instagram.com','angola instagram musica site:instagram.com','angola instagram moda site:instagram.com','angola instagram fitness site:instagram.com','angola instagram comedia site:instagram.com','benguela instagram site:instagram.com','angola instagram dance site:instagram.com','cabinda instagram site:instagram.com','luanda instagram moda site:instagram.com','angola instagram entrepreneur site:instagram.com','angola instagram food site:instagram.com','angola instagrammer site:instagram.com','huambo instagram site:instagram.com','angola instagram photography site:instagram.com','angola instagram travel site:instagram.com','lobito instagram angola site:instagram.com','angola ig influencer site:instagram.com','luanda influenciador instagram site:instagram.com','angola instagram vlog site:instagram.com','angola instagram comedy site:instagram.com','angola instagram business site:instagram.com','angola instagram digital creator site:instagram.com','luanda instagram photographer site:instagram.com','angola instagram model site:instagram.com','angola instagram artist site:instagram.com']);
+  return shuffle([
+    'angola influencer site:instagram.com', 'angolano creator site:instagram.com',
+    'luanda influencer site:instagram.com', 'angola kizomba site:instagram.com',
+    'angola lifestyle site:instagram.com', 'angola musica site:instagram.com',
+    'angola moda site:instagram.com', 'angola fitness site:instagram.com',
+    'angola comedia site:instagram.com', 'benguela site:instagram.com',
+    'angola dance site:instagram.com', 'cabinda site:instagram.com',
+    'luanda moda site:instagram.com', 'angola entrepreneur site:instagram.com',
+    'angola food site:instagram.com', 'angola digital creator site:instagram.com',
+    'huambo site:instagram.com', 'angola photography site:instagram.com',
+    'angola travel site:instagram.com', 'influenciador angolano site:instagram.com',
+    'angola ig model site:instagram.com', 'angola artist site:instagram.com',
+    'angola comedian site:instagram.com', 'angola fashion blogger site:instagram.com',
+    'lobito angola site:instagram.com', 'angola podcaster site:instagram.com',
+    'luanda photographer site:instagram.com', 'angola businessman site:instagram.com',
+    'angola public figure site:instagram.com', 'angola media site:instagram.com'
+  ]);
 }
 function getFBQueries(): string[] {
-  return shuffle(['site:facebook.com "angola" influencer','site:facebook.com "angola" "content creator"','site:facebook.com "luanda" influencer','site:facebook.com "angola" "kizomba"','site:facebook.com "angola" "moda"','site:facebook.com "angola" "musica"','site:facebook.com "angola" page','site:facebook.com "luanda" "lifestyle"','site:facebook.com "angola" "fitness"','site:facebook.com "benguela"','site:facebook.com "angola" "dance"','site:facebook.com "angola" "comedia"','site:facebook.com "angola" "fashion"','site:facebook.com "angola" "entrepreneur"','site:facebook.com "luanda" page','site:facebook.com "angola" "food"','site:facebook.com "cabinda" page','site:facebook.com "angola" "photography"','site:facebook.com "huambo" angola','site:facebook.com "angola" "entertainment"','site:facebook.com "angola" "business"','site:facebook.com "luanda" "model"','site:facebook.com "angola" "artist"','site:facebook.com "angola" "digital marketing"','site:facebook.com "angola" "influenciador"','site:facebook.com "angola" "creator digital"','site:facebook.com "luanda" "influencer"','site:facebook.com "angola" "vlog"','site:facebook.com "angola" "podcast"']);
+  return shuffle([
+    'site:facebook.com "angola" influencer', 'site:facebook.com "angola" "content creator"',
+    'site:facebook.com "luanda" influencer', 'site:facebook.com "angola" kizomba',
+    'site:facebook.com "angola" moda', 'site:facebook.com "angola" musica',
+    'site:facebook.com "luanda" lifestyle', 'site:facebook.com "angola" fitness',
+    'site:facebook.com "benguela" angola', 'site:facebook.com "angola" dance',
+    'site:facebook.com "angola" comedia', 'site:facebook.com "angola" fashion',
+    'site:facebook.com "angola" entrepreneur', 'site:facebook.com "luanda" page',
+    'site:facebook.com "angola" food', 'site:facebook.com "cabinda" page',
+    'site:facebook.com "angola" photography', 'site:facebook.com "huambo" angola',
+    'site:facebook.com "angola" entertainment', 'site:facebook.com "angola" business',
+    'site:facebook.com "luanda" model', 'site:facebook.com "angola" artist',
+    'site:facebook.com "angola" "influenciador"', 'site:facebook.com "angola" "creator digital"',
+    'site:facebook.com "luanda" influencer', 'site:facebook.com "angola" vlog',
+    'site:facebook.com "angola" podcast', 'site:facebook.com "angola" comedian',
+    'site:facebook.com "angola" page creator', 'site:facebook.com "angola" "public figure"',
+    'site:facebook.com "angola" "digital marketing"', 'site:facebook.com "angola" blogger'
+  ]);
 }
 
 function timeLeft(t0: number, limitMs: number): boolean { return Date.now() - t0 < limitMs; }
@@ -253,8 +336,8 @@ export async function POST(request: any) {
   var igUrlRe = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'<>])/g;
   var fbUrlRe = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})(?:\/|$|[\s"'<>])/g;
   var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]{2,24})(?:\/|$|[\s"'<>])/g;
-  var igJsonRe = /"username":"([a-zA-Z0-9_.]{3,30})"/g;  // de hashtag/post pages
-  var ttJsonRe = /"uniqueId":"([a-zA-Z0-9_.]{2,24})"/g; // de hashtag pages
+  var igJsonRe = /"username":"([a-zA-Z0-9_.]{3,30})"/g;
+  var ttJsonRe = /"uniqueId":"([a-zA-Z0-9_.]{2,24})"/g;
 
   function addUsers(users: string[], seen: Set<string>, raw: any[], plat: string, validator: Function, source: string) {
     for (var i = 0; i < users.length; i++) {
@@ -271,57 +354,86 @@ export async function POST(request: any) {
     }
   }
 
-  function makeSearchUrl(engine: string, query: string): string {
-    if (engine === 'bing') return 'https://www.bing.com/search?q=' + encodeURIComponent(query) + '&count=30';
-    return 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query);
-  }
-
   // =============================================
-  // PHASE 1: DISCOVERY — Search + Hashtags em PARALELO
+  // PHASE 1: DISCOVERY — Fontes multiplas em PARALELO
   // =============================================
   var allPromises: Promise<void>[] = [];
 
-  // --- 1A: Search engines (DDG + Bing por cada query) ---
   var igQ = getIGQueries(), fbQ = getFBQueries(), ttQ = getTTQueries();
-  var engines = ['ddg', 'bing'];
 
-  for (var ei = 0; ei < engines.length; ei++) {
-    var eng = engines[ei];
-    // IG: 5 queries por engine
-    for (var qi = 0; qi < Math.min(igQ.length, 5); qi++) {
-      (function(query, engine) {
+  // --- 1A: Google Serper API (mais fiavel) ---
+  if (SERPER_KEY) {
+    // IG: 8 queries via Serper
+    for (var qi = 0; qi < Math.min(igQ.length, 8); qi++) {
+      (function(query) {
         allPromises.push(
-          fetchHtml(makeSearchUrl(engine, query), 7000).then(function(html) {
-            if (html) addUsers(extractUsernames(html, igUrlRe), igSeen, igRaw, 'instagram', isValidIG, 'search');
+          serperSearch(query, 20).then(function(urls) {
+            if (urls.length > 0) addUsers(extractUsernamesFromUrls(urls, 'instagram'), igSeen, igRaw, 'instagram', isValidIG, 'serper');
           }).catch(function() {})
         );
-      })(igQ[qi], eng);
+      })(igQ[qi]);
     }
-    // FB: 4 queries por engine
-    for (var qi = 0; qi < Math.min(fbQ.length, 4); qi++) {
-      (function(query, engine) {
+    // FB: 8 queries via Serper
+    for (var qi = 0; qi < Math.min(fbQ.length, 8); qi++) {
+      (function(query) {
         allPromises.push(
-          fetchHtml(makeSearchUrl(engine, query), 7000).then(function(html) {
-            if (html) addUsers(extractUsernames(html, fbUrlRe), fbSeen, fbRaw, 'facebook', isValidFB, 'search');
+          serperSearch(query, 20).then(function(urls) {
+            if (urls.length > 0) addUsers(extractUsernamesFromUrls(urls, 'facebook'), fbSeen, fbRaw, 'facebook', isValidFB, 'serper');
           }).catch(function() {})
         );
-      })(fbQ[qi], eng);
+      })(fbQ[qi]);
     }
-    // TT: 3 queries por engine
-    for (var qi = 0; qi < Math.min(ttQ.length, 3); qi++) {
-      (function(query, engine) {
+    // TT: 6 queries via Serper
+    for (var qi = 0; qi < Math.min(ttQ.length, 6); qi++) {
+      (function(query) {
         allPromises.push(
-          fetchHtml(makeSearchUrl(engine, query), 7000).then(function(html) {
-            if (html) addUsers(extractUsernames(html, ttUrlRe), ttSeen, ttRaw, 'tiktok', isValidTT, 'search');
+          serperSearch(query, 20).then(function(urls) {
+            if (urls.length > 0) addUsers(extractUsernamesFromUrls(urls, 'tiktok'), ttSeen, ttRaw, 'tiktok', isValidTT, 'serper');
           }).catch(function() {})
         );
-      })(ttQ[qi], eng);
+      })(ttQ[qi]);
     }
   }
 
-  // --- 1B: Hashtag scraping (IG + TT) — mais fiavel que search ---
-  var igHashtags = ['angola', 'luanda', 'kizomba', 'benguela', 'cabinda', 'huambo', 'angolano', 'lobito'];
-  var ttHashtags = ['angola', 'luanda', 'kizomba', 'benguela', 'cabinda', 'huambo'];
+  // --- 1B: DuckDuckGo HTML (backup) ---
+  function makeDDGUrl(query: string): string {
+    return 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query);
+  }
+
+  // IG: 5 queries DDG
+  for (var qi = 0; qi < Math.min(igQ.length, 5); qi++) {
+    (function(query) {
+      allPromises.push(
+        fetchHtml(makeDDGUrl(query), 6000).then(function(html) {
+          if (html) addUsers(extractUsernames(html, igUrlRe), igSeen, igRaw, 'instagram', isValidIG, 'ddg');
+        }).catch(function() {})
+      );
+    })(igQ[qi + (SERPER_KEY ? 8 : 0)] || igQ[qi % igQ.length]);
+  }
+  // FB: 4 queries DDG
+  for (var qi = 0; qi < Math.min(fbQ.length, 4); qi++) {
+    (function(query) {
+      allPromises.push(
+        fetchHtml(makeDDGUrl(query), 6000).then(function(html) {
+          if (html) addUsers(extractUsernames(html, fbUrlRe), fbSeen, fbRaw, 'facebook', isValidFB, 'ddg');
+        }).catch(function() {})
+      );
+    })(fbQ[qi + (SERPER_KEY ? 8 : 0)] || fbQ[qi % fbQ.length]);
+  }
+  // TT: 3 queries DDG
+  for (var qi = 0; qi < Math.min(ttQ.length, 3); qi++) {
+    (function(query) {
+      allPromises.push(
+        fetchHtml(makeDDGUrl(query), 6000).then(function(html) {
+          if (html) addUsers(extractUsernames(html, ttUrlRe), ttSeen, ttRaw, 'tiktok', isValidTT, 'ddg');
+        }).catch(function() {})
+      );
+    })(ttQ[qi + (SERPER_KEY ? 6 : 0)] || ttQ[qi % ttQ.length]);
+  }
+
+  // --- 1C: Hashtag scraping directo (muito fiavel para usernames) ---
+  var igHashtags = ['angola', 'luanda', 'kizomba', 'benguela', 'cabinda', 'huambo', 'angolano', 'lobito', 'luandaangola', 'angolainfluencer'];
+  var ttHashtags = ['angola', 'luanda', 'kizomba', 'benguela', 'cabinda', 'huambo', 'foryou', 'angolafrica'];
 
   if (doIG) {
     for (var hi = 0; hi < igHashtags.length; hi++) {
@@ -347,6 +459,20 @@ export async function POST(request: any) {
     }
   }
 
+  // --- 1D: Buscar em paginas de hashtag/search do IG para mais usernames ---
+  if (doIG) {
+    var igSearchTerms = ['angola', 'luanda', 'angolano', 'benguela', 'kizomba angola'];
+    for (var si = 0; si < igSearchTerms.length; si++) {
+      (function(term) {
+        allPromises.push(
+          fetchHtml('https://www.instagram.com/web/search/topsearch/?context=blended&query=' + encodeURIComponent(term), 6000).then(function(html) {
+            if (html) addUsers(extractUsernames(html, igJsonRe), igSeen, igRaw, 'instagram', isValidIG, 'igsearch');
+          }).catch(function() {})
+        );
+      })(igSearchTerms[si]);
+    }
+  }
+
   await Promise.all(allPromises);
   logs.push('Discovery (' + Math.round(Date.now() - t0) + 'ms): TT=' + ttRaw.length + ' IG=' + igRaw.length + ' FB=' + fbRaw.length);
 
@@ -354,6 +480,7 @@ export async function POST(request: any) {
   // PHASE 2: ENRICHMENT — batches paralelos de 6
   // =============================================
   var enrichQueue: { profile: any; type: string }[] = [];
+  // Interleaved enrichment: IG > FB > TT
   var maxLen = Math.max(doIG ? igRaw.length : 0, doFB ? fbRaw.length : 0, doTT ? ttRaw.length : 0);
   for (var ri = 0; ri < maxLen; ri++) {
     if (doIG && ri < igRaw.length && igRaw[ri].followers === 0) enrichQueue.push({ profile: igRaw[ri], type: 'ig' });
@@ -387,7 +514,7 @@ export async function POST(request: any) {
   logs.push('Enriched: TT=' + enriched.tt + '/' + ttRaw.length + ' IG=' + enriched.ig + '/' + igRaw.length + ' FB=' + enriched.fb + '/' + fbRaw.length);
 
   // =============================================
-  // PHASE 3: Score + Filter (minF so para enriquecidos com f>0)
+  // PHASE 3: Score + Filter
   // =============================================
   function scoreAndFilter(rawList: any[]): any[] {
     var result: any[] = [];
@@ -413,7 +540,7 @@ export async function POST(request: any) {
   logs.push('Qualified: TT=' + ttQual.length + ' IG=' + igQual.length + ' FB=' + fbQual.length);
 
   // =============================================
-  // PHASE 4: Interleave — IG > FB > TT
+  // PHASE 4: Interleave — IG > FB > TT, score priority
   // =============================================
   var buckets: any[][] = [[], [], []];
   [igQual, fbQual, ttQual].forEach(function(qual) {
@@ -433,7 +560,7 @@ export async function POST(request: any) {
   }
 
   // =============================================
-  // PHASE 5: Backfill — incluir nao enriquecidos
+  // PHASE 5: Backfill — nao enriquecidos tambem contam
   // =============================================
   if (qualified.length < target) {
     var allRaw = (doIG ? igRaw : []).concat(doFB ? fbRaw : []).concat(doTT ? ttRaw : []);
