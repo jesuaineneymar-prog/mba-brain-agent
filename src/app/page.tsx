@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useMBAStore } from '@/store/mba-store';
 
-const storeGet = function(k: string, d: string) { if (d === undefined) d = ''; if (typeof window !== 'undefined' && window.localStorage) { var v = window.localStorage.getItem(k); if (v) return v; } return d; };
+const storeGet = function(k: string, d?: string) { if (d === undefined) d = ''; if (typeof window !== 'undefined' && window.localStorage) { var v = window.localStorage.getItem(k); if (v) return v; } return d; };
 const storeSet = function(k: string, v: string) { if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem(k, v); } };
 
 const P = {
@@ -26,6 +26,11 @@ const statusColors: Record<string, string> = { prospect: P.textSec, contacted: P
 const statusLabels: Record<string, string> = { prospect:'Prospecto', contacted:'Contactado', replied:'Respondeu', accepted:'Aceite', rejected:'Rejeitado', blacklisted:'Blacklist' };
 const fmtDt = function(d: string) { var dt = new Date(d); if (isNaN(dt.getTime())) return d; return dt.toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
 
+/* ===== PLATFORM CONSTANTS ===== */
+var ALL_PLATFORMS = ['instagram', 'tiktok', 'facebook'];
+var PLAT_ICONS: Record<string,string> = { instagram: '📸', tiktok: '🎵', facebook: '👤' };
+var PLAT_NAMES: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
+
 function getProfiles(): any[] {
   if (typeof window === 'undefined' || !window.localStorage) return [];
   var raw = window.localStorage.getItem('mba_profiles') || '[]';
@@ -44,336 +49,114 @@ function getStoredCredentials() {
   };
 }
 
-/* ===== AUTOMATION CONFIG ===== */
+/* ===== AUTOMATION CONFIG (3 plataformas) ===== */
 function getAutoConfig() {
   try {
     var raw = storeGet('mba_auto_config', '');
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      // Ensure all 3 platforms exist
+      if (!parsed.platforms) parsed.platforms = {};
+      for (var i = 0; i < ALL_PLATFORMS.length; i++) {
+        var pf = ALL_PLATFORMS[i];
+        if (!parsed.platforms[pf]) parsed.platforms[pf] = { username: '', password: '', enabled: false };
+      }
+      return parsed;
+    }
   } catch(e) {}
-  return { enabled: false, platform: 'instagram', username: '', password: '' };
+  return {
+    enabled: false,
+    platforms: {
+      instagram: { username: '', password: '', enabled: false },
+      tiktok: { username: '', password: '', enabled: false },
+      facebook: { username: '', password: '', enabled: false }
+    }
+  };
 }
-function saveAutoConfig(cfg: any) {
-  storeSet('mba_auto_config', JSON.stringify(cfg));
-}
-function setAutoTrigger(platform: string) {
-  storeSet('mba_auto_trigger', JSON.stringify({ ts: Date.now(), platform: platform }));
-}
-function consumeAutoTrigger(): any {
+function saveAutoConfig(cfg: any) { storeSet('mba_auto_config', JSON.stringify(cfg)); }
+function setAutoTrigger() { storeSet('mba_auto_trigger', JSON.stringify({ ts: Date.now() })); }
+function consumeAutoTrigger(): boolean {
   try {
     var raw = storeGet('mba_auto_trigger', '');
-    if (!raw) return null;
+    if (!raw) return false;
     var d = JSON.parse(raw);
-    // Only trigger if less than 30 seconds ago (avoid stale triggers)
-    if (Date.now() - d.ts > 30000) { storeSet('mba_auto_trigger', ''); return null; }
+    if (Date.now() - d.ts > 60000) { storeSet('mba_auto_trigger', ''); return false; }
     storeSet('mba_auto_trigger', '');
-    return d;
-  } catch(e) { return null; }
+    return true;
+  } catch(e) { return false; }
 }
 
 function computeDashboard() {
   var profiles = getProfiles();
   var today = new Date().toISOString().slice(0, 10);
   var totalProfiles = profiles.length;
-  var contactedToday = 0;
-  var repliedToday = 0;
-  var outboundMessages = 0;
-  var inboundMessages = 0;
-  var statusBreakdown: any[] = [];
-  var platformBreakdown: any[] = [];
-  var topProfiles: any[] = [];
-  var dailyStats: any[] = [];
-  var pendingFollowUps = 0;
-
+  var contactedToday = 0; var repliedToday = 0;
+  var outboundMessages = 0; var inboundMessages = 0;
+  var statusBreakdown: any[] = []; var platformBreakdown: any[] = [];
+  var topProfiles: any[] = []; var dailyStats: any[] = []; var pendingFollowUps = 0;
   var statusCounts: Record<string, number> = {};
   var platCounts: Record<string, number> = {};
   var dayMap: Record<string, {contacted:number; replied:number; accepted:number}> = {};
-  var now = Date.now();
-  var threeDays = 3 * 24 * 60 * 60 * 1000;
+  var now = Date.now(); var threeDays = 3 * 24 * 60 * 60 * 1000;
   var dayNames = ['Dom','Seg','Ter','Qua','Qui','Sex','Sab'];
 
   for (var i = 0; i < profiles.length; i++) {
-    var p = profiles[i];
-    var st = p.status || 'prospect';
+    var p = profiles[i]; var st = p.status || 'prospect';
     statusCounts[st] = (statusCounts[st] || 0) + 1;
-    var pl = p.platform || 'unknown';
-    platCounts[pl] = (platCounts[pl] || 0) + 1;
-
+    var pl = p.platform || 'unknown'; platCounts[pl] = (platCounts[pl] || 0) + 1;
     if (p.firstContactedAt && p.firstContactedAt.slice(0, 10) === today) contactedToday++;
-
-    var hasReply = false;
-    var msgs = p.messages || [];
+    var hasReply = false; var msgs = p.messages || [];
     for (var j = 0; j < msgs.length; j++) {
       var m = msgs[j];
       if (m.direction === 'outbound') {
-        outboundMessages++;
-        var mDay = (m.sentAt || '').slice(0, 10);
-        if (mDay === today && m.type === 'initial') { /* count as contacted today already */ }
+        outboundMessages++; var mDay = (m.sentAt || '').slice(0, 10);
         if (!dayMap[mDay]) dayMap[mDay] = {contacted:0, replied:0, accepted:0};
-        if (m.type === 'initial' || m.type === 'follow-up') dayMap[mDay].contacted++;
+        if (m.type === 'initial' || m.type === 'follow-up' || m.type === 'auto') dayMap[mDay].contacted++;
       }
       if (m.direction === 'inbound') {
-        inboundMessages++;
-        hasReply = true;
-        var mDay2 = (m.sentAt || '').slice(0, 10);
+        inboundMessages++; hasReply = true; var mDay2 = (m.sentAt || '').slice(0, 10);
         if (mDay2 === today) repliedToday++;
         if (!dayMap[mDay2]) dayMap[mDay2] = {contacted:0, replied:0, accepted:0};
         dayMap[mDay2].replied++;
       }
     }
-    if (hasReply && st !== 'replied' && st !== 'accepted') { st = 'replied'; }
-
+    if (hasReply && st !== 'replied' && st !== 'accepted') st = 'replied';
     var followUpCount = 0;
-    for (var fu = 0; fu < msgs.length; fu++) {
-      if (msgs[fu].type === 'follow-up') followUpCount++;
-    }
+    for (var fu = 0; fu < msgs.length; fu++) { if (msgs[fu].type === 'follow-up') followUpCount++; }
     var lastOut = null;
-    for (var k = msgs.length - 1; k >= 0; k--) {
-      if (msgs[k].direction === 'outbound' && msgs[k].type !== 'follow-up') { lastOut = msgs[k]; break; }
-    }
+    for (var k = msgs.length - 1; k >= 0; k--) { if (msgs[k].direction === 'outbound' && msgs[k].type !== 'follow-up') { lastOut = msgs[k]; break; } }
     if (lastOut && followUpCount < 2) {
-      var sentTime = new Date(lastOut.sentAt).getTime();
-      var hasReplyAfter = false;
-      for (var mm = 0; mm < msgs.length; mm++) {
-        if (msgs[mm].direction === 'inbound' && new Date(msgs[mm].sentAt).getTime() > sentTime) { hasReplyAfter = true; break; }
-      }
-      if (!hasReplyAfter && (now - sentTime) > threeDays) {
-        pendingFollowUps++;
-      }
+      var sentTime = new Date(lastOut.sentAt).getTime(); var hasReplyAfter = false;
+      for (var mm = 0; mm < msgs.length; mm++) { if (msgs[mm].direction === 'inbound' && new Date(msgs[mm].sentAt).getTime() > sentTime) { hasReplyAfter = true; break; } }
+      if (!hasReplyAfter && (now - sentTime) > threeDays) pendingFollowUps++;
     }
   }
-
-  for (var sk in statusCounts) { statusBreakdown.push({status: sk, count: statusCounts[sk]}); }
-  for (var pk in platCounts) { platformBreakdown.push({platform: pk, count: platCounts[pk]}); }
-
+  for (var sk in statusCounts) statusBreakdown.push({status: sk, count: statusCounts[sk]});
+  for (var pk in platCounts) platformBreakdown.push({platform: pk, count: platCounts[pk]});
   var sorted = profiles.slice().sort(function(a, b) { return (b.followers || 0) - (a.followers || 0); });
-  for (var ti = 0; ti < Math.min(10, sorted.length); ti++) { topProfiles.push(sorted[ti]); }
-
+  for (var ti = 0; ti < Math.min(10, sorted.length); ti++) topProfiles.push(sorted[ti]);
   for (var di = 6; di >= 0; di--) {
-    var d = new Date(now - di * 86400000);
-    var dk = d.toISOString().slice(0, 10);
+    var d2 = new Date(now - di * 86400000); var dk = d2.toISOString().slice(0, 10);
     var dd = dayMap[dk] || {contacted:0, replied:0, accepted:0};
-    dailyStats.push({date: dk, dayName: dayNames[d.getDay()], contacted: dd.contacted, replied: dd.replied, accepted: dd.accepted});
+    dailyStats.push({date: dk, dayName: dayNames[d2.getDay()], contacted: dd.contacted, replied: dd.replied, accepted: dd.accepted});
   }
-
   var responseRate = outboundMessages > 0 ? ((inboundMessages / outboundMessages) * 100) : 0;
-
-  return {
-    overview: { totalProfiles, contactedToday, repliedToday, totalCampaigns: 0, outboundMessages, inboundMessages, responseRate },
-    statusBreakdown, platformBreakdown, topProfiles, dailyStats, pendingFollowUps
-  };
+  return { overview: { totalProfiles, contactedToday, repliedToday, totalCampaigns:0, outboundMessages, inboundMessages, responseRate }, statusBreakdown, platformBreakdown, topProfiles, dailyStats, pendingFollowUps };
 }
 
-function generateAutoReply(inboundMsg: string, profile: any): string {
-  var msg = inboundMsg.toLowerCase();
-  if (msg.indexOf('nao') >= 0 && (msg.indexOf('interesse') >= 0 || msg.indexOf('quero') >= 0 || msg.indexOf('aceito') >= 0)) {
-    return 'Compreendo. Obrigado pelo seu tempo. Se mudar de ideia, estaremos sempre disponiveis.\n\nCumprimentos,\nEquipa Mwango Brain';
-  }
-  if (msg.indexOf('sim') >= 0 || msg.indexOf('interesse') >= 0 || msg.indexOf('quero saber') >= 0 || msg.indexOf('gostaria') >= 0) {
-    return 'Otimo! Ficamos felizes com o seu interesse.\n\nPara avancar, podemos combinar os proximos passos. Qual a melhor forma de contacto?\n\nCumprimentos,\nEquipa Mwango Brain';
-  }
-  if (msg.indexOf('quanto') >= 0 || msg.indexOf('preco') >= 0 || msg.indexOf('valor') >= 0 || msg.indexOf('oferta') >= 0 || msg.indexOf('pagam') >= 0) {
-    return 'O valor da proposta depende de varios factores como o numero de seguidores, taxa de engagement e nicho do perfil.\n\nPodemos discutir os detalhes. Quando lhe seria conveniente?\n\nCumprimentos,\nEquipa Mwango Brain';
-  }
-  if (msg.indexOf('quem') >= 0 || msg.indexOf('empresa') >= 0 || msg.indexOf('o que e') >= 0) {
-    return 'Somos a Mwango Brain, uma agencia criativa sediada em Luanda, Angola. Trabalhamos com criadores de conteudo e oferecemos propostas de aquisicao de contas.\n\nTeria interesse em saber mais?\n\nCumprimentos,\nEquipa Mwango Brain';
-  }
-  return 'Obrigado pela sua resposta, ' + (profile.displayName || profile.username) + '.\n\nGostaria de saber mais sobre a nossa proposta? Estamos disponiveis para esclarecer qualquer duvida.\n\nCumprimentos,\nEquipa Mwango Brain';
-}
-
-/* ===== INBOX CHECKER - le respostas reais via cookies ===== */
-var lastInboxCheck = 0;
-
-async function checkInbox() {
-  var creds = getStoredCredentials();
-  var hasIG = creds.igSession && creds.igCsrf;
-  var hasTT = creds.ttSession && creds.ttCsrf;
-  if (!hasIG && !hasTT) return;
-  var saved = getProfiles();
-  if (saved.length === 0) return;
-  var igUsernames: string[] = [];
-  var ttUsernames: string[] = [];
-  for (var i = 0; i < saved.length; i++) {
-    if (saved[i].platform === 'instagram') igUsernames.push(saved[i].username);
-    if (saved[i].platform === 'tiktok') ttUsernames.push(saved[i].username);
-  }
-  var allKnown = igUsernames.concat(ttUsernames);
-  var reqBody: any = { knownUsernames: allKnown, lastCheckTimestamp: lastInboxCheck };
-  if (hasIG) { reqBody.igSession = creds.igSession; reqBody.igCsrf = creds.igCsrf; }
-  if (hasTT) { reqBody.ttSession = creds.ttSession; reqBody.ttCsrf = creds.ttCsrf; }
-  var res = await fetch('/api/inbox', {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'x-mba-session': 'active' },
-    body: JSON.stringify(reqBody)
-  }).catch(function() { return null; });
-  if (!res || !res.ok) { lastInboxCheck = Date.now(); return; }
-  var data = await res.json().catch(function() { return null; });
-  if (!data || !data.newMessages || data.newMessages.length === 0) {
-    lastInboxCheck = Date.now(); return;
-  }
-  lastInboxCheck = Date.now();
-  var changed = false;
-  for (var mi = 0; mi < data.newMessages.length; mi++) {
-    var nm = data.newMessages[mi];
-    var msgUsername = nm.username.toLowerCase();
-    var msgPlatform = nm.platform;
-    for (var pi = 0; pi < saved.length; pi++) {
-      var p = saved[pi];
-      if (p.platform !== msgPlatform) continue;
-      if (p.username.toLowerCase() !== msgUsername) continue;
-      var msgTime = nm.timestamp;
-      var alreadyExists = false;
-      var msgs = p.messages || [];
-      for (var ei = 0; ei < msgs.length; ei++) {
-        if (msgs[ei].direction === 'inbound' && msgs[ei].content === nm.content && Math.abs(new Date(msgs[ei].sentAt).getTime() - msgTime) < 5000) { alreadyExists = true; break; }
-      }
-      if (alreadyExists) continue;
-      p.messages.push({ content: nm.content, direction: 'inbound', sentAt: new Date(msgTime).toISOString(), type: 'reply', sendAttempted: false, delivered: false, deliveryMsg: '', _username: p.username, _platform: p.platform });
-      if (p.status === 'prospect' || p.status === 'contacted') p.status = 'replied';
-      changed = true;
-      break;
-    }
-  }
-  if (changed) saveProfiles(saved);
-}
-
-async function checkFollowUpsAndReplies() {
-  var saved = getProfiles();
-  var now = Date.now();
-  var threeDays = 3 * 24 * 60 * 60 * 1000;
-  var changed = false;
-  var todayKey = 'mba_daily_' + new Date().toISOString().slice(0, 10);
-  var dailySent = 0;
-  if (typeof window !== 'undefined' && window.localStorage) { dailySent = parseInt(window.localStorage.getItem(todayKey) || '0'); }
-
-  for (var i = 0; i < saved.length; i++) {
-    var p = saved[i];
-    if (!p.messages || p.messages.length === 0) continue;
-
-    // Auto-reply to inbound messages
-    for (var j = 0; j < p.messages.length; j++) {
-      var msg = p.messages[j];
-      if (msg.direction === 'inbound' && !msg.autoReplied) {
-        var reply = generateAutoReply(msg.content || '', p);
-        p.messages.push({ content: reply, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto-reply', sendAttempted: false, delivered: false, deliveryMsg: '' });
-        msg.autoReplied = true;
-        if (p.status === 'prospect' || p.status === 'contacted') p.status = 'replied';
-        changed = true;
-      }
-    }
-
-    // Count existing follow-ups
-    var followUpCount = 0;
-    for (var fc = 0; fc < p.messages.length; fc++) {
-      if (p.messages[fc].type === 'follow-up') followUpCount++;
-    }
-    // Stop after 2 follow-ups
-    if (followUpCount >= 2) continue;
-
-    // Find the last outbound message (before any follow-ups)
-    var lastOutbound = null;
-    for (var k = p.messages.length - 1; k >= 0; k--) {
-      if (p.messages[k].direction === 'outbound' && p.messages[k].type !== 'follow-up') { lastOutbound = p.messages[k]; break; }
-    }
-    if (!lastOutbound) continue;
-
-    var sentTime = new Date(lastOutbound.sentAt).getTime();
-
-    // Check if there was a reply AFTER this message
-    var hasReply = false;
-    for (var m = 0; m < p.messages.length; m++) {
-      if (p.messages[m].direction === 'inbound' && new Date(p.messages[m].sentAt).getTime() > sentTime) { hasReply = true; break; }
-    }
-    if (hasReply) continue;
-
-    // If 3+ days passed and no reply
-    if ((now - sentTime) > threeDays && dailySent < LIMIT_DIARIO) {
-      var fuMsg = followUpCount === 0 ? FOLLOWUP_MSG_1 : FOLLOWUP_MSG_2;
-      var fuTime = new Date().toISOString();
-
-      // Actually SEND the follow-up via API
-      var sr = await fetch('/api/send-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-mba-session': 'active' },
-        body: JSON.stringify({ username: p.username, message: fuMsg, platform: p.platform, sentToday: dailySent })
-      }).catch(function() { return null; });
-      var sd = null;
-      if (sr) { sd = await sr.json().catch(function() { return null; }); }
-
-      var delivered = !!(sd && sd.dmSent);
-      var deliveryMsg = (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Nao enviado';
-
-      p.messages.push({
-        content: fuMsg, direction: 'outbound', sentAt: fuTime,
-        type: 'follow-up', sendAttempted: true, delivered: delivered, deliveryMsg: deliveryMsg
-      });
-
-      if (delivered) {
-        dailySent++;
-        if (p.status === 'prospect') p.status = 'contacted';
-      }
-      changed = true;
-    }
-  }
-  if (changed) {
-    saveProfiles(saved);
-    if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem(todayKey, String(dailySent)); }
-  }
-}
-
-async function sendUnsentMessages() {
-  var saved = getProfiles();
-  var todayKey = 'mba_daily_' + new Date().toISOString().slice(0, 10);
-  var dailySent = 0;
-  if (typeof window !== 'undefined' && window.localStorage) { dailySent = parseInt(window.localStorage.getItem(todayKey) || '0'); }
-  if (dailySent >= 30) return;
-  var sent = 0;
-  var maxBatch = Math.min(5, 30 - dailySent);
-  for (var i = 0; i < saved.length && sent < maxBatch; i++) {
-    var p = saved[i];
-    if (!p.messages) continue;
-    for (var j = 0; j < p.messages.length && sent < maxBatch; j++) {
-      var msg = p.messages[j];
-      if (msg.direction === 'outbound' && !msg.sendAttempted) {
-        msg.sendAttempted = true;
-          var sr = await fetch('/api/send-message', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-mba-session': 'active' },
-            body: JSON.stringify({ username: p.username, message: msg.content, platform: p.platform, sentToday: dailySent + sent })
-          }).catch(function() { return null; });
-          var sd = null;
-          if (sr) { sd = await sr.json().catch(function() { return null; }); }
-          if (sd && sd.dmSent) {
-            msg.delivered = true;
-            msg.deliveryMsg = sd.deliveryMsg || 'DM enviado';
-            sent++;
-            if (p.status === 'prospect') p.status = 'contacted';
-          } else {
-            msg.delivered = false;
-            msg.deliveryMsg = (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Falha ao enviar DM';
-          }
-      }
-    }
-  }
-  if (sent > 0) {
-    saveProfiles(saved);
-    if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem(todayKey, String(dailySent + sent)); }
-  }
-}
-
+/* ===== UI COMPONENTS ===== */
 function Sphere({ size = 240, speed = 1 }: { size?: number; speed?: number }) {
   const ref = useRef<HTMLCanvasElement>(null), raf = useRef<number>(0);
   useEffect(() => {
     const cv = ref.current; if (!cv) return;
-    const ctx = cv.getContext('2d');
-    const DPR = window.devicePixelRatio || 2;
-    cv.width = size * DPR; cv.height = size * DPR;
-    ctx.scale(DPR, DPR);
+    const ctx = cv.getContext('2d'); const DPR = window.devicePixelRatio || 2;
+    cv.width = size * DPR; cv.height = size * DPR; ctx.scale(DPR, DPR);
     const cx = size/2, cy = size/2, R = size * 0.36;
     const pts = Array.from({ length: 240 }, function() {
       const t = Math.random() * Math.PI * 2, p = Math.acos(2 * Math.random() - 1);
       return { ox: Math.sin(p)*Math.cos(t), oy: Math.sin(p)*Math.sin(t), oz: Math.cos(p), sz: Math.random()*1.8+0.3, hot: Math.random()<0.05 };
     });
-    const TX = 0.28, cosX = Math.cos(TX), sinX = Math.sin(TX);
-    let rot = 0;
+    const TX = 0.28, cosX = Math.cos(TX), sinX = Math.sin(TX); let rot = 0;
     function draw() {
       ctx.clearRect(0, 0, size, size); rot += 0.004 * speed;
       const pulse = 1 + Math.sin(Date.now()/950) * 0.025;
@@ -408,7 +191,6 @@ function Sphere({ size = 240, speed = 1 }: { size?: number; speed?: number }) {
   }, [size, speed]);
   return <canvas ref={ref} style={{ width: size, height: size }} />;
 }
-
 function Panel({ children, style = {} }: { children: React.ReactNode; style?: React.CSSProperties }) {
   return <div style={{ background:P.surface, border:'1px solid '+P.border, borderRadius:10, padding:16, ...style }}>{children}</div>;
 }
@@ -421,7 +203,7 @@ function Lbl({ children }: { children: React.ReactNode }) {
 function StatCard({ label, value, sub, color = P.red }: { label:string; value:string|number; sub?:string; color?:string }) {
   return <Panel style={{ flex:1, minWidth:120 }}><Lbl>{label}</Lbl><div style={{ color, fontSize:24, fontWeight:700, fontFamily:"'JetBrains Mono',monospace", lineHeight:1 }}>{value}</div>{sub && <div style={{ color:P.textSec, fontSize:10, marginTop:4 }}>{sub}</div>}</Panel>;
 }
-function Btn({ children, onClick, disabled, variant = 'primary', size = 'md' }: { children:React.ReactNode; onClick?:()=>void; disabled?:boolean; variant?:string; size?:string }) {
+function Btn({ children, onClick, disabled, variant = 'primary', size = 'md', style: extraStyle = {} }: { children:React.ReactNode; onClick?:()=>void; disabled?:boolean; variant?:string; size?:string; style?: React.CSSProperties }) {
   const pad = size==='sm'?'5px 12px':size==='lg'?'13px 28px':'9px 18px';
   const fs = size==='sm'?11:size==='lg'?13:12;
   const st:Record<string,React.CSSProperties> = {
@@ -429,15 +211,14 @@ function Btn({ children, onClick, disabled, variant = 'primary', size = 'md' }: 
     ghost: { background:'transparent', border:'1px solid '+P.border, color:P.textSec },
     danger: { background:'rgba(255,60,60,0.08)', border:'1px solid rgba(255,60,60,0.3)', color:'#ff6b6b' },
   };
-  return <button onClick={disabled?undefined:onClick} style={{ ...st[variant]||st.primary, padding:pad, fontSize:fs, fontWeight:600, cursor:disabled?'not-allowed':'pointer', borderRadius:6, fontFamily:"'Inter',sans-serif", transition:'all .15s', display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap' }}>{children}</button>;
+  return <button onClick={disabled?undefined:onClick} style={{ ...st[variant]||st.primary, padding:pad, fontSize:fs, fontWeight:600, cursor:disabled?'not-allowed':'pointer', borderRadius:6, fontFamily:"'Inter',sans-serif", transition:'all .15s', display:'inline-flex', alignItems:'center', gap:6, whiteSpace:'nowrap', ...extraStyle }}>{children}</button>;
 }
 function BarComp({ value, max, color = P.red, h = 8 }: { value:number; max:number; color?:string; h?:number }) {
   const pct = max > 0 ? Math.min(100, (value/max)*100) : 0;
   return <div style={{ height:h, background:P.surface2, borderRadius:h/2, overflow:'hidden' }}><div style={{ height:'100%', width:pct+'%', background:'linear-gradient(90deg,'+color+','+P.redB+')', borderRadius:h/2, transition:'width .5s' }} /></div>;
 }
 function StatusBadge({ status }: { status: string }) {
-  const c = statusColors[status] || P.textDim;
-  const l = statusLabels[status] || status;
+  const c = statusColors[status] || P.textDim; const l = statusLabels[status] || status;
   return <span style={{ padding:'2px 8px', borderRadius:3, background:c+'18', border:'1px solid '+c+'44', color:c, fontSize:10, fontWeight:600, textTransform:'uppercase' }}>{l}</span>;
 }
 function DeliveryBadge({ msg }: { msg: any }) {
@@ -449,36 +230,33 @@ function EmptyState({ icon, title, sub }: { icon:string; title:string; sub:strin
   return <div style={{ textAlign:'center', padding:48, color:P.textDim }}><div style={{ fontSize:32, opacity:0.15, marginBottom:12 }}>{icon}</div><div style={{ color:P.text, fontSize:14, fontWeight:600 }}>{title}</div><div style={{ fontSize:12, marginTop:6 }}>{sub}</div></div>;
 }
 
+/* ===== LOGIN SCREEN ===== */
 function LoginScreen() {
-  const [code, setCode] = useState('');
-  const [error, setError] = useState(false);
-  const [booting, setBooting] = useState(false);
-  const [bootStep, setBootStep] = useState(0);
+  const [code, setCode] = useState(''); const [error, setError] = useState(false);
+  const [booting, setBooting] = useState(false); const [bootStep, setBootStep] = useState(0);
   const { setAuthenticated } = useMBAStore();
   const lines = ['A verificar credenciais...', 'A inicializar MBA-OS...', 'A carregar modulos...', 'A conectar APIs...', 'Sistema pronto.'];
   const tryLogin = async function() {
-      if (code !== 'MBA2026') { setError(true); setTimeout(function() { setError(false); }, 1500); return; }
-      setBooting(true);
-      for (var i = 0; i < lines.length; i++) { setBootStep(i); await new Promise(function(r) { setTimeout(r, 450); }); }
-      storeSet('mba_session', 'active');
-      setAuthenticated(true, 'active');
+    if (code !== 'MBA2026') { setError(true); setTimeout(function() { setError(false); }, 1500); return; }
+    setBooting(true);
+    for (var i = 0; i < lines.length; i++) { setBootStep(i); await new Promise(function(r) { setTimeout(r, 450); }); }
+    storeSet('mba_session', 'active'); setAuthenticated(true, 'active');
   };
-  const gridBg = { backgroundImage:'linear-gradient('+P.border+' 1px,transparent 1px),linear-gradient(90deg,'+P.border+' 1px,transparent 1px)', backgroundSize:'52px 52px' };
   return (
-    <div style={{ width:'100vw', height:'100vh', background:P.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden', ...gridBg }}>
+    <div style={{ width:'100vw', height:'100vh', background:P.bg, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', position:'relative', overflow:'hidden', backgroundImage:'linear-gradient(rgba(192,0,28,0.14) 1px,transparent 1px),linear-gradient(90deg,rgba(192,0,28,0.14) 1px,transparent 1px)', backgroundSize:'52px 52px' }}>
       <div style={{ position:'absolute', inset:0, background:'radial-gradient(ellipse 70% 50% at 50% 45%, rgba(192,0,28,0.14) 0%, transparent 65%)', pointerEvents:'none' }} />
       <Sphere size={240} />
-      <div style={{ position:'absolute', textAlign:'center', animation:'fade-up .6s ease-out' }}>
-        <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:42, fontWeight:900, color:P.red, animation:'glitch 4s infinite', letterSpacing:4, marginBottom:6 }}>MBA</div>
+      <div style={{ position:'absolute', textAlign:'center' }}>
+        <div style={{ fontFamily:"'Orbitron',sans-serif", fontSize:42, fontWeight:900, color:P.red, letterSpacing:4, marginBottom:6 }}>MBA</div>
         <div style={{ fontSize:11, color:P.textSec, letterSpacing:6, textTransform:'uppercase', marginBottom:4 }}>MWANGO BRAIN AGENT</div>
         <div style={{ fontSize:10, color:P.textDim, letterSpacing:2 }}>PROSPECCAO INTELIGENTE v2.0</div>
       </div>
       {booting ? (
         <div style={{ position:'absolute', bottom:'20%', fontFamily:"'JetBrains Mono',monospace", fontSize:11, textAlign:'center' }}>
-          {lines.map(function(l, i) { return <div key={i} style={{ color: i<=bootStep ? P.green : P.textDim, marginBottom:4, opacity: i<=bootStep?1:0.3, transition:'all .3s' }}>{i<=bootStep?'\u2713':'\u25CB'} {l}</div>; })}
+          {lines.map(function(l, i) { return <div key={i} style={{ color: i<=bootStep ? P.green : P.textDim, marginBottom:4 }}>{i<=bootStep?'\u2713':'\u25CB'} {l}</div>; })}
         </div>
       ) : (
-        <div style={{ position:'absolute', bottom:'18%', display:'flex', flexDirection:'column', alignItems:'center', gap:10, animation:'fade-up .8s ease-out' }}>
+        <div style={{ position:'absolute', bottom:'18%', display:'flex', flexDirection:'column', alignItems:'center', gap:10 }}>
           <input value={code} onChange={function(e) { setCode(e.target.value); }} onKeyDown={function(e) { if(e.key==='Enter') tryLogin(); }} placeholder="Codigo de acesso" style={{ ...INP, width:260, textAlign:'center', letterSpacing:3, fontSize:14 }} />
           {error && <div style={{ color:P.orange, fontSize:12 }}>Codigo incorrecto</div>}
           <button onClick={tryLogin} style={{ width:260, padding:'11px', background:'rgba(192,0,28,0.15)', border:'1px solid '+P.red, color:P.redB, borderRadius:6, fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:"'Inter',sans-serif", letterSpacing:1 }}>ENTRAR NO SISTEMA</button>
@@ -489,24 +267,30 @@ function LoginScreen() {
   );
 }
 
+/* ===== DASHBOARD TAB (with Automation Config) ===== */
 function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh: () => void }) {
   const [dashData, setDashData] = useState<any>(null);
   const loadDash = function() { setDashData(computeDashboard()); };
   useEffect(function() { loadDash(); }, [refreshKey]);
-
-  // Automation config state
   const [autoCfg, setAutoCfg] = useState<any>(getAutoConfig());
   const [showCfg, setShowCfg] = useState(false);
   const [cfgSaved, setCfgSaved] = useState(false);
-  const platformNames: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
 
   if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="Sem dados" sub="Execute uma prospeccao para ver resultados." /></Panel></div>;
-  var d = dashData;
-  var o = d.overview || {};
+  var d = dashData; var o = d.overview || {};
+  var activePlats = ALL_PLATFORMS.filter(function(pf) { var pc = autoCfg.platforms && autoCfg.platforms[pf]; return autoCfg.enabled && pc && pc.enabled && pc.username; });
+
+  function updatePlat(pf: string, field: string, val: string | boolean) {
+    var c = JSON.parse(JSON.stringify(autoCfg));
+    if (!c.platforms) c.platforms = {};
+    if (!c.platforms[pf]) c.platforms[pf] = { username:'', password:'', enabled:false };
+    (c.platforms[pf] as any)[field] = val;
+    setAutoCfg(c);
+  }
+
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-
-      {/* AUTOMATION CONFIG PANEL */}
+      {/* ===== AUTOMATION PANEL ===== */}
       <Panel style={{ marginBottom:14, border: autoCfg.enabled ? '1px solid rgba(0,192,99,0.4)' : undefined, background: autoCfg.enabled ? 'rgba(0,192,99,0.04)' : undefined }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -517,55 +301,57 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
             {showCfg ? 'Fechar' : 'Configurar'}
           </button>
         </div>
-
         {autoCfg.enabled ? (
           <div style={{ fontSize:11, color:P.green, marginBottom:8 }}>
-            Apos cada prospeccao, o sistema envia DMs automaticamente no {platformNames[autoCfg.platform] || autoCfg.platform}.
-            So precisas de clicar em "Iniciar Prospeccao" — o resto e automatico.
+            Apos cada prospeccao, o sistema envia DMs automaticamente.
+            Plataformas: {activePlats.length > 0 ? activePlats.map(function(p) { return PLAT_NAMES[p]; }).join(', ') : 'nenhuma configurada'}.
+            So precisas de clicar "Iniciar Prospeccao" - o resto e automatico.
           </div>
         ) : (
           <div style={{ fontSize:11, color:P.textSec, marginBottom:8 }}>
-            Configura as tuas credenciais e activa a automacao para enviar DMs automaticamente apos cada prospeccao.
+            Configura credenciais das 3 plataformas e activa. Apos cada prospeccao, DMs vao sozinhos.
           </div>
         )}
-
         {showCfg && (
-          <div style={{ marginTop:8, padding:12, borderRadius:6, background:P.surface2, border:'1px solid '+P.border }}>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
+          <div style={{ marginTop:8, padding:14, borderRadius:6, background:P.surface2, border:'1px solid '+P.border }}>
+            {/* Global Toggle */}
+            <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14, paddingBottom:10, borderBottom:'1px solid '+P.border }}>
               <div>
-                <Lbl style={{ fontSize:10 }}>Plataforma para DMs</Lbl>
-                <select value={autoCfg.platform} onChange={function(e) { setAutoCfg({...autoCfg, platform: e.target.value}); }} style={SEL as any}>
-                  <option value="instagram">Instagram</option>
-                  <option value="tiktok">TikTok</option>
-                  <option value="facebook">Facebook</option>
-                </select>
+                <div style={{ color:P.text, fontSize:12, fontWeight:700 }}>Automacao Geral</div>
+                <div style={{ color:P.textDim, fontSize:9, marginTop:2 }}>Envia DMs automaticamente apos cada prospeccao</div>
               </div>
-              <div style={{ display:'flex', alignItems:'flex-end' }}>
-                <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontSize:11, color: autoCfg.enabled ? P.green : P.textSec, fontWeight:600, padding:'8px 0' }}>
-                  <div onClick={function() { setAutoCfg({...autoCfg, enabled: !autoCfg.enabled}); }} style={{ width:36, height:20, borderRadius:10, background: autoCfg.enabled ? P.green : '#333', position:'relative', transition:'background 0.2s', cursor:'pointer', flexShrink:0 }}>
-                    <div style={{ width:16, height:16, borderRadius:'50%', background:'#fff', position:'absolute', top:2, left: autoCfg.enabled ? 18 : 2, transition:'left 0.2s' }} />
+              <div onClick={function() { setAutoCfg({...autoCfg, enabled: !autoCfg.enabled}); }} style={{ width:44, height:24, borderRadius:12, background: autoCfg.enabled ? P.green : '#333', position:'relative', transition:'background 0.2s', cursor:'pointer', flexShrink:0 }}>
+                <div style={{ width:20, height:20, borderRadius:'50%', background:'#fff', position:'absolute', top:2, left: autoCfg.enabled ? 22 : 2, transition:'left 0.2s' }} />
+              </div>
+            </div>
+            {/* 3 Platform Credential Sections */}
+            {ALL_PLATFORMS.map(function(pf) {
+              var pCfg = (autoCfg.platforms && autoCfg.platforms[pf]) || { username:'', password:'', enabled:false };
+              var pReady = pCfg.enabled && !!pCfg.username;
+              return (
+                <div key={pf} style={{ marginBottom:12, padding:12, borderRadius:6, border:'1px solid '+(pReady ? 'rgba(0,192,99,0.25)' : P.border), background: pReady ? 'rgba(0,192,99,0.04)' : 'transparent' }}>
+                  <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:10 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                      <span style={{ fontSize:16 }}>{PLAT_ICONS[pf]}</span>
+                      <span style={{ color:P.text, fontSize:12, fontWeight:700 }}>{PLAT_NAMES[pf]}</span>
+                      {pReady && <span style={{ fontSize:8, padding:'1px 6px', borderRadius:8, background:'rgba(0,192,99,0.15)', color:P.green, fontWeight:700 }}>PRONTO</span>}
+                    </div>
+                    <div onClick={function() { updatePlat(pf, 'enabled', !pCfg.enabled); }} style={{ width:36, height:20, borderRadius:10, background: pCfg.enabled ? P.green : '#333', position:'relative', transition:'background 0.2s', cursor:'pointer', flexShrink:0 }}>
+                      <div style={{ width:16, height:16, borderRadius:'50%', background:'#fff', position:'absolute', top:2, left: pCfg.enabled ? 18 : 2, transition:'left 0.2s' }} />
+                    </div>
                   </div>
-                  {autoCfg.enabled ? 'Automacao ON' : 'Automacao OFF'}
-                </label>
-              </div>
-            </div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:10 }}>
-              <div>
-                <Lbl style={{ fontSize:10 }}>Username do {platformNames[autoCfg.platform]}</Lbl>
-                <input value={autoCfg.username} onChange={function(e) { setAutoCfg({...autoCfg, username: e.target.value}); }} placeholder="utilizador" style={INP} />
-              </div>
-              <div>
-                <Lbl style={{ fontSize:10 }}>Password</Lbl>
-                <input type="password" value={autoCfg.password} onChange={function(e) { setAutoCfg({...autoCfg, password: e.target.value}); }} placeholder="password" style={INP} />
-              </div>
-            </div>
-            <div style={{ display:'flex', gap:8 }}>
-              <Btn onClick={function() { saveAutoConfig(autoCfg); setCfgSaved(true); setTimeout(function() { setCfgSaved(false); }, 2000); }} style={{ flex:1 }}>
-                {cfgSaved ? 'Guardado!' : 'Guardar Configuracao'}
-              </Btn>
-            </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                    <div><Lbl>Username</Lbl><input value={pCfg.username} onChange={function(e) { updatePlat(pf, 'username', e.target.value); }} placeholder={"Utilizador do " + PLAT_NAMES[pf]} style={INP} /></div>
+                    <div><Lbl>Password</Lbl><input type="password" value={pCfg.password} onChange={function(e) { updatePlat(pf, 'password', e.target.value); }} placeholder="Password" style={INP} /></div>
+                  </div>
+                </div>
+              );
+            })}
+            <Btn onClick={function() { saveAutoConfig(autoCfg); setCfgSaved(true); setTimeout(function() { setCfgSaved(false); }, 2000); onRefresh(); }} style={{ width:'100%' }}>
+              {cfgSaved ? '\u2713 Guardado!' : 'Guardar Configuracao'}
+            </Btn>
             <div style={{ fontSize:9, color:P.textDim, marginTop:8, lineHeight:'15px' }}>
-              As credenciais ficam guardadas apenas no teu navegador. Apos activar, basta clicar "Iniciar Prospeccao" e o sistema faz o resto: login + envio de DMs automatico.
+              Credenciais guardadas no teu navegador. Apos activar, so clicas "Iniciar Prospeccao" e o sistema faz: login + envio de DMs em todas as plataformas activas.
             </div>
           </div>
         )}
@@ -585,16 +371,12 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
           <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{(d.dailyStats || []).map(function(ds: any, i: number) {
             var maxC = Math.max.apply(null, (d.dailyStats || []).map(function(x: any) { return x.contacted; }).concat([1]));
             var maxR = Math.max.apply(null, (d.dailyStats || []).map(function(x: any) { return x.replied; }).concat([1]));
-            return <div key={i}>
-              <div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11 }}>{ds.dayName} {ds.date?ds.date.slice(5):''}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{ds.contacted}c / {ds.replied}r</span></div>
-              <div style={{ display:'flex', gap:3 }}><div style={{ flex:2 }}><BarComp value={ds.contacted} max={maxC} color={P.orange} h={6} /></div><div style={{ flex:2 }}><BarComp value={ds.replied} max={maxR} color={P.green} h={6} /></div></div>
-            </div>;
+            return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11 }}>{ds.dayName} {ds.date?ds.date.slice(5):''}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{ds.contacted}c / {ds.replied}r</span></div><div style={{ display:'flex', gap:3 }}><div style={{ flex:2 }}><BarComp value={ds.contacted} max={maxC} color={P.orange} h={6} /></div><div style={{ flex:2 }}><BarComp value={ds.replied} max={maxR} color={P.green} h={6} /></div></div></div>;
           })}</div>
         </Panel>
         <Panel><STitle>Por Plataforma</STitle>
           {(d.platformBreakdown || []).length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{d.platformBreakdown.map(function(p: any, i: number) {
-            var colors = [P.red, P.orange, P.blue, P.green];
-            var maxP = Math.max.apply(null, d.platformBreakdown.map(function(x: any) { return x.count; }).concat([1]));
+            var colors = [P.red, P.orange, P.blue, P.green]; var maxP = Math.max.apply(null, d.platformBreakdown.map(function(x: any) { return x.count; }).concat([1]));
             return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{p.platform}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span></div><BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} /></div>;
           })}</div> : <EmptyState icon="\u25CE" title="Sem dados" sub="Aguardando prospeccao" />}
         </Panel>
@@ -607,10 +389,7 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
         </Panel>
         <Panel><STitle>Top 10 Perfis</STitle>
           {(d.topProfiles || []).length > 0 ? d.topProfiles.map(function(p: any, i: number) {
-            return <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 0', borderBottom:i<9?'1px solid '+P.border:'none' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div>
-              <span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.followers > 0 ? p.followers.toLocaleString('pt-PT') : '—'}</span>
-            </div>;
+            return <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 0', borderBottom:i<9?'1px solid '+P.border:'none' }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.followers > 0 ? p.followers.toLocaleString('pt-PT') : '\u2014'}</span></div>;
           }) : <EmptyState icon="\u25CE" title="Sem perfis" sub="Aguardando prospeccao" />}
         </Panel>
       </div>
@@ -618,54 +397,27 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
   );
 }
 
+/* ===== PROFILE DETAIL MODAL ===== */
 function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onClose:()=>void; onUpdate:()=>void }) {
   const [notes, setNotes] = useState(profile?.notes || '');
   const [status, setStatus] = useState(profile?.status || 'prospect');
-  const [msg, setMsg] = useState('');
-  const [sending, setSending] = useState(false);
+  const [msg, setMsg] = useState(''); const [sending, setSending] = useState(false);
   if (!profile) return null;
-  const saveNotes = async function() {
-    var saved = getProfiles();
-    for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].notes = notes; saved[i].status = status; break; } }
-    saveProfiles(saved);
-    onUpdate();
-  };
+  const saveNotes = async function() { var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].notes = notes; saved[i].status = status; break; } } saveProfiles(saved); onUpdate(); };
   const sendMessage = async function() {
-    if (!msg.trim()) return;
-    setSending(true);
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
-      var sd = null;
-      if (sr) { sd = await sr.json().catch(function() { return null; }); }
-      var saved = getProfiles();
-      for (var i = 0; i < saved.length; i++) {
-        if (saved[i].id === profile.id) {
-          if (!saved[i].messages) saved[i].messages = [];
-          var dmOk = !!(sd && sd.dmSent);
-          saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' });
-          if (saved[i].status === 'prospect' && dmOk) saved[i].status = 'contacted';
-          break;
-        }
-      }
-      saveProfiles(saved);
-      setMsg(''); onUpdate();
-    setSending(false);
+    if (!msg.trim()) return; setSending(true);
+    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
+    var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
+    var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { if (!saved[i].messages) saved[i].messages = []; var dmOk = !!(sd && sd.dmSent); saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' }); if (saved[i].status === 'prospect' && dmOk) saved[i].status = 'contacted'; break; } }
+    saveProfiles(saved); setMsg(''); onUpdate(); setSending(false);
   };
-  const blacklist = function() {
-    var saved = getProfiles();
-    for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].status = 'blacklisted'; break; } }
-    saveProfiles(saved);
-    onUpdate(); onClose();
-  };
+  const blacklist = function() { var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].status = 'blacklisted'; break; } } saveProfiles(saved); onUpdate(); onClose(); };
   var msgs = profile.messages || [];
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }} onClick={onClose}>
       <div style={{ background:P.surface, border:'1px solid '+P.border, borderRadius:12, padding:20, width:'90%', maxWidth:560, maxHeight:'85vh', overflowY:'auto' }} onClick={function(e) { e.stopPropagation(); }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-            <div style={{ color:P.redB, fontSize:16, fontWeight:700 }}>{profile.username}</div>
-            <span style={{ color:P.textDim, fontSize:11 }}>{profile.platform}</span>
-            <StatusBadge status={status} />
-          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}><div style={{ color:P.redB, fontSize:16, fontWeight:700 }}>{profile.username}</div><span style={{ color:P.textDim, fontSize:11 }}>{profile.platform}</span><StatusBadge status={status} /></div>
           <button onClick={onClose} style={{ background:'none', border:'none', color:P.textSec, cursor:'pointer', fontSize:18 }}>&times;</button>
         </div>
         <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
@@ -675,45 +427,17 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
           {profile.profileUrl && <div style={{ alignSelf:'flex-end' }}><a href={profile.profileUrl} target="_blank" rel="noreferrer"><Btn variant="ghost" size="sm">Abrir perfil</Btn></a></div>}
         </div>
         {profile.bio && <div style={{ marginBottom:14 }}><Lbl>Biografia</Lbl><div style={{ color:P.textSec, fontSize:12, whiteSpace:'pre-wrap' }}>{profile.bio}</div></div>}
-        <div style={{ marginBottom:14 }}><Lbl>Estado</Lbl>
-          <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-            {['prospect','contacted','replied','accepted','rejected'].map(function(s) { return <button key={s} onClick={function() { setStatus(s); }} style={{ padding:'5px 10px', borderRadius:4, border:'1px solid '+(status===s?(statusColors[s]||P.red):P.border), background:status===s?(statusColors[s]||P.red)+'18':'transparent', color:status===s?(statusColors[s]||P.red):P.textSec, fontSize:11, cursor:'pointer' }}>{statusLabels[s]}</button>; })}
-          </div>
-        </div>
+        <div style={{ marginBottom:14 }}><Lbl>Estado</Lbl><div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>{['prospect','contacted','replied','accepted','rejected'].map(function(s) { return <button key={s} onClick={function() { setStatus(s); }} style={{ padding:'5px 10px', borderRadius:4, border:'1px solid '+(status===s?(statusColors[s]||P.red):P.border), background:status===s?(statusColors[s]||P.red)+'18':'transparent', color:status===s?(statusColors[s]||P.red):P.textSec, fontSize:11, cursor:'pointer' }}>{statusLabels[s]}</button>; })}</div></div>
         <div style={{ marginBottom:14 }}><Lbl>Notas</Lbl><textarea value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={2} style={{ ...INP, resize:'vertical' }} /></div>
-        <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}>
-          <Btn onClick={saveNotes}>Guardar</Btn>
-          <Btn variant="danger" onClick={blacklist}>Blacklist</Btn>
-        </div>
-        {msgs.length > 0 && <div style={{ marginBottom:14, borderTop:'1px solid '+P.border, paddingTop:14 }}>
-          <Lbl>Historico de mensagens ({msgs.length})</Lbl>
-          <div style={{ maxHeight:200, overflowY:'auto' }}>
-            {msgs.map(function(m: any, i: number) {
-              return <div key={i} style={{ padding:'6px 0', borderBottom:'1px solid '+P.redDim, display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}>
-                <div style={{ flex:1, minWidth:0 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:2 }}>
-                    <span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:9, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span>
-                    <DeliveryBadge msg={m} />
-                    {m.type && <span style={{ color:P.textDim, fontSize:9 }}>({m.type})</span>}
-                  </div>
-                  <div style={{ color:P.textSec, fontSize:11, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.content}</div>
-
-                </div>
-                <span style={{ color:P.textDim, fontSize:9, flexShrink:0 }}>{fmtDt(m.sentAt)}</span>
-              </div>;
-            })}
-          </div>
-        </div>}
-        <div style={{ borderTop:'1px solid '+P.border, paddingTop:14 }}>
-          <Lbl>Enviar mensagem</Lbl>
-          <textarea value={msg} onChange={function(e) { setMsg(e.target.value); }} rows={3} placeholder="Escreva a mensagem..." style={{ ...INP, resize:'vertical', marginBottom:8 }} />
-          <Btn onClick={sendMessage} disabled={sending || !msg.trim()}>{sending ? 'A enviar...' : 'Enviar DM real'}</Btn>
-        </div>
+        <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}><Btn onClick={saveNotes}>Guardar</Btn><Btn variant="danger" onClick={blacklist}>Blacklist</Btn></div>
+        {msgs.length > 0 && <div style={{ marginBottom:14, borderTop:'1px solid '+P.border, paddingTop:14 }}><Lbl>Historico ({msgs.length})</Lbl><div style={{ maxHeight:200, overflowY:'auto' }}>{msgs.map(function(m: any, i: number) { return <div key={i} style={{ padding:'6px 0', borderBottom:'1px solid '+P.redDim, display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}><div style={{ flex:1, minWidth:0 }}><div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:2 }}><span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:9, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span><DeliveryBadge msg={m} />{m.type && <span style={{ color:P.textDim, fontSize:9 }}>({m.type})</span>}</div><div style={{ color:P.textSec, fontSize:11, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.content}</div></div><span style={{ color:P.textDim, fontSize:9, flexShrink:0 }}>{fmtDt(m.sentAt)}</span></div>; })}</div></div>}
+        <div style={{ borderTop:'1px solid '+P.border, paddingTop:14 }}><Lbl>Enviar mensagem</Lbl><textarea value={msg} onChange={function(e) { setMsg(e.target.value); }} rows={3} placeholder="Escreva a mensagem..." style={{ ...INP, resize:'vertical', marginBottom:8 }} /><Btn onClick={sendMessage} disabled={sending || !msg.trim()}>{sending ? 'A enviar...' : 'Enviar DM real'}</Btn></div>
       </div>
     </div>
   );
 }
 
+/* ===== PROSPECTING TAB (with auto-trigger) ===== */
 function ProspectingTab() {
   const [form, setForm] = useState({ platform:'all', minFollowers:500, maxFollowers:100000, location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
@@ -733,68 +457,59 @@ function ProspectingTab() {
     if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; });
     if (filterStatus !== 'all') all = all.filter(function(p: any) { return p.status === filterStatus; });
     if (search) { var s = search.toLowerCase(); all = all.filter(function(p: any) { return (p.username || '').toLowerCase().indexOf(s) >= 0 || (p.displayName || '').toLowerCase().indexOf(s) >= 0; }); }
-    setTotal(all.length);
-    var start = (page - 1) * 50;
-    setProfiles(all.slice(start, start + 50));
+    setTotal(all.length); var start = (page - 1) * 50; setProfiles(all.slice(start, start + 50));
   };
   useEffect(function() { loadProfiles(); }, [page, filterPlat, filterStatus, search]);
-
-  const deleteAllProfiles = function() {
-    if (!confirm('Apagar TODOS os ' + total + ' perfis guardados? Esta accao nao pode ser desfeita.')) return;
-    if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.removeItem('mba_profiles'); }
-    setProfiles([]); setTotal(0); setResults([]); setSelected(new Set()); setPage(1);
-  };
+  const deleteAllProfiles = function() { if (!confirm('Apagar TODOS os ' + total + ' perfis?')) return; if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.removeItem('mba_profiles'); } setProfiles([]); setTotal(0); setResults([]); setSelected(new Set()); setPage(1); };
 
   const runProspect = async function() {
     setLoading(true); setResults([]); setProspectMsg('A procurar perfis angolanos...');
-      var prospectBody: any = { ...form, targetCount: 50 };
-      const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body:JSON.stringify(prospectBody) }).catch(function() { return null; });
-      if (!res) { setProspectMsg('Erro de conexao'); setLoading(false); return; }
-      if (!res.ok) {
-        const errData = await res.json().catch(function() { return null; });
-        const errMsg = (errData && errData.error) ? errData.error : ('Erro HTTP ' + res.status);
-        setProspectMsg(errMsg);
-        setLoading(false);
-        return;
-      }
-      const d = await res.json().catch(function() { return null; });
-      if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); return; }
-      setProspectMsg(d.message || '');
-      if (d.profiles && d.profiles.length > 0) {
-        setResults(d.profiles);
-        var saved = getProfiles();
-        var savedIds = new Set(saved.map(function(s: any) { return s.username + ':' + s.platform; }));
-        var newOnes = d.profiles.filter(function(p: any) { return !savedIds.has(p.username + ':' + p.platform); });
-        var merged = saved.concat(newOnes);
-        saveProfiles(merged);
-        setProfiles(merged);
-        setTotal(merged.length);
-        setSelected(new Set());
+    var prospectBody: any = { ...form, targetCount: 50 };
+    const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body:JSON.stringify(prospectBody) }).catch(function() { return null; });
+    if (!res) { setProspectMsg('Erro de conexao'); setLoading(false); return; }
+    if (!res.ok) { const errData = await res.json().catch(function() { return null; }); setProspectMsg((errData && errData.error) ? errData.error : ('Erro HTTP ' + res.status)); setLoading(false); return; }
+    const d = await res.json().catch(function() { return null; });
+    if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); return; }
+    setProspectMsg(d.message || '');
+    if (d.profiles && d.profiles.length > 0) {
+      setResults(d.profiles);
+      var saved = getProfiles();
+      var savedIds = new Set(saved.map(function(s: any) { return s.username + ':' + s.platform; }));
+      var newOnes = d.profiles.filter(function(p: any) { return !savedIds.has(p.username + ':' + p.platform); });
+      var merged = saved.concat(newOnes);
+      saveProfiles(merged); setProfiles(merged); setTotal(merged.length); setSelected(new Set());
 
-        // ===== AUTO-DM: trigger automatic sending after prospection =====
-        var autoCfg = getAutoConfig();
-        if (autoCfg.enabled && newOnes.length > 0) {
-          var targetPlatform = autoCfg.platform || 'instagram';
-          // Filter new profiles for the target platform
-          var newForPlatform = newOnes.filter(function(p: any) { return p.platform === targetPlatform; });
-          if (newForPlatform.length > 0) {
-            setProspectMsg('Prospeccao feita! ' + newForPlatform.length + ' novos perfis. A iniciar envio automatico de DMs...');
-            setAutoTrigger(targetPlatform);
-            // Switch to messages tab after a brief delay
-            setTimeout(function() {
-              if (typeof window !== 'undefined') {
-                var evt = new CustomEvent('mba-switch-tab', { detail: 'messages' });
-                window.dispatchEvent(evt);
-              }
-            }, 800);
+      // ===== AUTO-TRIGGER: se automacao ON, disparar envio de DMs =====
+      var autoCfg = getAutoConfig();
+      if (autoCfg.enabled && newOnes.length > 0) {
+        // Verificar se ha pelo menos uma plataforma activa com credenciais
+        var hasActivePlat = false;
+        for (var i = 0; i < ALL_PLATFORMS.length; i++) {
+          var pc = autoCfg.platforms[ALL_PLATFORMS[i]];
+          if (pc && pc.enabled && pc.username) { hasActivePlat = true; break; }
+        }
+        if (hasActivePlat) {
+          var platCounts: Record<string,number> = {};
+          for (var j = 0; j < newOnes.length; j++) {
+            var np = newOnes[j].platform || 'unknown';
+            platCounts[np] = (platCounts[np] || 0) + 1;
           }
+          var platSummary = Object.keys(platCounts).map(function(k) { return platCounts[k] + ' ' + k; }).join(', ');
+          setProspectMsg('Prospeccao feita! ' + newOnes.length + ' novos perfis (' + platSummary + '). A iniciar envio automatico de DMs...');
+          setAutoTrigger();
+          // Switch to messages tab
+          setTimeout(function() {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('mba-switch-tab', { detail: 'messages' }));
+            }
+          }, 800);
         }
       }
+    }
     setLoading(false);
   };
 
   var filtered = results.length > 0 ? results : profiles;
-
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <Panel style={{ marginBottom:14 }}>
@@ -808,7 +523,6 @@ function ProspectingTab() {
         <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar...' : 'Iniciar Prospeccao'}</Btn>
         {prospectMsg && <div style={{ color: prospectMsg.indexOf('LIMITE') >= 0 ? '#ff4444' : P.textSec, fontSize:11, marginTop:8, fontWeight: prospectMsg.indexOf('LIMITE') >= 0 ? 700 : 400 }}>{prospectMsg}</div>}
       </Panel>
-
       <Panel style={{ marginBottom:14 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14, flexWrap:'wrap', gap:8 }}>
           <STitle>Perfis ({total})</STitle>
@@ -819,27 +533,11 @@ function ProspectingTab() {
             {total > 0 && <Btn variant="danger" size="sm" onClick={deleteAllProfiles}>Apagar todos</Btn>}
           </div>
         </div>
-
-        {total > 0 && <div style={{ display:'flex', gap:12, marginBottom:10, flexWrap:'wrap' }}>
-          <div style={{ color:P.textSec, fontSize:11 }}><span style={{ fontWeight:700 }}>{total}</span> perfis encontrados</div>
-        </div>}
-
-        <div style={{ overflowX:'auto' }}>
-          <div style={{ minWidth:480 }}>
-            <div style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.border, color:P.textDim, fontSize:10, fontWeight:600, letterSpacing:'.5px' }}>
-              <div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div><div style={{ width:80, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:70 }}>PLATAFORMA</div><div style={{ width:50 }}></div>
-            </div>
-            {filtered.map(function(p: any) {
-              return <div key={p.id} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}>
-                <div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{p.username}</div>
-                <div style={{ flex:2, color:P.textSec, fontSize:12 }}>{p.displayName||'-'}</div>
-                <div style={{ width:80, textAlign:'right', color: p.followers > 0 ? P.text : P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.followers > 0 ? p.followers.toLocaleString('pt-PT') : '\u2014'}</div>
-                <div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div>
-                <div style={{ width:50 }}><button onClick={function() { setDetailProfile(p); }} style={{ background:'none', border:'none', color:P.textSec, cursor:'pointer', fontSize:14 }}>&#9776;</button></div>
-              </div>;
-            })}
-          </div>
-        </div>
+        {total > 0 && <div style={{ display:'flex', gap:12, marginBottom:10, flexWrap:'wrap' }}><div style={{ color:P.textSec, fontSize:11 }}><span style={{ fontWeight:700 }}>{total}</span> perfis encontrados</div></div>}
+        <div style={{ overflowX:'auto' }}><div style={{ minWidth:480 }}>
+          <div style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.border, color:P.textDim, fontSize:10, fontWeight:600, letterSpacing:'.5px' }}><div style={{ flex:2 }}>HANDLE</div><div style={{ flex:2 }}>NOME</div><div style={{ width:80, textAlign:'right' }}>SEGUIDORES</div><div style={{ width:70 }}>PLATAFORMA</div><div style={{ width:50 }}></div></div>
+          {filtered.map(function(p: any) { return <div key={p.id} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}><div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{p.username}</div><div style={{ flex:2, color:P.textSec, fontSize:12 }}>{p.displayName||'-'}</div><div style={{ width:80, textAlign:'right', color: p.followers > 0 ? P.text : P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.followers > 0 ? p.followers.toLocaleString('pt-PT') : '\u2014'}</div><div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div><div style={{ width:50 }}><button onClick={function() { setDetailProfile(p); }} style={{ background:'none', border:'none', color:P.textSec, cursor:'pointer', fontSize:14 }}>&#9776;</button></div></div>; })}
+        </div></div>
         {total > 50 && <div style={{ display:'flex', justifyContent:'center', gap:8, marginTop:12 }}><Btn variant="ghost" size="sm" disabled={page<=1} onClick={function() { setPage(page-1); }}>Anterior</Btn><span style={{ color:P.textSec, fontSize:12, alignSelf:'center' }}>Pagina {page} de {Math.ceil(total/50)}</span><Btn variant="ghost" size="sm" disabled={page>=Math.ceil(total/50)} onClick={function() { setPage(page+1); }}>Proxima</Btn></div>}
       </Panel>
       {detailProfile && <ProfileDetailModal profile={detailProfile} onClose={function() { setDetailProfile(null); loadProfiles(); }} onUpdate={loadProfiles} />}
@@ -847,6 +545,7 @@ function ProspectingTab() {
   );
 }
 
+/* ===== MESSAGES TAB (with Auto-Send + 3x Retry per DM) ===== */
 function MessagesTab() {
   const [subtab, setSubtab] = useState('all');
   const [messages, setMessages] = useState<any[]>([]);
@@ -855,18 +554,6 @@ function MessagesTab() {
   const [sending, setSending] = useState(false);
   const [blStatus, setBlStatus] = useState<any>({ online: false, loading: true });
 
-  // Login state
-  const [loginPlatform, setLoginPlatform] = useState('instagram');
-  const [loginUser, setLoginUser] = useState('');
-  const [loginPass, setLoginPass] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginResult, setLoginResult] = useState<any>(null);
-  const [loginStatus, setLoginStatus] = useState<Record<string,any>>({
-    instagram: { loggedIn: false, label: '' },
-    tiktok: { loggedIn: false, label: '' },
-    facebook: { loggedIn: false, label: '' }
-  });
-
   // Auto-send state
   const [autoSending, setAutoSending] = useState(false);
   const [autoProgress, setAutoProgress] = useState<any>(null);
@@ -874,25 +561,18 @@ function MessagesTab() {
   const [autoDone, setAutoDone] = useState(false);
   const autoStopRef = useRef(false);
 
+  // Login status per platform
+  const [loginStatus, setLoginStatus] = useState<Record<string,any>>({});
+
   // Listen for auto-trigger from ProspectingTab
   useEffect(function() {
     var handler = function() {
-      var trigger = consumeAutoTrigger();
-      if (trigger) {
-        var cfg = getAutoConfig();
-        setLoginPlatform(trigger.platform);
-        if (cfg.username && cfg.password) {
-          setLoginUser(cfg.username);
-          setLoginPass(cfg.password);
-          // Auto-send after a tiny delay to let state settle
-          setTimeout(function() { autoSendRef.current(); }, 500);
-        }
+      if (consumeAutoTrigger()) {
+        setTimeout(function() { autoSendRef.current(); }, 500);
       }
     };
-    // Check immediately (in case trigger was set before mount)
     handler();
     window.addEventListener('mba-auto-trigger', handler);
-    // Also check periodically (polling fallback)
     var interval = setInterval(handler, 1000);
     return function() { window.removeEventListener('mba-auto-trigger', handler); clearInterval(interval); };
   }, []);
@@ -901,381 +581,242 @@ function MessagesTab() {
     fetch('/api/send-message').then(function(r) { return r.json(); }).then(function(data) {
       setBlStatus({ online: !!data.browserless && data.browserless.online, loading: false });
     }).catch(function() { setBlStatus({ online: false, loading: false }); });
-    // Restore login status from localStorage
-    try {
-      var saved = storeGet('mba_login_status', '');
-      if (saved) { setLoginStatus(JSON.parse(saved)); }
-    } catch(e) {}
+    // Restore login status
+    try { var saved = storeGet('mba_login_status', ''); if (saved) setLoginStatus(JSON.parse(saved)); } catch(e) {}
   }, []);
 
-  const saveLoginStatus = function(status: any) {
-    setLoginStatus(status);
-    storeSet('mba_login_status', JSON.stringify(status));
-  };
-
-  const doLogin = async function() {
-    if (!loginUser.trim() || !loginPass.trim()) { setLoginResult({ error: 'Preenche username e password' }); return; }
-    setLoginLoading(true);
-    setLoginResult(null);
-    try {
-      var res = await fetch('/api/send-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'login', platform: loginPlatform, username: loginUser, password: loginPass })
-      });
-      var data = await res.json();
-      setLoginResult(data);
-      if (data.success) {
-        // Save cookies to localStorage
-        storeSet('mba_cookies_' + loginPlatform, data.cookiesJson || '');
-        storeSet('mba_session_' + loginPlatform, data.sessionid || '');
-        storeSet('mba_csrf_' + loginPlatform, data.csrftoken || '');
-        // Update login status
-        var newStatus = { ...loginStatus };
-        newStatus[loginPlatform] = { loggedIn: true, label: data.message || 'Logado' };
-        saveLoginStatus(newStatus);
-        setLoginUser('');
-        setLoginPass('');
-      }
-    } catch(e) {
-      setLoginResult({ error: 'Erro de conexao: ' + (e as any).message });
-    }
-    setLoginLoading(false);
-  };
-
-  const logoutPlatform = function(platform: string) {
-    storeSet('mba_cookies_' + platform, '');
-    storeSet('mba_session_' + platform, '');
-    storeSet('mba_csrf_' + platform, '');
-    var newStatus = { ...loginStatus };
-    newStatus[platform] = { loggedIn: false, label: '' };
-    saveLoginStatus(newStatus);
-  };
+  const saveLoginStatus = function(st: any) { setLoginStatus(st); storeSet('mba_login_status', JSON.stringify(st)); };
 
   const loadMessages = function() {
-    var allProfiles = getProfiles();
-    var msgs: any[] = [];
-    allProfiles.forEach(function(p: any) {
-      if (p.messages) p.messages.forEach(function(m: any) {
-        msgs.push({
-          content: m.content, direction: m.direction, sentAt: m.sentAt, type: m.type,
-          sendAttempted: m.sendAttempted, delivered: m.delivered, deliveryMsg: m.deliveryMsg,
-          _username: p.username, _platform: p.platform, _profileId: p.id
-        });
-      });
-    });
+    var allProfiles = getProfiles(); var msgs: any[] = [];
+    allProfiles.forEach(function(p: any) { if (p.messages) p.messages.forEach(function(m: any) { msgs.push({ content: m.content, direction: m.direction, sentAt: m.sentAt, type: m.type, sendAttempted: m.sendAttempted, delivered: m.delivered, deliveryMsg: m.deliveryMsg, _username: p.username, _platform: p.platform, _profileId: p.id }); }); });
     msgs.sort(function(a: any, b: any) { return new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(); });
     setMessages(msgs);
   };
-
   useEffect(function() { loadMessages(); }, []);
 
   const sendMessage = async function() {
-    if (!selProfile || !msgText.trim()) return;
-    setSending(true);
-      var saved = getProfiles();
-      var targetProfile = null;
-      for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
-      if (!targetProfile) { setSending(false); return; }
-      var pf = targetProfile.platform || 'instagram';
-      // Get stored cookies for this platform
-      var cookies = storeGet('mba_cookies_' + pf, '');
-      var sessionid = storeGet('mba_session_' + pf, '');
-      var csrftoken = storeGet('mba_csrf_' + pf, '');
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: pf, sentToday: 0, cookies: cookies || undefined, sessionid: sessionid || undefined, csrftoken: csrftoken || undefined }) }).catch(function() { return null; });
-      var sd = null;
-      if (sr) { sd = await sr.json().catch(function() { return null; }); }
-      if (!targetProfile.messages) targetProfile.messages = [];
-      var dmOk2 = !!(sd && sd.dmSent);
-      targetProfile.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk2, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' });
-      if (targetProfile.status === 'prospect' && dmOk2) targetProfile.status = 'contacted';
-      saveProfiles(saved);
-      setMsgText(PROPOSTA);
-      loadMessages();
-    setSending(false);
+    if (!selProfile || !msgText.trim()) return; setSending(true);
+    var saved = getProfiles(); var targetProfile = null;
+    for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
+    if (!targetProfile) { setSending(false); return; }
+    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) }).catch(function() { return null; });
+    var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
+    if (!targetProfile.messages) targetProfile.messages = [];
+    var dmOk = !!(sd && sd.dmSent);
+    targetProfile.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' });
+    if (targetProfile.status === 'prospect' && dmOk) targetProfile.status = 'contacted';
+    saveProfiles(saved); setMsgText(PROPOSTA); loadMessages(); setSending(false);
   };
+
+  /* ===== AUTO-SEND WITH 3x RETRY ===== */
+  const MAX_RETRIES = 3;
+  const RETRY_DELAY = 3000;
 
   const autoSendRef = useRef<() => Promise<void>>(async function(){});
 
-  const autoSend = async function() {
-    autoStopRef.current = false;
-    setAutoDone(false);
-    setAutoLog([]);
-    var pf = loginPlatform;
-
-    // Step 1: Login if not logged in
-    if (!(loginStatus[pf] || {}).loggedIn) {
-      if (!loginUser.trim() || !loginPass.trim()) {
-        setAutoLog([{ ok: false, msg: 'Preenche username e password primeiro' }]);
-        return;
+  const doLoginForPlatform = async function(pf: string, username: string, password: string): Promise<boolean> {
+    if ((loginStatus[pf] || {}).loggedIn) return true;
+    setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' A fazer login no ' + PLAT_NAMES[pf] + '...' }]); });
+    setAutoProgress({ step: 'login', text: 'Login ' + PLAT_NAMES[pf] + '...', platform: pf });
+    try {
+      var res = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'login', platform: pf, username: username, password: password }) });
+      var data = await res.json().catch(function() { return { success:false, error:'Erro de conexao' }; });
+      if (data.success) {
+        storeSet('mba_cookies_' + pf, data.cookiesJson || '');
+        storeSet('mba_session_' + pf, data.sessionid || '');
+        storeSet('mba_csrf_' + pf, data.csrftoken || '');
+        var newSt = { ...loginStatus }; newSt[pf] = { loggedIn: true, label: data.message || 'Logado' }; saveLoginStatus(newSt);
+        setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: PLAT_ICONS[pf] + ' Login ' + PLAT_NAMES[pf] + ' feito!' }]); });
+        return true;
+      } else {
+        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' Login ' + PLAT_NAMES[pf] + ' falhou: ' + (data.error || 'erro') }]); });
+        return false;
       }
-      setAutoSending(true);
-      setAutoLog([{ ok: false, msg: 'A fazer login no ' + platformNames[pf] + '...' }]);
-      setAutoProgress({ step: 'login', text: 'A fazer login...' });
-
-      var loginRes = await fetch('/api/send-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'login', platform: pf, username: loginUser, password: loginPass })
-      });
-      var loginData = await loginRes.json().catch(function() { return { success: false, error: 'Erro de conexao' }; });
-
-      if (!loginData.success) {
-        setAutoLog([{ ok: false, msg: 'Login falhou: ' + (loginData.error || 'erro desconhecido') }]);
-        setAutoProgress(null);
-        setAutoSending(false);
-        setLoginResult(loginData);
-        return;
-      }
-
-      // Save cookies
-      storeSet('mba_cookies_' + pf, loginData.cookiesJson || '');
-      storeSet('mba_session_' + pf, loginData.sessionid || '');
-      storeSet('mba_csrf_' + pf, loginData.csrftoken || '');
-      var newSt = { ...loginStatus };
-      newSt[pf] = { loggedIn: true, label: loginData.message || 'Logado' };
-      setLoginStatus(newSt);
-      setLoginResult(loginData);
-      setLoginUser('');
-      setLoginPass('');
-      setAutoLog([{ ok: true, msg: 'Login feito! A preparar envio de DMs...' }]);
-    } else {
-      setAutoSending(true);
-      setAutoLog([{ ok: true, msg: 'Sessao activa. A enviar DMs...' }]);
+    } catch(e) {
+      setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' Erro de conexao: ' + ((e as any).message || '') }]); });
+      return false;
     }
+  };
 
-    // Step 2: Get uncontacted prospects
+  const sendDMWithRetry = async function(username: string, message: string, platform: string, sentCount: number): Promise<{ ok: boolean; msg: string }> {
+    var cookies = storeGet('mba_cookies_' + platform, '');
+    var sessionid = storeGet('mba_session_' + platform, '');
+    var csrftoken = storeGet('mba_csrf_' + platform, '');
+
+    for (var attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      if (autoStopRef.current) return { ok: false, msg: 'Parado pelo utilizador' };
+
+      var body: any = { username: username, message: message, platform: platform, sentToday: sentCount };
+      if (cookies) body.cookies = cookies;
+      if (sessionid) body.sessionid = sessionid;
+      if (csrftoken) body.csrftoken = csrftoken;
+
+      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }).catch(function() { return null; });
+      var sd = sr ? await sr.json().catch(function() { return null; }) : null;
+      var dmOk = !!(sd && sd.dmSent);
+
+      if (dmOk) {
+        var source = (sd && sd.source) || '';
+        return { ok: true, msg: '@' + username + ' DM enviado (tentativa ' + attempt + '/' + MAX_RETRIES + ', ' + source + ')' };
+      }
+
+      // If failed and not last attempt, wait and retry
+      var errMsg = (sd && sd.deliveryMsg) || 'Erro desconhecido';
+      if (attempt < MAX_RETRIES) {
+        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '@' + username + ' tentativa ' + attempt + '/' + MAX_RETRIES + ' falhou (' + errMsg.substring(0, 60) + '). A tentar novamente...' }]); });
+        await new Promise(function(r) { setTimeout(r, RETRY_DELAY); });
+
+        // If it looks like session expired, try re-login
+        if (errMsg.indexOf('Nao esta logado') >= 0 || errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('HTTP 401') >= 0 || errMsg.indexOf('HTTP 403') >= 0) {
+          var cfg = getAutoConfig();
+          var pc = cfg.platforms && cfg.platforms[platform];
+          if (pc && pc.username && pc.password) {
+            setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Sessao expirou. A fazer re-login...' }]); });
+            var reLoggedIn = await doLoginForPlatform(platform, pc.username, pc.password);
+            if (!reLoggedIn) {
+              return { ok: false, msg: '@' + username + ' Re-login falhou. Impossivel enviar.' };
+            }
+            // Refresh cookies after re-login
+            cookies = storeGet('mba_cookies_' + platform, '');
+            sessionid = storeGet('mba_session_' + platform, '');
+            csrftoken = storeGet('mba_csrf_' + platform, '');
+          }
+        }
+        continue;
+      }
+
+      // Last attempt failed
+      return { ok: false, msg: '@' + username + ' FALHOU apos ' + MAX_RETRIES + ' tentativas: ' + errMsg.substring(0, 80) };
+    }
+    return { ok: false, msg: '@' + username + ' FALHOU' };
+  };
+
+  const autoSend = async function() {
+    autoStopRef.current = false; setAutoDone(false); setAutoLog([]);
+    var cfg = getAutoConfig();
+    if (!cfg.enabled) { setAutoLog([{ ok: false, msg: 'Automacao desactivada. Activa no Dashboard.' }]); return; }
+
+    // Login to all active platforms first
+    var loggedInPlats: string[] = [];
+    for (var i = 0; i < ALL_PLATFORMS.length; i++) {
+      var pf = ALL_PLATFORMS[i];
+      var pc = cfg.platforms && cfg.platforms[pf];
+      if (pc && pc.enabled && pc.username && pc.password) {
+        if (autoStopRef.current) break;
+        var ok = await doLoginForPlatform(pf, pc.username, pc.password);
+        if (ok) loggedInPlats.push(pf);
+      }
+    }
+    if (loggedInPlats.length === 0) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Nenhuma plataforma com login bem sucedido.' }]); }); setAutoSending(false); return; }
+
+    setAutoSending(true);
+    setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: loggedInPlats.map(function(p) { return PLAT_NAMES[p]; }).join(', ') + ' prontos. A enviar DMs...' }]); });
+
+    // Get uncontacted prospects from logged-in platforms
     await new Promise(function(r) { setTimeout(r, 500); });
     var allProfiles = getProfiles();
+    var activePlatSet = new Set(loggedInPlats);
     var prospects = allProfiles.filter(function(p: any) {
-      if (p.platform !== pf) return false;
-      if (p.status === 'contacted' || p.status === 'replied' || p.status === 'deal') return false;
+      if (!activePlatSet.has(p.platform)) return false;
+      if (p.status === 'contacted' || p.status === 'replied' || p.status === 'accepted') return false;
       var msgs = p.messages || [];
-      for (var i = 0; i < msgs.length; i++) {
-        if (msgs[i].direction === 'outbound' && msgs[i].sendAttempted) return false;
-      }
+      for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].direction === 'outbound' && msgs[mi].sendAttempted) return false; }
       return true;
     });
 
-    // Sort by angolaScore descending (best prospects first)
+    // Sort by angolaScore descending
     prospects.sort(function(a: any, b: any) { return (b.angolaScore || 0) - (a.angolaScore || 0); });
+    if (prospects.length === 0) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Sem prospects por contactar nas plataformas activas' }]); }); setAutoProgress(null); setAutoSending(false); setAutoDone(true); return; }
 
-    if (prospects.length === 0) {
-      setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Sem prospects por contactar nesta plataforma' }]); });
-      setAutoProgress(null);
-      setAutoSending(false);
-      setAutoDone(true);
-      return;
-    }
+    var todayKey = 'mba_daily_' + new Date().toISOString().slice(0, 10);
+    var dailySent = parseInt(storeGet(todayKey, '0') || '0') || 0;
+    var batch = prospects.slice(0, LIMIT_DIARIO - dailySent);
+    var sent = 0; var failed = 0;
 
-    var batch = prospects.slice(0, 30);
-    var sent = 0;
-    var failed = 0;
-    var cookiesExpired = false;
+    setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: batch.length + ' perfis para contactar (' + dailySent + '/' + LIMIT_DIARIO + ' usados hoje)' }]); });
 
-    setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: batch.length + ' perfis para contactar. A enviar...' }]); });
-
-    // Step 3: Send DMs one by one
     for (var idx = 0; idx < batch.length; idx++) {
-      if (autoStopRef.current) break;
+      if (autoStopRef.current) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Parado pelo utilizador' }]); }); break; }
       var p = batch[idx];
-      setAutoProgress({ step: 'sending', current: idx + 1, total: batch.length, username: p.username, sent: sent, failed: failed });
+      setAutoProgress({ step: 'sending', current: idx + 1, total: batch.length, username: p.username, platform: p.platform, sent: sent, failed: failed });
 
-      var cookies = storeGet('mba_cookies_' + pf, '');
-      var sessionid = storeGet('mba_session_' + pf, '');
-      var csrftoken = storeGet('mba_csrf_' + pf, '');
-
-      var sr = await fetch('/api/send-message', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: p.username, message: msgText, platform: pf,
-          sentToday: sent, cookies: cookies || undefined,
-          sessionid: sessionid || undefined, csrftoken: csrftoken || undefined
-        })
-      }).catch(function() { return null; });
-
-      var sd = sr ? await sr.json().catch(function() { return null; }) : null;
-      var ok = !!(sd && sd.dmSent);
-      var deliveryMsg = (sd && sd.deliveryMsg) || 'Erro de conexao';
+      var result = await sendDMWithRetry(p.username, msgText, p.platform, dailySent + sent);
 
       // Update profile in localStorage
-      var saved = getProfiles();
-      var target = null;
+      var saved = getProfiles(); var target = null;
       for (var j = 0; j < saved.length; j++) { if (saved[j].id === p.id) { target = saved[j]; break; } }
       if (target) {
         if (!target.messages) target.messages = [];
-        target.messages.push({
-          content: msgText, direction: 'outbound', sentAt: new Date().toISOString(),
-          type: 'auto', sendAttempted: true, delivered: ok, deliveryMsg: deliveryMsg
-        });
-        if (ok && target.status === 'prospect') target.status = 'contacted';
+        target.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto', sendAttempted: true, delivered: result.ok, deliveryMsg: result.msg });
+        if (result.ok && target.status === 'prospect') target.status = 'contacted';
         saveProfiles(saved);
       }
 
-      if (ok) {
-        sent++;
-        setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: '@' + p.username + ' - DM enviado (' + (sd && sd.source || 'browserless') + ')' }]); });
+      if (result.ok) {
+        sent++; dailySent++;
+        setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: result.msg }]); });
       } else {
         failed++;
-        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '@' + p.username + ' - ' + deliveryMsg.substring(0, 80) }]); });
-        // Check if cookies expired
-        if (deliveryMsg.indexOf('Nao esta logado') >= 0 || deliveryMsg.indexOf('expirad') >= 0 || deliveryMsg.indexOf('HTTP 401') >= 0 || deliveryMsg.indexOf('HTTP 403') >= 0) {
-          cookiesExpired = true;
-          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Sessao expirou! Faz login novamente para continuar.' }]); });
-          break;
-        }
+        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: result.msg }]); });
       }
-
+      storeSet(todayKey, String(dailySent));
       loadMessages();
-
-      // Wait between messages to avoid rate limiting
-      if (idx < batch.length - 1 && !cookiesExpired) {
-        await new Promise(function(r) { setTimeout(r, 2500); });
-      }
+      if (idx < batch.length - 1) await new Promise(function(r) { setTimeout(r, 2500); });
     }
 
     setAutoProgress({ step: 'done', sent: sent, failed: failed, total: batch.length });
-    setAutoSending(false);
-    setAutoDone(true);
+    setAutoSending(false); setAutoDone(true);
   };
 
-  const stopAutoSend = function() {
-    autoStopRef.current = true;
-    setAutoSending(false);
-    setAutoProgress(null);
-    setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Parado pelo utilizador' }]); });
-  };
+  const stopAutoSend = function() { autoStopRef.current = true; setAutoSending(false); setAutoProgress(null); setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Parado pelo utilizador' }]); }); };
 
-  // Keep ref updated so the trigger useEffect can call it
   autoSendRef.current = autoSend;
 
   var filtered = messages.filter(function(m) { return subtab === 'all' || m.direction === subtab; });
   var profiles = getProfiles();
-  var platformIcons: Record<string,string> = { instagram: '📸', tiktok: '🎵', facebook: '👤' };
-  var platformNames: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      {/* Status bar */}
+      {/* Browserless Status */}
       <div style={{ padding:'10px 14px', borderRadius:8, border:'1px solid '+(blStatus.online ? 'rgba(0,192,99,0.3)' : 'rgba(255,68,68,0.3)'), background: blStatus.online ? 'rgba(0,192,99,0.06)' : 'rgba(255,68,68,0.06)', marginBottom:14 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
           <div style={{ width:8, height:8, borderRadius:'50%', background: blStatus.loading ? '#888' : blStatus.online ? P.green : '#ff4444', flexShrink:0 }} />
-          <div style={{ fontSize:11, fontWeight:700, color: blStatus.online ? P.green : '#ff4444' }}>
-            {blStatus.loading ? 'Verificando Browserless...' : blStatus.online ? 'Browserless Online - DMs activos' : 'Browserless Offline'}
-          </div>
+          <div style={{ fontSize:11, fontWeight:700, color: blStatus.online ? P.green : '#ff4444' }}>{blStatus.loading ? 'Verificando...' : blStatus.online ? 'Browserless Online - DMs activos' : 'Browserless Offline'}</div>
         </div>
         <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-          {['instagram','tiktok','facebook'].map(function(pf) {
+          {ALL_PLATFORMS.map(function(pf) {
             var st = loginStatus[pf] || { loggedIn: false };
             return <div key={pf} style={{ display:'flex', alignItems:'center', gap:5, fontSize:10, color: st.loggedIn ? P.green : P.textDim }}>
-              <span>{platformIcons[pf]} {platformNames[pf]}:</span>
-              <span style={{ fontWeight:700, color: st.loggedIn ? P.green : '#ff4444' }}>{st.loggedIn ? '✓ Logado' : '✗ Nao logado'}</span>
+              <span>{PLAT_ICONS[pf]} {PLAT_NAMES[pf]}:</span>
+              <span style={{ fontWeight:700, color: st.loggedIn ? P.green : '#ff4444' }}>{st.loggedIn ? '\u2713 Logado' : '\u2717 Nao logado'}</span>
             </div>;
           })}
         </div>
-        {blStatus.online && <div style={{ fontSize:9, color:P.textDim, marginTop:6 }}>Navegador na nuvem via Browserless.io (grátis, sem VPS, sem cartão)</div>}
       </div>
 
-      {/* Login Section */}
+      {/* AUTO-SEND PANEL */}
       <Panel style={{ marginBottom:14 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-          <STitle>Login das Plataformas</STitle>
-          <div style={{ fontSize:9, color:P.textDim }}>Os cookies ficam guardados no teu navegador</div>
-        </div>
-
-        <div style={{ display:'flex', gap:6, marginBottom:12 }}>
-          {['instagram','tiktok','facebook'].map(function(pf) {
-            var st = loginStatus[pf] || { loggedIn: false };
-            var isActive = loginPlatform === pf;
-            return (
-              <button key={pf} onClick={function() { setLoginPlatform(pf); }} style={{
-                padding:'6px 12px', borderRadius:4, border:'1px solid '+(isActive?P.red:P.border),
-                background:isActive?P.redDim:'transparent', color:isActive?P.redB:P.textSec,
-                fontSize:10, cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', gap:4
-              }}>
-                {platformIcons[pf]} {platformNames[pf]}
-                {st.loggedIn && <span style={{ color:P.green, fontSize:9 }}>✓</span>}
-                {st.loggedIn && <span onClick={function(e) { e.stopPropagation(); logoutPlatform(pf); }} style={{ color:'#ff4444', fontSize:10, marginLeft:2, cursor:'pointer' }}>×</span>}
-              </button>
-            );
-          })}
-        </div>
-
-        {(loginStatus[loginPlatform] || {}).loggedIn ? (
-          <div style={{ padding:12, borderRadius:6, background:'rgba(0,192,99,0.08)', border:'1px solid rgba(0,192,99,0.2)', fontSize:11, color:P.green }}>
-            ✓ {platformNames[loginPlatform]} esta logado. Os DMs serao enviados com a tua sessao.
-            <button onClick={function() { logoutPlatform(loginPlatform); }} style={{ marginLeft:12, padding:'4px 10px', borderRadius:4, border:'1px solid #ff4444', background:'transparent', color:'#ff4444', fontSize:10, cursor:'pointer' }}>Terminar sessao</button>
-          </div>
-        ) : (
-          <div>
-            <div style={{ display:'flex', gap:8, marginBottom:8 }}>
-              <div style={{ flex:1 }}>
-                <Lbl style={{ fontSize:10 }}>Username / Email</Lbl>
-                <input value={loginUser} onChange={function(e) { setLoginUser(e.target.value); }} placeholder={"Utilizador do " + platformNames[loginPlatform]} style={INP} />
-              </div>
-              <div style={{ flex:1 }}>
-                <Lbl style={{ fontSize:10 }}>Password</Lbl>
-                <input type="password" value={loginPass} onChange={function(e) { setLoginPass(e.target.value); }} placeholder="Password" style={INP} onKeyDown={function(e) { if ((e as any).key === 'Enter') doLogin(); }} />
-              </div>
-            </div>
-            <Btn onClick={doLogin} disabled={loginLoading || !loginUser.trim() || !loginPass.trim()} style={{ width:'100%' }}>
-              {loginLoading ? 'A fazer login...' : '🔑 Fazer login no ' + platformNames[loginPlatform]}
-            </Btn>
-            <div style={{ fontSize:9, color:P.textDim, marginTop:8, lineHeight:'16px' }}>
-              O login abre um navegador na nuvem (Browserless.io) que entra na tua conta automaticamente.
-              Os cookies ficam guardados no teu navegador para enviar DMs sem precisares de login novamente.
-            </div>
-          </div>
-        )}
-
-        {loginResult && !loginResult.success && (
-          <div style={{ marginTop:8, padding:10, borderRadius:6, background:'rgba(255,68,68,0.08)', border:'1px solid rgba(255,68,68,0.2)', fontSize:10, color:'#ff6b6b' }}>
-            ✗ {loginResult.error || 'Login falhou'}
-          </div>
-        )}
-        {loginResult && loginResult.success && (
-          <div style={{ marginTop:8, padding:10, borderRadius:6, background:'rgba(0,192,99,0.08)', border:'1px solid rgba(0,192,99,0.2)', fontSize:10, color:P.green }}>
-            ✓ {loginResult.message || 'Login realizado!'}
-          </div>
-        )}
-      </Panel>
-
-      {/* AUTO-SEND Section */}
-      <Panel style={{ marginBottom:14 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-          <STitle>Auto-Enviar DMs</STitle>
+          <STitle>Auto-Enviar DMs (Zero Falhas)</STitle>
           {autoSending && <button onClick={stopAutoSend} style={{ padding:'4px 10px', borderRadius:4, border:'1px solid #ff4444', background:'transparent', color:'#ff4444', fontSize:10, cursor:'pointer' }}>Parar</button>}
         </div>
         <div style={{ fontSize:10, color:P.textSec, marginBottom:10, lineHeight:'16px' }}>
-          Mete as tuas credenciais {!(loginStatus[loginPlatform]||{}).loggedIn ? 'abaixo' : '(ja logado)'} e carrega no botao.
-          O sistema faz login automaticamente e envia DMs a todos os prospects por contactar — ordenados por relevancia Angola.
+          Cada DM tenta 3 vezes antes de falhar. Se a sessao expirar, faz re-login automatico.
+          Usa as credenciais configuradas no Dashboard para cada plataforma.
         </div>
 
-        {!(loginStatus[loginPlatform]||{}).loggedIn && (
-          <div style={{ display:'flex', gap:8, marginBottom:10 }}>
-            <div style={{ flex:1 }}>
-              <Lbl style={{ fontSize:10 }}>Username / Email</Lbl>
-              <input value={loginUser} onChange={function(e) { setLoginUser(e.target.value); }} placeholder={"Utilizador do " + platformNames[loginPlatform]} style={INP} />
-            </div>
-            <div style={{ flex:1 }}>
-              <Lbl style={{ fontSize:10 }}>Password</Lbl>
-              <input type="password" value={loginPass} onChange={function(e) { setLoginPass(e.target.value); }} placeholder="Password" style={INP} />
-            </div>
-          </div>
-        )}
-
         {!autoSending && !autoDone && (
-          <Btn onClick={autoSend} disabled={!(loginStatus[loginPlatform]||{}).loggedIn && (!loginUser.trim() || !loginPass.trim())} style={{ width:'100%', background:'linear-gradient(135deg, '+P.red+', #800010)' }}>
-            {platformIcons[loginPlatform]} Auto-Enviar DMs no {platformNames[loginPlatform]}
+          <Btn onClick={autoSend} style={{ width:'100%', background:'linear-gradient(135deg, '+P.red+', #800010)' }}>
+            Auto-Enviar DMs em Todas as Plataformas
           </Btn>
         )}
 
-        {/* Progress bar */}
+        {/* Progress */}
         {autoProgress && autoProgress.step === 'sending' && (
           <div style={{ marginTop:10 }}>
             <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:P.textSec, marginBottom:4 }}>
-              <span>@{autoProgress.username}</span>
+              <span>{PLAT_ICONS[autoProgress.platform] || ''} @{autoProgress.username}</span>
               <span>{autoProgress.current}/{autoProgress.total} ({autoProgress.sent} ok, {autoProgress.failed} falhou)</span>
             </div>
             <div style={{ height:6, borderRadius:3, background:P.surface2, overflow:'hidden' }}>
@@ -1283,13 +824,11 @@ function MessagesTab() {
             </div>
           </div>
         )}
-
         {autoProgress && autoProgress.step === 'login' && (
           <div style={{ marginTop:10, padding:10, borderRadius:6, background:P.surface2, fontSize:11, color:P.textSec, textAlign:'center' }}>
-            <span style={{ animation:'blink 1s infinite' }}>A fazer login...</span> (pode demorar ~20s)
+            <span style={{ animation:'blink 1s infinite' }}>{autoProgress.text}</span>
           </div>
         )}
-
         {autoProgress && autoProgress.step === 'done' && (
           <div style={{ marginTop:10, padding:12, borderRadius:6, background: autoProgress.sent > 0 ? 'rgba(0,192,99,0.08)' : 'rgba(255,68,68,0.08)', border: '1px solid ' + (autoProgress.sent > 0 ? 'rgba(0,192,99,0.2)' : 'rgba(255,68,68,0.2)'), fontSize:12, fontWeight:700, color: autoProgress.sent > 0 ? P.green : '#ff6b6b', textAlign:'center' }}>
             {autoProgress.sent} DMs enviados, {autoProgress.failed} falharam (de {autoProgress.total})
@@ -1299,93 +838,45 @@ function MessagesTab() {
 
         {/* Log */}
         {autoLog.length > 0 && (
-          <div style={{ marginTop:10, maxHeight:150, overflowY:'auto', padding:8, borderRadius:6, background:'rgba(0,0,0,0.3)', fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>
-            {autoLog.map(function(l: any, i: number) {
-              return <div key={i} style={{ color: l.ok ? P.green : '#ff6b6b', padding:'2px 0', borderBottom: i < autoLog.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
-                {l.ok ? '✓' : '✗'} {l.msg}
-              </div>;
-            })}
+          <div style={{ marginTop:10, maxHeight:200, overflowY:'auto', padding:8, borderRadius:6, background:'rgba(0,0,0,0.3)', fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>
+            {autoLog.map(function(l: any, i: number) { return <div key={i} style={{ color: l.ok ? P.green : '#ff6b6b', padding:'2px 0', borderBottom: i < autoLog.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>{l.ok ? '\u2713' : '\u2717'} {l.msg}</div>; })}
           </div>
         )}
       </Panel>
 
-      {/* Send DM Section - Manual */}
+      {/* Manual Send */}
       <Panel style={{ marginBottom:14 }}>
         <STitle>Enviar Mensagem (manual)</STitle>
-        <div style={{ marginBottom:10 }}>
-          <Lbl>Perfil</Lbl>
-          <select value={selProfile} onChange={function(e) { setSelProfile(e.target.value); }} style={SEL as any}>
-            <option value="">Seleccionar perfil...</option>
-            {profiles.map(function(p: any) { return <option key={p.id} value={p.id}>{p.username} ({p.platform}) - {p.followers > 0 ? p.followers.toLocaleString() : '—'} seg</option>; })}
-          </select>
-        </div>
+        <div style={{ marginBottom:10 }}><Lbl>Perfil</Lbl><select value={selProfile} onChange={function(e) { setSelProfile(e.target.value); }} style={SEL as any}><option value="">Seleccionar perfil...</option>{profiles.map(function(p: any) { return <option key={p.id} value={p.id}>{p.username} ({p.platform}) - {p.followers > 0 ? p.followers.toLocaleString() : '\u2014'} seg</option>; })}</select></div>
         <textarea value={msgText} onChange={function(e) { setMsgText(e.target.value); }} rows={4} style={{ ...INP, resize:'vertical', marginBottom:8 }} />
         <Btn onClick={sendMessage} disabled={sending || !selProfile}>{sending ? 'A enviar...' : 'Enviar agora'}</Btn>
       </Panel>
-      <Panel><STitle>Historico ({filtered.length})</STitle>
-        {filtered.length > 0 ? filtered.slice(0, 100).map(function(m: any, i: number) {
-          return <div key={i} style={{ padding:'10px 0', borderBottom:i<99?'1px solid '+P.redDim:'none' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
-              <span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:10, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span>
-              <span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{m._username}</span>
-              <span style={{ color:P.textDim, fontSize:10 }}>{m._platform}</span>
-              {m.direction === 'outbound' && <DeliveryBadge msg={m} />}
-              {m.type && <span style={{ color:P.textDim, fontSize:9 }}>({m.type})</span>}
-            </div>
-            <div style={{ color:P.textSec, fontSize:11, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.content}</div>
 
-            <div style={{ color:P.textDim, fontSize:10, marginTop:4 }}>{fmtDt(m.sentAt)}</div>
-          </div>;
-        }) : <EmptyState icon="\u2709" title="Sem mensagens" sub="As mensagens aparecerao aqui depois de enviar DMs" />}
+      {/* History */}
+      <Panel><STitle>Historico ({filtered.length})</STitle>
+        {filtered.length > 0 ? filtered.slice(0, 100).map(function(m: any, i: number) { return <div key={i} style={{ padding:'10px 0', borderBottom:i<99?'1px solid '+P.redDim:'none' }}><div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}><span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:10, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span><span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{m._username}</span><span style={{ color:P.textDim, fontSize:10 }}>{m._platform}</span>{m.direction === 'outbound' && <DeliveryBadge msg={m} />}{m.type && <span style={{ color:P.textDim, fontSize:9 }}>({m.type})</span>}</div><div style={{ color:P.textSec, fontSize:11, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.content}</div><div style={{ color:P.textDim, fontSize:10, marginTop:4 }}>{fmtDt(m.sentAt)}</div></div>; }) : <EmptyState icon="\u2709" title="Sem mensagens" sub="As mensagens aparecerao aqui depois de enviar DMs" />}
       </Panel>
     </div>
   );
 }
 
+/* ===== AGENT CHAT ===== */
 function AgentChat() {
   const [chatHistory, setChatHistory] = useState<{role:string; content:string}[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [input, setInput] = useState(''); const [loading, setLoading] = useState(false);
   const chatEnd = useRef<HTMLDivElement>(null);
   useEffect(function() { chatEnd.current?.scrollIntoView({ behavior:'smooth' }); }, [chatHistory]);
   const send = async function() {
-    if (!input.trim() || loading) return;
-    var userMsg = input.trim();
-    setInput('');
-    setChatHistory(function(h) { return h.concat([{ role:'user', content:userMsg }]); });
-    setLoading(true);
-      var profiles = getProfiles();
-      var systemContext = 'ESTADO ACTUAL DO SISTEMA:\n';
-      systemContext += '- Total de perfis guardados: ' + profiles.length + '\n';
-      var platCount: Record<string,number> = {};
-      var statusCount: Record<string,number> = {};
-      var totalSent = 0; var totalDelivered = 0; var totalFailed = 0;
-      for (var i = 0; i < profiles.length; i++) {
-        var pl = profiles[i].platform || 'unknown';
-        platCount[pl] = (platCount[pl] || 0) + 1;
-        var st = profiles[i].status || 'prospect';
-        statusCount[st] = (statusCount[st] || 0) + 1;
-        var ms = profiles[i].messages || [];
-        for (var j = 0; j < ms.length; j++) {
-          if (ms[j].direction === 'outbound') {
-            totalSent++;
-            if (ms[j].delivered) totalDelivered++;
-            else if (ms[j].sendAttempted) totalFailed++;
-          }
-        }
-      }
-      systemContext += '- Por plataforma: ' + JSON.stringify(platCount) + '\n';
-      systemContext += '- Por estado: ' + JSON.stringify(statusCount) + '\n';
-      systemContext += '- DMs: ' + totalSent + ' enviados, ' + totalDelivered + ' entregues, ' + totalFailed + ' falhados\n';
-      systemContext += '- Limite diario: 30 DMs\n';
-
-      const res = await fetch('/api/respond', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10), systemContext: systemContext }) }).catch(function() { return null; });
-      if (res && res.ok) {
-        const d = await res.json().catch(function() { return null; });
-        if (d && d.reply) { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:d.reply }]); }); }
-        else { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro ao gerar resposta.' }]); }); }
-      }
-      else { setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro de ligacao.' }]); }); }
+    if (!input.trim() || loading) return; var userMsg = input.trim(); setInput('');
+    setChatHistory(function(h) { return h.concat([{ role:'user', content:userMsg }]); }); setLoading(true);
+    var profiles = getProfiles(); var systemContext = 'ESTADO ACTUAL DO SISTEMA:\n';
+    systemContext += '- Total de perfis guardados: ' + profiles.length + '\n';
+    var platCount: Record<string,number> = {}; var statusCount: Record<string,number> = {};
+    var totalSent = 0; var totalDelivered = 0; var totalFailed = 0;
+    for (var i = 0; i < profiles.length; i++) { var pl = profiles[i].platform || 'unknown'; platCount[pl] = (platCount[pl] || 0) + 1; var st = profiles[i].status || 'prospect'; statusCount[st] = (statusCount[st] || 0) + 1; var ms = profiles[i].messages || []; for (var j = 0; j < ms.length; j++) { if (ms[j].direction === 'outbound') { totalSent++; if (ms[j].delivered) totalDelivered++; else if (ms[j].sendAttempted) totalFailed++; } } }
+    systemContext += '- Por plataforma: ' + JSON.stringify(platCount) + '\n- Por estado: ' + JSON.stringify(statusCount) + '\n- DMs: ' + totalSent + ' enviados, ' + totalDelivered + ' entregues, ' + totalFailed + ' falhados\n- Limite diario: 30 DMs\n';
+    const res = await fetch('/api/respond', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10), systemContext: systemContext }) }).catch(function() { return null; });
+    if (res && res.ok) { const d = await res.json().catch(function() { return null; }); if (d && d.reply) setChatHistory(function(h) { return h.concat([{ role:'assistant', content:d.reply }]); }); else setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro ao gerar resposta.' }]); }); } else setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro de ligacao.' }]); });
     setLoading(false);
   };
   return (
@@ -1393,14 +884,7 @@ function AgentChat() {
       <div style={{ padding:'10px 16px', borderBottom:'1px solid '+P.border }}><STitle>Agente IA</STitle></div>
       <div style={{ flex:1, overflowY:'auto', padding:16 }}>
         {chatHistory.length === 0 && <EmptyState icon="\u2609" title="Agente Mwango Brain" sub="Pergunte sobre prospeccao, perfis, DMs, ou qualquer coisa sobre o sistema." />}
-        {chatHistory.map(function(m, i) {
-          return <div key={i} style={{ display:'flex', justifyContent:m.role==='user'?'flex-end':'flex-start', marginBottom:10 }}>
-            <div style={{ maxWidth:'80%', padding:'10px 14px', borderRadius:8, background:m.role==='user'?'rgba(192,0,28,0.12)':'rgba(255,255,255,0.04)', border:'1px solid '+(m.role==='user'?P.border:'rgba(255,255,255,0.06)'), color:P.text, fontSize:13, lineHeight:1.5 }}>
-              {m.role === 'assistant' && <div style={{ color:P.redB, fontSize:10, fontWeight:700, marginBottom:4 }}>MBA AGENTE</div>}
-              <div style={{ whiteSpace:'pre-wrap' }}>{m.content}</div>
-            </div>
-          </div>;
-        })}
+        {chatHistory.map(function(m, i) { return <div key={i} style={{ display:'flex', justifyContent:m.role==='user'?'flex-end':'flex-start', marginBottom:10 }}><div style={{ maxWidth:'80%', padding:'10px 14px', borderRadius:8, background:m.role==='user'?'rgba(192,0,28,0.12)':'rgba(255,255,255,0.04)', border:'1px solid '+(m.role==='user'?P.border:'rgba(255,255,255,0.06)'), color:P.text, fontSize:13, lineHeight:1.5 }}>{m.role === 'assistant' && <div style={{ color:P.redB, fontSize:10, fontWeight:700, marginBottom:4 }}>MBA AGENTE</div>}<div style={{ whiteSpace:'pre-wrap' }}>{m.content}</div></div></div>; })}
         {loading && <div style={{ display:'flex', justifyContent:'flex-start' }}><div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(255,255,255,0.04)', color:P.textDim, fontSize:12, animation:'blink 1.5s infinite' }}>A pensar...</div></div>}
         <div ref={chatEnd} />
       </div>
@@ -1412,49 +896,17 @@ function AgentChat() {
   );
 }
 
+/* ===== FOLLOW-UPS TAB ===== */
 function FollowUpsTab() {
-  var profiles = getProfiles();
-  var now = Date.now();
-  var pendingDue: any[] = [];
-  var pendingWait: any[] = [];
-  var sentList: any[] = [];
-  var doneList: any[] = [];
-
+  var profiles = getProfiles(); var now = Date.now();
+  var pendingDue: any[] = []; var pendingWait: any[] = []; var sentList: any[] = []; var doneList: any[] = [];
   for (var i = 0; i < profiles.length; i++) {
-    var p = profiles[i];
-    var msgs = p.messages || [];
-    var fuCount = 0;
-    var lastOut = null;
-    for (var mi = 0; mi < msgs.length; mi++) {
-      if (msgs[mi].type === 'follow-up') {
-        fuCount++;
-        var entry: any = { username: p.username, platform: p.platform, followers: p.followers || 0, sentAt: msgs[mi].sentAt, delivered: msgs[mi].delivered, fuNum: fuCount, replied: false };
-        var fuT = new Date(msgs[mi].sentAt).getTime();
-        for (var ri = 0; ri < msgs.length; ri++) { if (msgs[ri].direction === 'inbound' && new Date(msgs[ri].sentAt).getTime() > fuT) { entry.replied = true; break; } }
-        if (entry.replied || fuCount >= 2) { doneList.push(entry); } else { sentList.push(entry); }
-      }
-      if (msgs[mi].direction === 'outbound' && msgs[mi].type !== 'follow-up' && msgs[mi].type !== 'auto-reply') { lastOut = msgs[mi]; }
-    }
-    if (fuCount < 2 && lastOut) {
-      var sT = new Date(lastOut.sentAt).getTime();
-      var hasR = false;
-      for (var hr = 0; hr < msgs.length; hr++) { if (msgs[hr].direction === 'inbound' && new Date(msgs[hr].sentAt).getTime() > sT) { hasR = true; break; } }
-      if (!hasR) {
-        var days = Math.floor((now - sT) / 86400000);
-        var item: any = { username: p.username, platform: p.platform, followers: p.followers || 0, days: days, fuNum: fuCount, nextFu: fuCount + 1, due: days >= 3, dueIn: 3 - days };
-        if (days >= 3) { pendingDue.push(item); } else { pendingWait.push(item); }
-      }
-    }
+    var p = profiles[i]; var msgs = p.messages || []; var fuCount = 0; var lastOut = null;
+    for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].type === 'follow-up') { fuCount++; var entry: any = { username: p.username, platform: p.platform, followers: p.followers || 0, sentAt: msgs[mi].sentAt, delivered: msgs[mi].delivered, fuNum: fuCount, replied: false }; var fuT = new Date(msgs[mi].sentAt).getTime(); for (var ri = 0; ri < msgs.length; ri++) { if (msgs[ri].direction === 'inbound' && new Date(msgs[ri].sentAt).getTime() > fuT) { entry.replied = true; break; } } if (entry.replied || fuCount >= 2) doneList.push(entry); else sentList.push(entry); } if (msgs[mi].direction === 'outbound' && msgs[mi].type !== 'follow-up' && msgs[mi].type !== 'auto-reply') lastOut = msgs[mi]; }
+    if (fuCount < 2 && lastOut) { var sT = new Date(lastOut.sentAt).getTime(); var hasR = false; for (var hr = 0; hr < msgs.length; hr++) { if (msgs[hr].direction === 'inbound' && new Date(msgs[hr].sentAt).getTime() > sT) { hasR = true; break; } } if (!hasR) { var days = Math.floor((now - sT) / 86400000); var item: any = { username: p.username, platform: p.platform, followers: p.followers || 0, days: days, fuNum: fuCount, nextFu: fuCount + 1, due: days >= 3, dueIn: 3 - days }; if (days >= 3) pendingDue.push(item); else pendingWait.push(item); } }
   }
-
-  pendingDue.sort(function(a: any, b: any) { return b.days - a.days; });
-  pendingWait.sort(function(a: any, b: any) { return b.days - a.days; });
-
-  var nDue = pendingDue.length;
-  var nWait = pendingWait.length;
-  var nSent = sentList.length;
-  var nDone = doneList.length;
-
+  pendingDue.sort(function(a: any, b: any) { return b.days - a.days; }); pendingWait.sort(function(a: any, b: any) { return b.days - a.days; });
+  var nDue = pendingDue.length; var nWait = pendingWait.length; var nSent = sentList.length; var nDone = doneList.length;
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <STitle>Follow-Ups Automaticos</STitle>
@@ -1464,91 +916,20 @@ function FollowUpsTab() {
         <StatCard label="Enviados" value={nSent} sub="aguardando resposta" color={P.blue} />
         <StatCard label="Concluidos" value={nDone} sub="respondeu ou max 2" color={P.green} />
       </div>
-
-      {nDue > 0 && (
-        <Panel style={{ marginBottom:14 }}>
-          <STitle>Prontos para Follow-Up ({nDue})</STitle>
-          <div style={{ color:P.textSec, fontSize:11, marginBottom:10 }}>Nao responderam ha 3+ dias. O sistema enviara automaticamente.</div>
-          {pendingDue.map(function(fu: any, idx: number) {
-            var fuLabel = 'F' + fu.nextFu;
-            return <div key={'d'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}>
-              <div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div>
-              <div style={{ width:70, textAlign:'right', color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.followers.toLocaleString('pt-PT')}</div>
-              <div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div>
-              <div style={{ width:60, color:P.orange, fontSize:11, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.days}d</div>
-              <div style={{ width:60 }}><span style={{ padding:'2px 8px', borderRadius:3, background:P.orange+'18', border:'1px solid '+P.orange+'44', color:P.orange, fontSize:10, fontWeight:600 }}>{fuLabel}</span></div>
-            </div>;
-          })}
-        </Panel>
-      )}
-
-      {nWait > 0 && (
-        <Panel style={{ marginBottom:14 }}>
-          <STitle>A Aguardar ({nWait})</STitle>
-          {pendingWait.map(function(fu: any, idx: number) {
-            return <div key={'w'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}>
-              <div style={{ flex:2, color:P.textSec, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div>
-              <div style={{ width:70, textAlign:'right', color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.followers.toLocaleString('pt-PT')}</div>
-              <div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div>
-              <div style={{ width:60, color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.days}d</div>
-              <div style={{ width:60, color:P.textSec, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.dueIn}d</div>
-            </div>;
-          })}
-        </Panel>
-      )}
-
-      {nSent > 0 && (
-        <Panel style={{ marginBottom:14 }}>
-          <STitle>Follow-Ups Enviados ({nSent})</STitle>
-          {sentList.map(function(fu: any, idx: number) {
-            var stColor = fu.delivered ? P.green : '#ff4444';
-            var stText = fu.delivered ? 'ENVIADO' : 'FALHOU';
-            var fuLabel = 'F' + fu.fuNum;
-            return <div key={'s'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}>
-              <div style={{ flex:2, color:P.textSec, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div>
-              <div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div>
-              <div style={{ width:60 }}><span style={{ color:P.blue, fontSize:10, fontWeight:600 }}>{fuLabel}</span></div>
-              <div style={{ width:70 }}><span style={{ color:stColor, fontSize:10, fontWeight:700 }}>{stText}</span></div>
-            </div>;
-          })}
-        </Panel>
-      )}
-
-      {nDone > 0 && (
-        <Panel style={{ marginBottom:14 }}>
-          <STitle>Concluidos ({nDone})</STitle>
-          {doneList.map(function(fu: any, idx: number) {
-            var stText = fu.replied ? 'RESPOSTA' : 'MAX 2';
-            var stColor = fu.replied ? P.green : P.textDim;
-            var fuLabel = 'F' + fu.fuNum;
-            return <div key={'c'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}>
-              <div style={{ flex:2, color:P.textDim, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div>
-              <div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div>
-              <div style={{ width:60 }}><span style={{ color:P.textDim, fontSize:10 }}>{fuLabel}</span></div>
-              <div style={{ width:70 }}><span style={{ color:stColor, fontSize:10, fontWeight:700 }}>{stText}</span></div>
-              <div style={{ width:90, color:P.textDim, fontSize:10 }}>{fmtDt(fu.sentAt)}</div>
-            </div>;
-          })}
-        </Panel>
-      )}
-
-      {nDue === 0 && nWait === 0 && nSent === 0 && nDone === 0 && (
-        <EmptyState icon="\u21BB" title="Sem follow-ups" sub="Os follow-ups aparecerao aqui 3 dias apos o primeiro contacto sem resposta." />
-      )}
+      {nDue > 0 && (<Panel style={{ marginBottom:14 }}><STitle>Prontos para Follow-Up ({nDue})</STitle>{pendingDue.map(function(fu: any, idx: number) { return <div key={'d'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}><div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div><div style={{ width:70, textAlign:'right', color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.followers.toLocaleString('pt-PT')}</div><div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div><div style={{ width:60, color:P.orange, fontSize:11, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.days}d</div><div style={{ width:60 }}><span style={{ padding:'2px 8px', borderRadius:3, background:P.orange+'18', border:'1px solid '+P.orange+'44', color:P.orange, fontSize:10, fontWeight:600 }}>F{fu.nextFu}</span></div></div>; })}</Panel>)}
+      {nWait > 0 && (<Panel style={{ marginBottom:14 }}><STitle>A Aguardar ({nWait})</STitle>{pendingWait.map(function(fu: any, idx: number) { return <div key={'w'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}><div style={{ flex:2, color:P.textSec, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div><div style={{ width:70, textAlign:'right', color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.followers.toLocaleString('pt-PT')}</div><div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div><div style={{ width:60, color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.days}d</div><div style={{ width:60, color:P.textSec, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.dueIn}d</div></div>; })}</Panel>)}
+      {nDue === 0 && nWait === 0 && nSent === 0 && nDone === 0 && (<EmptyState icon="\u21BB" title="Sem follow-ups" sub="Os follow-ups aparecerao aqui 3 dias apos o primeiro contacto sem resposta." />)}
     </div>
   );
 }
 
+/* ===== MAIN APP ===== */
 export default function MBAApp() {
   const { isAuthenticated, activeTab, setActiveTab, setAuthenticated } = useMBAStore();
   const [clock, setClock] = useState('');
   const [dashKey, setDashKey] = useState(0);
 
-  useEffect(function() {
-    var sid = storeGet('mba_session');
-    if (sid) { setAuthenticated(true, sid); }
-  }, []);
-
+  useEffect(function() { var sid = storeGet('mba_session'); if (sid) { setAuthenticated(true, sid); } }, []);
   useEffect(function() {
     if (!isAuthenticated) return;
     var tick = setInterval(function() { setClock(new Date().toLocaleTimeString('pt-PT', { hour:'2-digit', minute:'2-digit', second:'2-digit' })); }, 1000);
@@ -1557,11 +938,9 @@ export default function MBAApp() {
 
   // Listen for tab switch events from auto-trigger
   useEffect(function() {
-    var handler = function(e: any) {
-      if (e.detail) setActiveTab(e.detail);
-    };
-    window.addEventListener('mba-switch-tab', handler as any);
-    return function() { window.removeEventListener('mba-switch-tab', handler as any); };
+    var handler = function(e: any) { if (e.detail) setActiveTab(e.detail); };
+    window.addEventListener('mba-switch-tab', handler);
+    return function() { window.removeEventListener('mba-switch-tab', handler); };
   }, []);
 
   if (!isAuthenticated) return <LoginScreen />;
@@ -1580,9 +959,7 @@ export default function MBAApp() {
         </div>
       </div>
       <div style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
-        {TABS.map(function(t) {
-          return <button key={t.id} onClick={function() { setActiveTab(t.id); }} style={{ padding:'10px 16px', border:'none', borderBottom:activeTab===t.id?'2px solid '+P.red:'2px solid transparent', background:'transparent', color:activeTab===t.id?P.redB:P.textDim, fontSize:11, fontWeight:activeTab===t.id?700:500, cursor:'pointer', whiteSpace:'nowrap', letterSpacing:'.5px', transition:'all .15s' }}>{t.label}</button>;
-        })}
+        {TABS.map(function(t) { return <button key={t.id} onClick={function() { setActiveTab(t.id); }} style={{ padding:'10px 16px', border:'none', borderBottom:activeTab===t.id?'2px solid '+P.red:'2px solid transparent', background:'transparent', color:activeTab===t.id?P.redB:P.textDim, fontSize:11, fontWeight:activeTab===t.id?700:500, cursor:'pointer', whiteSpace:'nowrap', letterSpacing:'.5px', transition:'all .15s' }}>{t.label}</button>; })}
       </div>
       <div style={{ flex:1, overflow:'hidden' }}>
         {activeTab === 'dashboard' && <DashboardTab key={dashKey} refreshKey={dashKey} onRefresh={function() { setDashKey(dashKey + 1); }} />}
