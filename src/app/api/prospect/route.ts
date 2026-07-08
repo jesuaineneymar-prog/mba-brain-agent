@@ -4,7 +4,7 @@ export var maxDuration = 60;
 
 var SCRAPINGANT_KEY = '897af2903f4848fba1f603a46273d842';
 var SCRAPINGANT_BASE = 'https://api.scrapingant.com/v1/general';
-var SERPER_KEY = process.env.SERPER_API_KEY || '';
+var SERPER_KEY = process.env.SERPER_API_KEY || 'dea8e7c3442a9bc66e97a79611d553107432b9ea';
 var SERPER_BASE = 'https://google.serper.dev/search';
 
 var ANGOLA_WORDS = [
