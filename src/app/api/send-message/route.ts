@@ -31,6 +31,56 @@ async function checkBrowserless() {
   }
 }
 
+/* ===== DETAILED DIAGNOSTIC ===== */
+async function runDiagnostic() {
+  var diag: any = { steps: [], browserless: false, wss: false, ig: false };
+
+  // Step 1: HTTP health check
+  try {
+    var ctrl = new AbortController();
+    var tid = setTimeout(function() { ctrl.abort(); }, 10000);
+    var res = await fetch(BL_HTTP + '/content?token=' + BL_TOKEN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: 'https://example.com' }),
+      signal: ctrl.signal
+    });
+    clearTimeout(tid);
+    diag.browserless = res.ok;
+    diag.steps.push({ step: 'HTTP health check', ok: res.ok, status: res.status });
+  } catch(e: any) {
+    diag.steps.push({ step: 'HTTP health check', ok: false, error: e.message || 'timeout' });
+  }
+
+  // Step 2: WSS connect test
+  try {
+    var browser = await chromium.connect(BL_WSS, { timeout: 15000 });
+    diag.wss = true;
+    diag.steps.push({ step: 'WSS connect', ok: true });
+
+    // Step 3: Context creation
+    var context = browser.contexts()[0] || await browser.newContext({ userAgent: BL_UA });
+    diag.steps.push({ step: 'Context creation', ok: true });
+
+    // Step 4: Page creation + navigation to IG
+    var page = context.pages()[0] || await context.newPage();
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto('https://www.instagram.com/accounts/login/', { timeout: 20000 }).catch(function() {});
+    await sleep(3000);
+    var url = page.url();
+    var hasForm = !!(await page.$('input[name="username"]'));
+    diag.ig = hasForm && url.indexOf('instagram.com') >= 0;
+    diag.steps.push({ step: 'IG login page', ok: diag.ig, url: url, hasForm: hasForm });
+
+    await browser.close();
+  } catch(e: any) {
+    diag.steps.push({ step: 'WSS/Page', ok: false, error: (e.message || 'unknown').substring(0, 120) });
+    try { if (browser) await browser.close(); } catch(x) {}
+  }
+
+  return diag;
+}
+
 /* ===== LOGIN AUTOMATION VIA BROWSERLESS ===== */
 async function automateLogin(platform, username, password) {
   var browser = null;
@@ -531,7 +581,12 @@ export async function POST(request) {
 }
 
 /* ===== GET: STATUS / HEALTH CHECK ===== */
-export async function GET() {
+export async function GET(request: any) {
+  var url = new URL(request.url);
+  if (url.searchParams.get('diag') === '1') {
+    var diag = await runDiagnostic();
+    return NextResponse.json(diag);
+  }
   var blOnline = await checkBrowserless();
   return NextResponse.json({
     maxPerDay: MAX_PER_DAY,
