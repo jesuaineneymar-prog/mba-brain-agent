@@ -97,7 +97,11 @@ function isValidIG(un: string): boolean {
 }
 function isValidFB(name: string): boolean {
   if (!name || name.length < 3 || name.length > 60) return false;
-  var bad = ['events','groups','watch','marketplace','reels','gaming','login','recover','help','pages','p','l','n','r','media','photo','photos','video','videos','post','posts','comment','plugins','dialog','sharer','ajax','m','mobile','www','apps','privacy','terms','careers','directory','people','places','games','business','story','public','profile.php','fundraiser','policies','campaign','landing','share','create','settings','edit','nfx','explore'];
+  // URLs com path (posts, videos, etc) nao sao nomes de pagina
+  if (name.indexOf('/') >= 0) return false;
+  if (/^\d+$/.test(name)) return false;
+  // Palavras reservadas do Facebook
+  var bad = ['events','groups','watch','marketplace','reels','gaming','login','recover','help','pages','page','p','l','n','r','media','photo','photos','video','videos','post','posts','comment','plugins','dialog','sharer','ajax','m','mobile','www','apps','privacy','terms','careers','directory','people','places','games','business','story','public','profile.php','fundraiser','policies','campaign','landing','share','create','settings','edit','nfx','explore','oficial','official'];
   if (bad.indexOf(name.toLowerCase()) >= 0) return false;
   if (/^\d+$/.test(name)) return false;
   return true;
@@ -262,53 +266,53 @@ function shuffle(arr: string[]): string[] {
 }
 function getTTQueries(): string[] {
   return shuffle([
-    'angola influencer site:tiktok.com', 'angolano creator site:tiktok.com',
-    'luanda influencer site:tiktok.com', 'angola kizomba site:tiktok.com',
-    'angola lifestyle site:tiktok.com', 'angola musica site:tiktok.com',
-    'influenciador angolano site:tiktok.com', 'angola dance site:tiktok.com',
-    'angola comedy site:tiktok.com', 'benguela angola site:tiktok.com',
-    'angola moda site:tiktok.com', 'angola fitness site:tiktok.com',
-    'angola vlog site:tiktok.com', 'angola food blogger site:tiktok.com',
-    'angola photography site:tiktok.com'
+    'angola influencer tiktok', 'angolano creator tiktok',
+    'luanda influencer tiktok', 'angola kizomba tiktok',
+    'angola lifestyle tiktok', 'angola musica tiktok',
+    'influenciador angolano tiktok', 'angola dance tiktok',
+    'angola comedy tiktok', 'benguela angola tiktok',
+    'angola moda tiktok', 'angola fitness tiktok',
+    'angola vlog tiktok', 'angola food blogger tiktok',
+    'angola photography tiktok'
   ]);
 }
 function getIGQueries(): string[] {
   return shuffle([
-    'angola influencer site:instagram.com', 'angolano creator site:instagram.com',
-    'luanda influencer site:instagram.com', 'angola kizomba site:instagram.com',
-    'angola lifestyle site:instagram.com', 'angola musica site:instagram.com',
-    'angola moda site:instagram.com', 'angola fitness site:instagram.com',
-    'angola comedia site:instagram.com', 'benguela site:instagram.com',
-    'angola dance site:instagram.com', 'cabinda site:instagram.com',
-    'luanda moda site:instagram.com', 'angola entrepreneur site:instagram.com',
-    'angola food site:instagram.com', 'angola digital creator site:instagram.com',
-    'huambo site:instagram.com', 'angola photography site:instagram.com',
-    'angola travel site:instagram.com', 'influenciador angolano site:instagram.com',
-    'angola ig model site:instagram.com', 'angola artist site:instagram.com',
-    'angola comedian site:instagram.com', 'angola fashion blogger site:instagram.com',
-    'lobito angola site:instagram.com', 'angola podcaster site:instagram.com',
-    'luanda photographer site:instagram.com', 'angola businessman site:instagram.com',
-    'angola public figure site:instagram.com', 'angola media site:instagram.com'
+    'angola influencer instagram', 'angolano creator instagram',
+    'luanda influencer instagram', 'angola kizomba instagram',
+    'angola lifestyle instagram', 'angola musica instagram',
+    'angola moda instagram', 'angola fitness instagram',
+    'angola comedia instagram', 'benguela angola instagram',
+    'angola dance instagram', 'cabinda angola instagram',
+    'luanda moda instagram', 'angola entrepreneur instagram',
+    'angola food instagram', 'angola digital creator instagram',
+    'huambo angola instagram', 'angola photography instagram',
+    'angola travel instagram', 'influenciador angolano instagram',
+    'angola ig model instagram', 'angola artist instagram',
+    'angola comedian instagram', 'angola fashion blogger instagram',
+    'lobito angola instagram', 'angola podcaster instagram',
+    'luanda photographer instagram', 'angola businessman instagram',
+    'angola public figure instagram', 'angola media instagram'
   ]);
 }
 function getFBQueries(): string[] {
   return shuffle([
-    'site:facebook.com "angola" influencer', 'site:facebook.com "angola" "content creator"',
-    'site:facebook.com "luanda" influencer', 'site:facebook.com "angola" kizomba',
-    'site:facebook.com "angola" moda', 'site:facebook.com "angola" musica',
-    'site:facebook.com "luanda" lifestyle', 'site:facebook.com "angola" fitness',
-    'site:facebook.com "benguela" angola', 'site:facebook.com "angola" dance',
-    'site:facebook.com "angola" comedia', 'site:facebook.com "angola" fashion',
-    'site:facebook.com "angola" entrepreneur', 'site:facebook.com "luanda" page',
-    'site:facebook.com "angola" food', 'site:facebook.com "cabinda" page',
-    'site:facebook.com "angola" photography', 'site:facebook.com "huambo" angola',
-    'site:facebook.com "angola" entertainment', 'site:facebook.com "angola" business',
-    'site:facebook.com "luanda" model', 'site:facebook.com "angola" artist',
-    'site:facebook.com "angola" "influenciador"', 'site:facebook.com "angola" "creator digital"',
-    'site:facebook.com "luanda" influencer', 'site:facebook.com "angola" vlog',
-    'site:facebook.com "angola" podcast', 'site:facebook.com "angola" comedian',
-    'site:facebook.com "angola" page creator', 'site:facebook.com "angola" "public figure"',
-    'site:facebook.com "angola" "digital marketing"', 'site:facebook.com "angola" blogger'
+    'angola influencer facebook page', 'angola content creator facebook',
+    'luanda influencer facebook', 'angola kizomba facebook',
+    'angola moda facebook page', 'angola musica facebook',
+    'luanda lifestyle facebook', 'angola fitness facebook',
+    'benguela angola facebook', 'angola dance facebook',
+    'angola comedia facebook', 'angola fashion facebook page',
+    'angola entrepreneur facebook', 'luanda facebook page',
+    'angola food facebook', 'cabinda angola facebook page',
+    'angola photography facebook', 'huambo angola facebook',
+    'angola entertainment facebook', 'angola business facebook page',
+    'luanda model facebook', 'angola artist facebook',
+    'angola influenciador facebook', 'angola creator digital facebook',
+    'angola digital marketing facebook', 'angola vlog facebook',
+    'angola podcast facebook', 'angola comedian facebook',
+    'angola page creator facebook', 'angola public figure facebook',
+    'angola blogger facebook', 'angola digital influencer facebook'
   ]);
 }
 
