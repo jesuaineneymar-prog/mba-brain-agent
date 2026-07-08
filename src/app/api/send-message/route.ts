@@ -2,17 +2,12 @@ import { NextResponse } from 'next/server';
 
 // ============================================================
 //  MBA BRAIN AGENT — SEND MESSAGE API
-//  Browserless /function API (HTTP puro, sem WebSocket)
+//  Browserless /function API (HTTP, sem WebSocket)
 //
-//  FORMATO OBRIGATÓRIO do código:
-//    export default async function({ page }) { ... return result; }
-//
-//  RESTRIÇÕES do Browserless /function:
-//  - Não recebe "browser", só { page } e { context } (dummy)
-//  - Não tem setViewportSize, addInitScript, addCookies
-//  - Tem evaluateOnNewDocument, page.browserContext() (real)
-//  - UA deve ser override via evaluateOnNewDocument
-//  - Cookies: page.browserContext().cookies() / .setCookie()
+//  FORMATO: export default async function({ page }) { ... }
+//  APENAS page.goto, page.evaluate, page.title, page.url, page.browserContext
+//  NAO USA: page.fill, page.click, page.$, page.keyboard (nao existem)
+//  Em vez disso usa evalFill, evalClick, evalExists etc via page.evaluate
 // ============================================================
 
 export var maxDuration = 60;
@@ -22,7 +17,7 @@ var BL_TOKEN = process.env.BROWSERLESS_TOKEN || '2UqMn3vrQPAsFgGd027555e6ef8261d
 var BL_HTTP = 'https://production-sfo.browserless.io';
 var BL_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1';
 
-/* ===== CORE: POST código para Browserless ===== */
+/* ===== CORE: POST code to Browserless ===== */
 async function runOnBrowserless(code: string, timeoutMs: number = 50000): Promise<any> {
   var controller = new AbortController();
   var timer = setTimeout(function() { controller.abort(); }, timeoutMs);
@@ -62,13 +57,12 @@ async function checkBrowserless(): Promise<boolean> {
   } catch (e) { return false; }
 }
 
-/* ===== UA OVERRIDE SNIPPET (injeta antes de cada page load) ===== */
+/* ===== UA OVERRIDE SNIPPET ===== */
 var UA_OVERRIDE = 'await page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, "userAgent", { get: () => ' + JSON.stringify(BL_UA) + ' }); });';
 
-/* ===== DIAGNÓSTICO ===== */
+/* ===== DIAGNOSTIC ===== */
 async function runDiagnostic() {
   var diag: any = { steps: [], browserless: false, functionApi: false, browserNav: false };
-
   try {
     var ctrl = new AbortController();
     var tid = setTimeout(function() { ctrl.abort(); }, 10000);
@@ -79,17 +73,13 @@ async function runDiagnostic() {
   } catch(e: any) {
     diag.steps.push({ step: 'HTTP health check', ok: false, error: (e.message || 'timeout').substring(0, 120) });
   }
-
   try {
-    var testResult = await runOnBrowserless(
-      'export default async function() { return { ok: true, ts: Date.now() }; }', 15000
-    );
+    var testResult = await runOnBrowserless('export default async function() { return { ok: true, ts: Date.now() }; }', 15000);
     diag.functionApi = testResult && testResult.ok === true;
     diag.steps.push({ step: 'Function API (eval)', ok: diag.functionApi, result: JSON.stringify(testResult).substring(0, 100) });
   } catch(e: any) {
     diag.steps.push({ step: 'Function API (eval)', ok: false, error: (e.message || 'unknown').substring(0, 200) });
   }
-
   try {
     var navCode = 'export default async function({ page }) {\n' +
       UA_OVERRIDE + '\n' +
@@ -104,7 +94,6 @@ async function runDiagnostic() {
   } catch(e: any) {
     diag.steps.push({ step: 'Browser + UA override', ok: false, error: (e.message || 'unknown').substring(0, 200) });
   }
-
   return diag;
 }
 
@@ -112,106 +101,9 @@ async function runDiagnostic() {
 function makeLoginCode(platform: string, username: string, password: string): string {
   var u = JSON.stringify(username);
   var p = JSON.stringify(password);
-
-  if (platform === 'instagram') {
-    return 'export default async function({ page }) {\n' +
-      UA_OVERRIDE + '\n' +
-      'await page.goto("https://www.instagram.com/accounts/login/", { timeout: 15000 });\n' +
-      'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
-      'var hasForm = !!(await page.$(\'input[name="username"]\'));\n' +
-      'if (!hasForm) { return { success: false, error: "Instagram nao mostrou formulario de login (possible 429/blocked IP)" }; }\n' +
-      'await page.fill(\'input[name="username"]\', ' + u + ');\n' +
-      'await page.fill(\'input[name="password"]\', ' + p + ');\n' +
-      'await page.click(\'div[role="button"]:has-text("Log in")\');\n' +
-      'await new Promise(function(r) { setTimeout(r, 6000); });\n' +
-      'var urlNow = page.url();\n' +
-      'if (urlNow.indexOf("/accounts/login") >= 0) {\n' +
-      '  return { success: false, error: "Login falhou - credenciais invalidas ou captcha" };\n' +
-      '}\n' +
-      'try { await page.click(\'div[role="button"]:has-text("Not Now")\', { timeout: 2000 }); await new Promise(function(r) { setTimeout(r, 500); }); } catch(e) {}\n' +
-      'try { await page.click(\'button:has-text("Not Now")\', { timeout: 2000 }); await new Promise(function(r) { setTimeout(r, 500); }); } catch(e) {}\n' +
-      'await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      'var bc = page.browserContext();\n' +
-      'var cookies = await bc.cookies();\n' +
-      'var cookiesJson = JSON.stringify(cookies);\n' +
-      'var sessionid = "", csrftoken = "";\n' +
-      'for (var i = 0; i < cookies.length; i++) {\n' +
-      '  if (cookies[i].name === "sessionid") sessionid = cookies[i].value;\n' +
-      '  if (cookies[i].name === "csrftoken") csrftoken = cookies[i].value;\n' +
-      '}\n' +
-      'return { success: true, sessionid: sessionid, csrftoken: csrftoken, cookiesJson: cookiesJson, message: "Login Instagram feito com sucesso" };\n' +
-    '}';
-  }
-
-  if (platform === 'tiktok') {
-    // Se nao tem password, tentar login por email (envia codigo)
-    if (!password) {
-      return 'export default async function({ page }) {\n' +
-        UA_OVERRIDE + '\n' +
-        'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
-        'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
-        'try { await page.click("text=Use phone / email / username"); } catch(e) {}\n' +
-        'await new Promise(function(r) { setTimeout(r, 1500); });\n' +
-        'var emailTab = await page.$("text=Email");\n' +
-        'if (emailTab) { await emailTab.click(); await new Promise(function(r) { setTimeout(r, 1000); }); }\n' +
-        'await page.fill(\'input[type="text"]\', ' + u + ');\n' +
-        'await new Promise(function(r) { setTimeout(r, 500); });\n' +
-        'try { await page.click(\'button[type="submit"]\'); } catch(e) { try { await page.click(\'div[role="button"]:has-text("Send code")\'); } catch(e2) { await page.keyboard.press("Enter"); } }\n' +
-        'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
-        'var codeInput = await page.$(\'input[data-e2e="verify-code-input"]\');\n' +
-        'if (codeInput) { return { success: false, needsCode: true, error: "TikTok envio codigo de verificacao para o teu email. Login automatico nao e possivel sem password.\n\nSolucao: Define uma password no TikTok (Settings > Account > Password) para poder automatizar o login." }; }\n' +
-        'var bc = page.browserContext();\n' +
-        'var cookies = await bc.cookies();\n' +
-        'var cookiesJson = JSON.stringify(cookies);\n' +
-        'var sessionid = "";\n' +
-        'for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === "sessionid") sessionid = cookies[i].value; }\n' +
-        'if (sessionid) { return { success: true, sessionid: sessionid, cookiesJson: cookiesJson, message: "Login TikTok feito com sucesso" }; }\n' +
-        'return { success: false, needsCode: true, error: "TikTok login por email requer verificacao. Define uma password nas definicoes da tua conta TikTok para automatizar." };\n' +
-      '}';
-    }
-    // Com password - login normal
-    return 'export default async function({ page }) {\n' +
-      UA_OVERRIDE + '\n' +
-      'await page.goto("https://www.tiktok.com/login", { timeout: 15000 });\n' +
-      'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
-      'try { await page.click("text=Use phone / email / username"); } catch(e) {}\n' +
-      'await new Promise(function(r) { setTimeout(r, 1000); });\n' +
-      'await page.fill(\'input[type="text"]\', ' + u + ');\n' +
-      'await page.fill(\'input[type="password"]\', ' + p + ');\n' +
-      'try { await page.click(\'button[type="submit"]\'); } catch(e) { try { await page.click(\'div[role="button"]:has-text("Log in")\'); } catch(e2) { await page.keyboard.press("Enter"); } }\n' +
-      'await new Promise(function(r) { setTimeout(r, 6000); });\n' +
-      'var bc = page.browserContext();\n' +
-      'var cookies = await bc.cookies();\n' +
-      'var cookiesJson = JSON.stringify(cookies);\n' +
-      'var sessionid = "", csrftoken = "";\n' +
-      'for (var i = 0; i < cookies.length; i++) {\n' +
-      '  if (cookies[i].name === "sessionid") sessionid = cookies[i].value;\n' +
-      '  if (cookies[i].name === "tt_csrf_token") csrftoken = cookies[i].value;\n' +
-      '}\n' +
-      'if (sessionid) { return { success: true, sessionid: sessionid, csrftoken: csrftoken, cookiesJson: cookiesJson, message: "Login TikTok feito com sucesso" }; }\n' +
-      'return { success: false, error: "Login TikTok falhou - verifica credenciais" };\n' +
-    '}';
-  }
-
-  if (platform === 'facebook') {
-    return 'export default async function({ page }) {\n' +
-      UA_OVERRIDE + '\n' +
-      'await page.goto("https://www.facebook.com/login", { timeout: 15000 });\n' +
-      'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
-      'await page.fill(\'input[id="email"]\', ' + u + ');\n' +
-      'await page.fill(\'input[id="pass"]\', ' + p + ');\n' +
-      'await page.click(\'button[name="login"]\');\n' +
-      'await new Promise(function(r) { setTimeout(r, 6000); });\n' +
-      'try { await page.click(\'button:has-text("Not Now")\', { timeout: 2000 }); await new Promise(function(r) { setTimeout(r, 500); }); } catch(e) {}\n' +
-      'var bc = page.browserContext();\n' +
-      'var cookies = await bc.cookies();\n' +
-      'var cookiesJson = JSON.stringify(cookies);\n' +
-      'var fbToken = "";\n' +
-      'for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === "datr") fbToken = cookies[i].value; }\n' +
-      'return { success: true, fbToken: fbToken, cookiesJson: cookiesJson, message: "Login Facebook feito com sucesso" };\n' +
-    '}';
-  }
-
+  if (platform === 'instagram') return "export default async function({ page }) {\n\nvar evalFill = async function(pg, sel, val) {\n  return await pg.evaluate(function(a) {\n    var el = document.querySelector(a.sel);\n    if (!el) return false;\n    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, a.val); else el.value = a.val;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      el.dispatchEvent(new Event('change', { bubbles: true }));\n    } else if (el.contentEditable === 'true') {\n      el.focus(); document.execCommand('selectAll', false, null);\n      document.execCommand('insertText', false, a.val);\n    }\n    return true;\n  }, { sel: sel, val: val });\n};\nvar evalClick = async function(pg, sel) {\n  return await pg.evaluate(function(s) {\n    var els = document.querySelectorAll(s);\n    if (els.length > 0) { els[0].click(); return true; } return false;\n  }, sel);\n};\nvar evalClickText = async function(pg, text) {\n  return await pg.evaluate(function(t) {\n    var els = document.querySelectorAll('div[role=\"button\"], button, a, span');\n    for (var i = 0; i < els.length; i++) {\n      if (els[i].textContent.trim().toLowerCase().indexOf(t.toLowerCase()) >= 0) {\n        els[i].click(); return true;\n      }\n    }\n    return false;\n  }, text);\n};\nvar evalExists = async function(pg, sel) {\n  return await pg.evaluate(function(s) { return !!document.querySelector(s); }, sel);\n};\nvar evalType = async function(pg, txt) {\n  return await pg.evaluate(function(t) {\n    var el = document.activeElement;\n    if (el && el.contentEditable === 'true') {\n      el.focus(); document.execCommand('insertText', false, t); return true;\n    }\n    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, t); else el.value = t;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      return true;\n    }\n    return false;\n  }, txt);\n};\nvar evalPressEnter = async function(pg) {\n  await pg.evaluate(function() {\n    var el = document.activeElement;\n    if (el) {\n      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n    }\n  });\n};\nvar evalSleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };\nvar evalGetCookies = async function(pg) {\n  var bc = pg.browserContext();\n  return await bc.cookies();\n};\nvar evalSetCookies = async function(pg, cookies) {\n  var bc = pg.browserContext();\n  for (var i = 0; i < cookies.length; i++) { await bc.setCookie(cookies[i]); }\n};\nvar evalExtractCookie = function(cookies, name) {\n  for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === name) return cookies[i].value; }\n  return '';\n};\n\nawait page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, \"userAgent\", { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); });\n\n  await page.goto(\"https://www.instagram.com/accounts/login/\", { timeout: 15000 });\n  await evalSleep(4000);\n  var hasForm = await evalExists(page, 'input[name=\"username\"]');\n  if (!hasForm) {\n    // Try alternative: maybe showing consent page or different layout\n    var hasAnyInput = await evalExists(page, 'input');\n    if (!hasAnyInput) {\n      return { success: false, error: \"Instagram nao mostrou formulario de login (possible block/captcha). Tenta novamente mais tarde ou muda de IP.\" };\n    }\n  }\n  await evalFill(page, 'input[name=\"username\"]', USERNAME_PLACEHOLDER);\n  await evalFill(page, 'input[name=\"password\"]', PASSWORD_PLACEHOLDER);\n  await evalClick(page, 'div[role=\"button\"]');\n  // Also try clicking any \"Log in\" text button\n  await evalClickText(page, 'Log in');\n  await evalSleep(7000);\n  var urlNow = page.url();\n  if (urlNow.indexOf(\"/accounts/login\") >= 0) {\n    // Check for error message\n    var errMsg = await page.evaluate(function() {\n      var el = document.getElementById('slfErrorAlert');\n      return el ? el.textContent : '';\n    }).catch(function() { return ''; });\n    return { success: false, error: \"Login IG falhou\" + (errMsg ? \": \" + errMsg.trim().substring(0, 100) : \" - credenciais invalidas ou captcha\") };\n  }\n  try { await evalClickText(page, 'Not Now'); await evalSleep(500); } catch(e) {}\n  try { await evalClickText(page, 'Not Now'); await evalSleep(500); } catch(e) {}\n  await evalSleep(2000);\n  var cookies = await evalGetCookies(page);\n  var sessionid = evalExtractCookie(cookies, 'sessionid');\n  var csrftoken = evalExtractCookie(cookies, 'csrftoken');\n  return { success: true, sessionid: sessionid, csrftoken: csrftoken, cookiesJson: JSON.stringify(cookies), message: \"Login Instagram feito com sucesso\" };\n}";
+  if (platform === 'tiktok') return "export default async function({ page }) {\n\nvar evalFill = async function(pg, sel, val) {\n  return await pg.evaluate(function(a) {\n    var el = document.querySelector(a.sel);\n    if (!el) return false;\n    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, a.val); else el.value = a.val;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      el.dispatchEvent(new Event('change', { bubbles: true }));\n    } else if (el.contentEditable === 'true') {\n      el.focus(); document.execCommand('selectAll', false, null);\n      document.execCommand('insertText', false, a.val);\n    }\n    return true;\n  }, { sel: sel, val: val });\n};\nvar evalClick = async function(pg, sel) {\n  return await pg.evaluate(function(s) {\n    var els = document.querySelectorAll(s);\n    if (els.length > 0) { els[0].click(); return true; } return false;\n  }, sel);\n};\nvar evalClickText = async function(pg, text) {\n  return await pg.evaluate(function(t) {\n    var els = document.querySelectorAll('div[role=\"button\"], button, a, span');\n    for (var i = 0; i < els.length; i++) {\n      if (els[i].textContent.trim().toLowerCase().indexOf(t.toLowerCase()) >= 0) {\n        els[i].click(); return true;\n      }\n    }\n    return false;\n  }, text);\n};\nvar evalExists = async function(pg, sel) {\n  return await pg.evaluate(function(s) { return !!document.querySelector(s); }, sel);\n};\nvar evalType = async function(pg, txt) {\n  return await pg.evaluate(function(t) {\n    var el = document.activeElement;\n    if (el && el.contentEditable === 'true') {\n      el.focus(); document.execCommand('insertText', false, t); return true;\n    }\n    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, t); else el.value = t;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      return true;\n    }\n    return false;\n  }, txt);\n};\nvar evalPressEnter = async function(pg) {\n  await pg.evaluate(function() {\n    var el = document.activeElement;\n    if (el) {\n      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n    }\n  });\n};\nvar evalSleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };\nvar evalGetCookies = async function(pg) {\n  var bc = pg.browserContext();\n  return await bc.cookies();\n};\nvar evalSetCookies = async function(pg, cookies) {\n  var bc = pg.browserContext();\n  for (var i = 0; i < cookies.length; i++) { await bc.setCookie(cookies[i]); }\n};\nvar evalExtractCookie = function(cookies, name) {\n  for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === name) return cookies[i].value; }\n  return '';\n};\n\nawait page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, \"userAgent\", { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); });\n\n  await page.goto(\"https://www.tiktok.com/login\", { timeout: 15000 });\n  await evalSleep(3000);\n  await evalClickText(page, 'Use phone / email / username');\n  await evalSleep(1000);\n  await evalFill(page, 'input[type=\"text\"]', USERNAME_PLACEHOLDER);\n  await evalFill(page, 'input[type=\"password\"]', PASSWORD_PLACEHOLDER);\n  await evalPressEnter(page);\n  await evalSleep(7000);\n  var cookies = await evalGetCookies(page);\n  var sessionid = evalExtractCookie(cookies, 'sessionid');\n  var csrftoken = evalExtractCookie(cookies, 'tt_csrf_token');\n  if (sessionid) {\n    return { success: true, sessionid: sessionid, csrftoken: csrftoken, cookiesJson: JSON.stringify(cookies), message: \"Login TikTok feito com sucesso\" };\n  }\n  return { success: false, error: \"Login TikTok falhou - verifica credenciais\" };\n}";
+  if (platform === 'facebook') return "export default async function({ page }) {\n\nvar evalFill = async function(pg, sel, val) {\n  return await pg.evaluate(function(a) {\n    var el = document.querySelector(a.sel);\n    if (!el) return false;\n    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, a.val); else el.value = a.val;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      el.dispatchEvent(new Event('change', { bubbles: true }));\n    } else if (el.contentEditable === 'true') {\n      el.focus(); document.execCommand('selectAll', false, null);\n      document.execCommand('insertText', false, a.val);\n    }\n    return true;\n  }, { sel: sel, val: val });\n};\nvar evalClick = async function(pg, sel) {\n  return await pg.evaluate(function(s) {\n    var els = document.querySelectorAll(s);\n    if (els.length > 0) { els[0].click(); return true; } return false;\n  }, sel);\n};\nvar evalClickText = async function(pg, text) {\n  return await pg.evaluate(function(t) {\n    var els = document.querySelectorAll('div[role=\"button\"], button, a, span');\n    for (var i = 0; i < els.length; i++) {\n      if (els[i].textContent.trim().toLowerCase().indexOf(t.toLowerCase()) >= 0) {\n        els[i].click(); return true;\n      }\n    }\n    return false;\n  }, text);\n};\nvar evalExists = async function(pg, sel) {\n  return await pg.evaluate(function(s) { return !!document.querySelector(s); }, sel);\n};\nvar evalType = async function(pg, txt) {\n  return await pg.evaluate(function(t) {\n    var el = document.activeElement;\n    if (el && el.contentEditable === 'true') {\n      el.focus(); document.execCommand('insertText', false, t); return true;\n    }\n    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, t); else el.value = t;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      return true;\n    }\n    return false;\n  }, txt);\n};\nvar evalPressEnter = async function(pg) {\n  await pg.evaluate(function() {\n    var el = document.activeElement;\n    if (el) {\n      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n    }\n  });\n};\nvar evalSleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };\nvar evalGetCookies = async function(pg) {\n  var bc = pg.browserContext();\n  return await bc.cookies();\n};\nvar evalSetCookies = async function(pg, cookies) {\n  var bc = pg.browserContext();\n  for (var i = 0; i < cookies.length; i++) { await bc.setCookie(cookies[i]); }\n};\nvar evalExtractCookie = function(cookies, name) {\n  for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === name) return cookies[i].value; }\n  return '';\n};\n\nawait page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, \"userAgent\", { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); });\n\n  await page.goto(\"https://www.facebook.com/login\", { timeout: 15000 });\n  await evalSleep(3000);\n  await evalFill(page, 'input[id=\"email\"]', USERNAME_PLACEHOLDER);\n  await evalFill(page, 'input[id=\"pass\"]', PASSWORD_PLACEHOLDER);\n  await evalClick(page, 'button[name=\"login\"]');\n  await evalSleep(7000);\n  try { await evalClickText(page, 'Not Now'); await evalSleep(500); } catch(e) {}\n  var cookies = await evalGetCookies(page);\n  var fbToken = evalExtractCookie(cookies, 'datr');\n  return { success: true, fbToken: fbToken, cookiesJson: JSON.stringify(cookies), message: \"Login Facebook feito com sucesso\" };\n}";
   return '';
 }
 
@@ -220,102 +112,9 @@ function makeDMCode(platform: string, targetUsername: string, message: string, c
   var target = JSON.stringify(targetUsername);
   var msg = JSON.stringify(message);
   var ck = cookiesJson ? JSON.stringify(cookiesJson) : 'null';
-
-  if (platform === 'instagram') {
-    return 'export default async function({ page }) {\n' +
-      UA_OVERRIDE + '\n' +
-      'if (' + ck + ') {\n' +
-      '  var bc = page.browserContext();\n' +
-      '  try {\n' +
-      '    var parsed = JSON.parse(' + ck + ');\n' +
-      '    for (var i = 0; i < parsed.length; i++) { await bc.setCookie(parsed[i]); }\n' +
-      '  } catch(e) {}\n' +
-      '}\n' +
-      'await page.goto("https://www.instagram.com/direct/new/", { timeout: 15000 });\n' +
-      'await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      'var hasSearch = !!(await page.$(\'input[placeholder="Search..."]\'));\n' +
-      'if (hasSearch) {\n' +
-      '  await page.fill(\'input[placeholder="Search..."]\', ' + target + ');\n' +
-      '  await new Promise(function(r) { setTimeout(r, 2500); });\n' +
-      '  try {\n' +
-      '    await page.click(\'div[role="option"]\', { timeout: 3000 });\n' +
-      '    await new Promise(function(r) { setTimeout(r, 1000); });\n' +
-      '    await page.click(\'div[role="dialog"] button:not([disabled])\');\n' +
-      '    await new Promise(function(r) { setTimeout(r, 1000); });\n' +
-      '    await page.keyboard.type(' + msg + ');\n' +
-      '    await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '    await page.keyboard.press("Enter");\n' +
-      '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    return { dmSent: true, deliveryMsg: "DM IG enviado via Browserless (new msg)" };\n' +
-      '  } catch(e) {}\n' +
-      '}\n' +
-      // METHOD B: Profile message button
-      'try {\n' +
-      '  await page.goto("https://www.instagram.com/" + ' + target + ' + "/", { timeout: 10000 });\n' +
-      '  await new Promise(function(r) { setTimeout(r, 1500); });\n' +
-      '  var msgBtn = await page.$(\'button:has-text("Message")\');\n' +
-      '  if (!msgBtn) msgBtn = await page.$(\'div[role="button"]:has-text("Message")\');\n' +
-      '  if (msgBtn) {\n' +
-      '    await msgBtn.click();\n' +
-      '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    await page.keyboard.type(' + msg + ');\n' +
-      '    await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '    await page.keyboard.press("Enter");\n' +
-      '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    return { dmSent: true, deliveryMsg: "DM IG enviado (profile msg btn)" };\n' +
-      '  }\n' +
-      '} catch(e2) {}\n' +
-      'return { dmSent: false, deliveryMsg: "Nao conseguiu abrir conversa IG (tentativa ' + attempt + ')" };\n' +
-    '}';
-  }
-
-  if (platform === 'tiktok') {
-    return 'export default async function({ page }) {\n' +
-      UA_OVERRIDE + '\n' +
-      'if (' + ck + ') {\n' +
-      '  var bc = page.browserContext();\n' +
-      '  try { var p = JSON.parse(' + ck + '); for (var i = 0; i < p.length; i++) { await bc.setCookie(p[i]); } } catch(e) {}\n' +
-      '}\n' +
-      'await page.goto("https://www.tiktok.com/@" + ' + target + ', { timeout: 15000 });\n' +
-      'await new Promise(function(r) { setTimeout(r, 2500); });\n' +
-      'var msgBtn = await page.$(\'div[data-e2e="profile-message-button"]\');\n' +
-      'if (msgBtn) {\n' +
-      '  await msgBtn.click();\n' +
-      '  await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '  var ta = await page.$(\'div[contenteditable="true"]\');\n' +
-      '  if (ta) {\n' +
-      '    await ta.click(); await page.keyboard.type(' + msg + ');\n' +
-      '    await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '    await page.keyboard.press("Enter");\n' +
-      '    await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '    return { dmSent: true, deliveryMsg: "DM TikTok enviado (profile btn)" };\n' +
-      '  }\n' +
-      '}\n' +
-      'return { dmSent: false, deliveryMsg: "Erro DM TikTok (tentativa ' + attempt + ')" };\n' +
-    '}';
-  }
-
-  if (platform === 'facebook') {
-    return 'export default async function({ page }) {\n' +
-      UA_OVERRIDE + '\n' +
-      'if (' + ck + ') {\n' +
-      '  var bc = page.browserContext();\n' +
-      '  try { var p = JSON.parse(' + ck + '); for (var i = 0; i < p.length; i++) { await bc.setCookie(p[i]); } } catch(e) {}\n' +
-      '}\n' +
-      'await page.goto("https://www.facebook.com/messages/t/" + ' + target + ', { timeout: 15000 });\n' +
-      'await new Promise(function(r) { setTimeout(r, 3000); });\n' +
-      'var msgArea = await page.$(\'div[aria-label="Message"], div[contenteditable="true"][role="textbox"]\');\n' +
-      'if (msgArea) {\n' +
-      '  await msgArea.click(); await page.keyboard.type(' + msg + ');\n' +
-      '  await new Promise(function(r) { setTimeout(r, 500); });\n' +
-      '  await page.keyboard.press("Enter");\n' +
-      '  await new Promise(function(r) { setTimeout(r, 2000); });\n' +
-      '  return { dmSent: true, deliveryMsg: "DM Facebook enviado (direct URL)" };\n' +
-      '}\n' +
-      'return { dmSent: false, deliveryMsg: "Erro DM Facebook (tentativa ' + attempt + ')" };\n' +
-    '}';
-  }
-
+  if (platform === 'instagram') return "export default async function({ page }) {\n\nvar evalFill = async function(pg, sel, val) {\n  return await pg.evaluate(function(a) {\n    var el = document.querySelector(a.sel);\n    if (!el) return false;\n    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, a.val); else el.value = a.val;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      el.dispatchEvent(new Event('change', { bubbles: true }));\n    } else if (el.contentEditable === 'true') {\n      el.focus(); document.execCommand('selectAll', false, null);\n      document.execCommand('insertText', false, a.val);\n    }\n    return true;\n  }, { sel: sel, val: val });\n};\nvar evalClick = async function(pg, sel) {\n  return await pg.evaluate(function(s) {\n    var els = document.querySelectorAll(s);\n    if (els.length > 0) { els[0].click(); return true; } return false;\n  }, sel);\n};\nvar evalClickText = async function(pg, text) {\n  return await pg.evaluate(function(t) {\n    var els = document.querySelectorAll('div[role=\"button\"], button, a, span');\n    for (var i = 0; i < els.length; i++) {\n      if (els[i].textContent.trim().toLowerCase().indexOf(t.toLowerCase()) >= 0) {\n        els[i].click(); return true;\n      }\n    }\n    return false;\n  }, text);\n};\nvar evalExists = async function(pg, sel) {\n  return await pg.evaluate(function(s) { return !!document.querySelector(s); }, sel);\n};\nvar evalType = async function(pg, txt) {\n  return await pg.evaluate(function(t) {\n    var el = document.activeElement;\n    if (el && el.contentEditable === 'true') {\n      el.focus(); document.execCommand('insertText', false, t); return true;\n    }\n    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, t); else el.value = t;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      return true;\n    }\n    return false;\n  }, txt);\n};\nvar evalPressEnter = async function(pg) {\n  await pg.evaluate(function() {\n    var el = document.activeElement;\n    if (el) {\n      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n    }\n  });\n};\nvar evalSleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };\nvar evalGetCookies = async function(pg) {\n  var bc = pg.browserContext();\n  return await bc.cookies();\n};\nvar evalSetCookies = async function(pg, cookies) {\n  var bc = pg.browserContext();\n  for (var i = 0; i < cookies.length; i++) { await bc.setCookie(cookies[i]); }\n};\nvar evalExtractCookie = function(cookies, name) {\n  for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === name) return cookies[i].value; }\n  return '';\n};\n\nawait page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, \"userAgent\", { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); });\n\n  if (CK_PLACEHOLDER) {\n    try { var parsed = JSON.parse(CK_PLACEHOLDER); await evalSetCookies(page, parsed); } catch(e) {}\n  }\n  // METHOD A: New message flow\n  await page.goto(\"https://www.instagram.com/direct/new/\", { timeout: 15000 });\n  await evalSleep(2500);\n  var hasSearch = await evalExists(page, 'input[placeholder=\"Search...\"]');\n  if (hasSearch) {\n    await evalFill(page, 'input[placeholder=\"Search...\"]', TARGET_PLACEHOLDER);\n    await evalSleep(3000);\n    var clicked = await evalClick(page, 'div[role=\"option\"]');\n    if (clicked) {\n      await evalSleep(1000);\n      await evalClick(page, 'div[role=\"dialog\"] button:not([disabled])');\n      await evalSleep(1500);\n      await evalType(page, MSG_PLACEHOLDER);\n      await evalPressEnter(page);\n      await evalSleep(2500);\n      return { dmSent: true, deliveryMsg: \"DM IG enviado (new msg)\" };\n    }\n  }\n  // METHOD B: Profile message button\n  try {\n    await page.goto(\"https://www.instagram.com/\" + TARGET_PLACEHOLDER + \"/\", { timeout: 10000 });\n    await evalSleep(2000);\n    var msgClicked = await evalClickText(page, 'Message');\n    if (msgClicked) {\n      await evalSleep(2500);\n      await evalType(page, MSG_PLACEHOLDER);\n      await evalPressEnter(page);\n      await evalSleep(2500);\n      return { dmSent: true, deliveryMsg: \"DM IG enviado (profile btn)\" };\n    }\n  } catch(e2) {}\n  return { dmSent: false, deliveryMsg: \"Nao conseguiu abrir conversa IG (tentativa ATTEMPT_PLACEHOLDER)\" };\n}";
+  if (platform === 'tiktok') return "export default async function({ page }) {\n\nvar evalFill = async function(pg, sel, val) {\n  return await pg.evaluate(function(a) {\n    var el = document.querySelector(a.sel);\n    if (!el) return false;\n    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, a.val); else el.value = a.val;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      el.dispatchEvent(new Event('change', { bubbles: true }));\n    } else if (el.contentEditable === 'true') {\n      el.focus(); document.execCommand('selectAll', false, null);\n      document.execCommand('insertText', false, a.val);\n    }\n    return true;\n  }, { sel: sel, val: val });\n};\nvar evalClick = async function(pg, sel) {\n  return await pg.evaluate(function(s) {\n    var els = document.querySelectorAll(s);\n    if (els.length > 0) { els[0].click(); return true; } return false;\n  }, sel);\n};\nvar evalClickText = async function(pg, text) {\n  return await pg.evaluate(function(t) {\n    var els = document.querySelectorAll('div[role=\"button\"], button, a, span');\n    for (var i = 0; i < els.length; i++) {\n      if (els[i].textContent.trim().toLowerCase().indexOf(t.toLowerCase()) >= 0) {\n        els[i].click(); return true;\n      }\n    }\n    return false;\n  }, text);\n};\nvar evalExists = async function(pg, sel) {\n  return await pg.evaluate(function(s) { return !!document.querySelector(s); }, sel);\n};\nvar evalType = async function(pg, txt) {\n  return await pg.evaluate(function(t) {\n    var el = document.activeElement;\n    if (el && el.contentEditable === 'true') {\n      el.focus(); document.execCommand('insertText', false, t); return true;\n    }\n    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, t); else el.value = t;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      return true;\n    }\n    return false;\n  }, txt);\n};\nvar evalPressEnter = async function(pg) {\n  await pg.evaluate(function() {\n    var el = document.activeElement;\n    if (el) {\n      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n    }\n  });\n};\nvar evalSleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };\nvar evalGetCookies = async function(pg) {\n  var bc = pg.browserContext();\n  return await bc.cookies();\n};\nvar evalSetCookies = async function(pg, cookies) {\n  var bc = pg.browserContext();\n  for (var i = 0; i < cookies.length; i++) { await bc.setCookie(cookies[i]); }\n};\nvar evalExtractCookie = function(cookies, name) {\n  for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === name) return cookies[i].value; }\n  return '';\n};\n\nawait page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, \"userAgent\", { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); });\n\n  if (CK_PLACEHOLDER) {\n    try { var parsed = JSON.parse(CK_PLACEHOLDER); await evalSetCookies(page, parsed); } catch(e) {}\n  }\n  await page.goto(\"https://www.tiktok.com/@\" + TARGET_PLACEHOLDER, { timeout: 15000 });\n  await evalSleep(3000);\n  var msgClicked = await evalClick(page, 'div[data-e2e=\"profile-message-button\"]');\n  if (msgClicked) {\n    await evalSleep(2500);\n    await evalClick(page, 'div[contenteditable=\"true\"]');\n    await evalSleep(500);\n    await evalType(page, MSG_PLACEHOLDER);\n    await evalPressEnter(page);\n    await evalSleep(2500);\n    return { dmSent: true, deliveryMsg: \"DM TikTok enviado (profile btn)\" };\n  }\n  return { dmSent: false, deliveryMsg: \"Erro DM TikTok (tentativa ATTEMPT_PLACEHOLDER)\" };\n}";
+  if (platform === 'facebook') return "export default async function({ page }) {\n\nvar evalFill = async function(pg, sel, val) {\n  return await pg.evaluate(function(a) {\n    var el = document.querySelector(a.sel);\n    if (!el) return false;\n    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, a.val); else el.value = a.val;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      el.dispatchEvent(new Event('change', { bubbles: true }));\n    } else if (el.contentEditable === 'true') {\n      el.focus(); document.execCommand('selectAll', false, null);\n      document.execCommand('insertText', false, a.val);\n    }\n    return true;\n  }, { sel: sel, val: val });\n};\nvar evalClick = async function(pg, sel) {\n  return await pg.evaluate(function(s) {\n    var els = document.querySelectorAll(s);\n    if (els.length > 0) { els[0].click(); return true; } return false;\n  }, sel);\n};\nvar evalClickText = async function(pg, text) {\n  return await pg.evaluate(function(t) {\n    var els = document.querySelectorAll('div[role=\"button\"], button, a, span');\n    for (var i = 0; i < els.length; i++) {\n      if (els[i].textContent.trim().toLowerCase().indexOf(t.toLowerCase()) >= 0) {\n        els[i].click(); return true;\n      }\n    }\n    return false;\n  }, text);\n};\nvar evalExists = async function(pg, sel) {\n  return await pg.evaluate(function(s) { return !!document.querySelector(s); }, sel);\n};\nvar evalType = async function(pg, txt) {\n  return await pg.evaluate(function(t) {\n    var el = document.activeElement;\n    if (el && el.contentEditable === 'true') {\n      el.focus(); document.execCommand('insertText', false, t); return true;\n    }\n    if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) {\n      var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;\n      var s = Object.getOwnPropertyDescriptor(proto, 'value');\n      if (s && s.set) s.set.call(el, t); else el.value = t;\n      el.dispatchEvent(new Event('input', { bubbles: true }));\n      return true;\n    }\n    return false;\n  }, txt);\n};\nvar evalPressEnter = async function(pg) {\n  await pg.evaluate(function() {\n    var el = document.activeElement;\n    if (el) {\n      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keypress', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n      el.dispatchEvent(new KeyboardEvent('keyup', { key: 'Enter', code: 'Enter', keyCode: 13, bubbles: true }));\n    }\n  });\n};\nvar evalSleep = function(ms) { return new Promise(function(r) { setTimeout(r, ms); }); };\nvar evalGetCookies = async function(pg) {\n  var bc = pg.browserContext();\n  return await bc.cookies();\n};\nvar evalSetCookies = async function(pg, cookies) {\n  var bc = pg.browserContext();\n  for (var i = 0; i < cookies.length; i++) { await bc.setCookie(cookies[i]); }\n};\nvar evalExtractCookie = function(cookies, name) {\n  for (var i = 0; i < cookies.length; i++) { if (cookies[i].name === name) return cookies[i].value; }\n  return '';\n};\n\nawait page.evaluateOnNewDocument(() => { Object.defineProperty(navigator, \"userAgent\", { get: () => 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.15.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1' }); });\n\n  if (CK_PLACEHOLDER) {\n    try { var parsed = JSON.parse(CK_PLACEHOLDER); await evalSetCookies(page, parsed); } catch(e) {}\n  }\n  await page.goto(\"https://www.facebook.com/messages/t/\" + TARGET_PLACEHOLDER, { timeout: 15000 });\n  await evalSleep(3500);\n  var msgArea = await evalClick(page, 'div[aria-label=\"Message\"], div[contenteditable=\"true\"][role=\"textbox\"]');\n  if (msgArea) {\n    await evalType(page, MSG_PLACEHOLDER);\n    await evalPressEnter(page);\n    await evalSleep(2500);\n    return { dmSent: true, deliveryMsg: \"DM Facebook enviado (direct URL)\" };\n  }\n  return { dmSent: false, deliveryMsg: \"Erro DM Facebook (tentativa ATTEMPT_PLACEHOLDER)\" };\n}";
   return '';
 }
 
@@ -324,9 +123,9 @@ async function automateLogin(platform: string, username: string, password: strin
   try {
     var code = makeLoginCode(platform, username, password);
     if (!code) return { success: false, error: 'Plataforma nao suportada: ' + platform };
-    return await runOnBrowserless(code, 45000);
+    return await runOnBrowserless(code, 50000);
   } catch (e: any) {
-    return { success: false, error: 'Erro Browserless HTTP: ' + (e.message || 'timeout') };
+    return { success: false, error: 'Erro Browserless: ' + (e.message || 'timeout') };
   }
 }
 
@@ -335,9 +134,9 @@ async function sendDMViaBrowserless(platform: string, targetUsername: string, me
   try {
     var code = makeDMCode(platform, targetUsername, message, cookiesJson, attempt);
     if (!code) return { dmSent: false, deliveryMsg: 'Plataforma nao suportada' };
-    return await runOnBrowserless(code, 45000);
+    return await runOnBrowserless(code, 50000);
   } catch (e: any) {
-    return { dmSent: false, deliveryMsg: 'Erro Browserless HTTP (tentativa ' + attempt + '): ' + (e.message || 'timeout').substring(0, 80) };
+    return { dmSent: false, deliveryMsg: 'Erro Browserless (tentativa ' + attempt + '): ' + (e.message || 'timeout').substring(0, 80) };
   }
 }
 
@@ -442,5 +241,5 @@ export async function POST(request: any) {
 /* ===== GET ===== */
 export async function GET() {
   var blOnline = await checkBrowserless();
-  return NextResponse.json({ maxPerDay: MAX_PER_DAY, remainingToday: MAX_PER_DAY, browserless: { online: blOnline, mode: 'http-function-esm-export-default' } });
+  return NextResponse.json({ maxPerDay: MAX_PER_DAY, remainingToday: MAX_PER_DAY, browserless: { online: blOnline, mode: 'http-function-eval-only' } });
 }

@@ -310,23 +310,7 @@ function getTTQueries(): string[] {
     'angola tiktok lifestyle site:tiktok.com',
     'angola tiktok musica site:tiktok.com',
     'angola tiktok moda site:tiktok.com',
-    'angola tiktok fitness site:tiktok.com',
-    'angola tiktok comedia site:tiktok.com',
-    'benguela tiktok site:tiktok.com',
-    'angola content creator tiktok site:tiktok.com',
-    'angola tiktok dance site:tiktok.com',
-    'cabinda tiktok site:tiktok.com',
-    'angola tiktok comedian site:tiktok.com',
-    'luanda tiktok moda site:tiktok.com',
-    'angola tiktoker site:tiktok.com',
-    'huambo tiktok site:tiktok.com',
-    'lobito tiktok site:tiktok.com',
-    'angola tiktok food site:tiktok.com',
-    'angola tiktok vlog site:tiktok.com',
-    'luanda tiktoker influencia site:tiktok.com',
-    'angola tiktok entertainment site:tiktok.com',
-    'namibe angola tiktok site:tiktok.com',
-    'malanje tiktok site:tiktok.com'
+    'angola tiktok fitness site:tiktok.com'
   ];
   for (var i = q.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
@@ -360,7 +344,12 @@ function getIGQueries(): string[] {
     'angola ig influencer site:instagram.com',
     'luanda influenciador instagram site:instagram.com',
     'angola instagram vlog site:instagram.com',
-    'angola instagram comedy site:instagram.com'
+    'angola instagram comedy site:instagram.com',
+    'angola instagram business site:instagram.com',
+    'angola instagram digital creator site:instagram.com',
+    'luanda instagram photographer site:instagram.com',
+    'angola instagram model site:instagram.com',
+    'angola instagram artist site:instagram.com'
   ];
   for (var i = q.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
@@ -390,7 +379,12 @@ function getFBQueries(): string[] {
     'site:facebook.com "cabinda" page',
     'site:facebook.com "angola" "photography"',
     'site:facebook.com "huambo" angola',
-    'site:facebook.com "angola" "entertainment"'
+    'site:facebook.com "angola" "entertainment"',
+    'site:facebook.com "angola" "business"',
+    'site:facebook.com "luanda" "model"',
+    'site:facebook.com "angola" "artist"',
+    'site:facebook.com "angola" "digital marketing"',
+    'site:facebook.com "angola" "comedia"'
   ];
   for (var i = q.length - 1; i > 0; i--) {
     var j = Math.floor(Math.random() * (i + 1));
@@ -413,7 +407,7 @@ export async function POST(request: any) {
   var platform = body.platform || 'all';
   var minF = body.minFollowers || 500;
   var maxF = body.maxFollowers || 100000;
-  var target = body.targetCount || 50;
+  var target = Math.max(body.targetCount || 50, 50);
   var loc = (body.location || 'Angola').trim();
   var logs: string[] = [];
 
@@ -429,35 +423,14 @@ export async function POST(request: any) {
 
   // =============================================
   // PHASE 1: DISCOVERY — DDG para TODAS as plataformas
-  // TT: 0-10s, IG: 10-20s, FB: 20-28s
+  // PRIORIDADE: IG primeiro (0-22s), FB segundo (22-35s), TT ultimo (35-42s)
   // =============================================
-
-  if (doTT) {
-    var ttQ = getTTQueries();
-    var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
-    for (var qi = 0; qi < ttQ.length && timeLeft(t0, 10000); qi++) {
-      var ttUsers = await searchDDG(ttQ[qi], ttUrlRe, 9000);
-      for (var ti = 0; ti < ttUsers.length; ti++) {
-        var un = ttUsers[ti];
-        if (isValidTT(un) && !ttSeen.has(un.toLowerCase())) {
-          ttSeen.add(un.toLowerCase());
-          ttRaw.push({
-            platform: 'tiktok', username: un, fullName: '',
-            followers: 0, following: 0, postsCount: 0, bio: '',
-            profileUrl: 'https://tiktok.com/@' + un, avatarUrl: '',
-            isVerified: false, category: '', _angolaQuery: true
-          });
-        }
-      }
-    }
-    logs.push('TT DDG: ' + ttRaw.length + ' users');
-  }
 
   if (doIG) {
     var igQ = getIGQueries();
     var igUrlRe = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'])/g;
-    for (var iqi = 0; iqi < igQ.length && timeLeft(t0, 20000); iqi++) {
-      var igUsers = await searchDDG(igQ[iqi], igUrlRe, 9000);
+    for (var iqi = 0; iqi < igQ.length && timeLeft(t0, 30000); iqi++) {
+      var igUsers = await searchDDG(igQ[iqi], igUrlRe, 8000);
       for (var ii = 0; ii < igUsers.length; ii++) {
         var igUn = igUsers[ii];
         if (isValidIG(igUn) && !igSeen.has(igUn.toLowerCase())) {
@@ -477,8 +450,8 @@ export async function POST(request: any) {
   if (doFB) {
     var fbQ = getFBQueries();
     var fbUrlRe = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})/g;
-    for (var fqi = 0; fqi < fbQ.length && timeLeft(t0, 28000); fqi++) {
-      var fbPages = await searchDDG(fbQ[fqi], fbUrlRe, 9000);
+    for (var fqi = 0; fqi < fbQ.length && timeLeft(t0, 45000); fqi++) {
+      var fbPages = await searchDDG(fbQ[fqi], fbUrlRe, 8000);
       for (var fpi = 0; fpi < fbPages.length; fpi++) {
         var fp = fbPages[fpi];
         if (isValidFB(fp) && !fbSeen.has(fp.toLowerCase())) {
@@ -493,6 +466,27 @@ export async function POST(request: any) {
       }
     }
     logs.push('FB DDG: ' + fbRaw.length + ' pages');
+  }
+
+  if (doTT) {
+    var ttQ = getTTQueries();
+    var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]+)/g;
+    for (var qi = 0; qi < ttQ.length && timeLeft(t0, 55000); qi++) {
+      var ttUsers = await searchDDG(ttQ[qi], ttUrlRe, 8000);
+      for (var ti = 0; ti < ttUsers.length; ti++) {
+        var ttUn = ttUsers[ti];
+        if (isValidTT(ttUn) && !ttSeen.has(ttUn.toLowerCase())) {
+          ttSeen.add(ttUn.toLowerCase());
+          ttRaw.push({
+            platform: 'tiktok', username: ttUn, fullName: '',
+            followers: 0, following: 0, postsCount: 0, bio: '',
+            profileUrl: 'https://tiktok.com/@' + ttUn, avatarUrl: '',
+            isVerified: false, category: '', _angolaQuery: true
+          });
+        }
+      }
+    }
+    logs.push('TT DDG: ' + ttRaw.length + ' users');
   }
 
   logs.push('After discovery: TT=' + ttRaw.length + ' IG=' + igRaw.length + ' FB=' + fbRaw.length);
@@ -638,11 +632,11 @@ export async function POST(request: any) {
   logs.push('Buckets - Angola:' + buckets[0].length + ' Lusofono:' + buckets[1].length + ' Provavel:' + buckets[2].length);
 
   // Preencher do bucket 0 (Angola), depois 1 (Lusofono), depois 2 (Provavel)
-  // DENTRO de cada bucket: IG primeiro, TT segundo, FB terceiro (prioridade)
-  var platOrder: Record<string, number> = { instagram: 0, tiktok: 1, facebook: 2 };
+  // DENTRO de cada bucket: IG primeiro, FB segundo, TT terceiro (IG/FB prioridade)
+  var platOrder: Record<string, number> = { instagram: 0, facebook: 1, tiktok: 2 };
   for (var b = 0; b < 3; b++) {
     if (qualified.length >= target) break;
-    // Sort bucket by platform priority (IG > TT > FB)
+    // Sort bucket by platform priority (IG > FB > TT)
     buckets[b].sort(function(a: any, b2: any) {
       return (platOrder[a.platform] || 9) - (platOrder[b2.platform] || 9);
     });
@@ -653,8 +647,9 @@ export async function POST(request: any) {
 
   // Se ainda nao chega ao target, aceitar perfis nao enriquecidos (0 seguidores = "—")
   // Mas perfis enriquecidos com < minF continuam bloqueados
+  // PRIORIDADE no backfill: IG > FB > TT
   if (qualified.length < target) {
-    var allRaw = (doIG ? igRaw : []).concat(doTT ? ttRaw : []).concat(doFB ? fbRaw : []);
+    var allRaw = (doIG ? igRaw : []).concat(doFB ? fbRaw : []).concat(doTT ? ttRaw : []);
     var seenIds = new Set(qualified.map(function(p) { return p.username; }));
     for (var ri = 0; ri < allRaw.length && qualified.length < target; ri++) {
       var rp = allRaw[ri];
