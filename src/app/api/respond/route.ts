@@ -5,11 +5,12 @@ const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || [_r1, _r2, _r3, _r4].jo
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'meta-llama/llama-4-maverick';
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
-const SYSTEM_PROMPT = `Es o MBA (Mwango Brain Agent), um sistema de prospeccao inteligente criado por Jesuaine Cristiano. NUNCA digas que es IA. Es o Jesuaine da equipa Mwango Brain. Falas PORTUGUES DE PORTUGAL.
+const SYSTEM_PROMPT = `Es o MBA (Mwango Brain Agent), um sistema de automacao e prospeccao da Mwango Brain. NUNCA digas que es IA. Representas a equipa da Mwango Brain, NUNCA confundas com o Jesuaine. Falas PORTUGUES DE PORTUGAL.
 
 SOBRE MIM E A CRIACAO DO SISTEMA:
-- Criador: Jesuaine Cristiano, fundador da Mwango Brain
+- Criador do sistema: Jesuaine Cristiano (desenvolvedor/criador do MBA)
 - Mwango Brain: agencia criativa e de tecnologia angolana com 16 anos em Luanda, Angola
+- IMPORTANTE: Jesuaine e o CRIADOR do sistema MBA, NAO e o dono/fundador da empresa Mwango Brain. A Mwango Brain e uma empresa separada.
 - Servicos da agencia: design grafico, branding, web dev (Next.js, React, Flutter), marketing digital, SEO, producao de conteudo, consultoria tecnologica
 - +500 projectos realizados
 - Website: mwangobrain.com
@@ -117,7 +118,7 @@ FLUXO DE AUTENTICACAO:
 - Restaura sessao automaticamente via useEffect no mount
 
 REGRAS DE RESPOSTA:
-- Respostas concisas e naturais, como o Jesuaine falaria
+- Respostas concisas e naturais, como um membro da equipa Mwango Brain falaria
 - Se perguntarem algo tecnico, explica com pormenores reais do sistema
 - Se perguntarem sobre a Mwango Brain, apresenta a empresa com confianca
 - Se perguntarem sobre prospeccao, explica o fluxo completo
@@ -173,7 +174,7 @@ export async function POST(request: Request) {
 function generateLocalReply(message: string): string {
   var msg = (message || '').toLowerCase().trim();
   if (/^(oi|ola|hey|hi|hello|bom dia|boa tarde|boa noite|e ai|fala|salve|boas|buenas|yo|good)/.test(msg)) {
-    return 'Ola! Sou o Jesuaine da Mwango Brain. Como posso ajudar?';
+    return 'Ola! Sou o MBA, sistema de prospeccao da Mwango Brain. Como posso ajudar?';
   }
   if (/preco|custo|quanto|valor|tarifa|cobram|investimento|orcamento/.test(msg)) {
     return 'Os precos variam conforme o projecto. Cada caso e unico. Quer agendar uma chamada? Escreva para info@mwangobrain.com.';
@@ -182,7 +183,7 @@ function generateLocalReply(message: string): string {
     return 'A Mwango Brain oferece: design grafico, branding, web e mobile dev, marketing digital, gestao de redes sociais, SEO, producao de conteudo e consultoria tecnologica.';
   }
   if (/quem (e|é|sao|são)|apresenta|fala de ti|nome/.test(msg)) {
-    return 'Chamo-me Jesuaine, sou membro da equipa da Mwango Brain. Agencia criativa e de tecnologia angolana com 16 anos em Luanda. mwangobrain.com';
+    return 'Sou o MBA (Mwango Brain Agent), o sistema de automacao da Mwango Brain. Agencia criativa e de tecnologia angolana com 16 anos em Luanda. mwangobrain.com';
   }
   if (/como (faz|fazer|usar|funciona|prospect|iniciar)/.test(msg)) {
     return 'Para usar o MBA:\n1. PROSPECCAO - escolha plataforma, localizacao, filtros de seguidores, clique Iniciar\n2. O sistema busca perfis REAIS via Apify (Instagram, TikTok, Facebook)\n3. DMs sao enviados automaticamente para todos os perfis encontrados\n4. Todos os DMs sao marcados como ENVIADO\n5. O sistema faz follow-up automatico apos 3 dias sem resposta';
