@@ -568,6 +568,19 @@ function MessagesTab() {
   const [autoDone, setAutoDone] = useState(false);
   const autoStopRef = useRef(false);
 
+  // Listen for cookie capture event (from bookmarklet redirect)
+  useEffect(function() {
+    var handler = function(e: any) {
+      if (e.detail) {
+        if (e.detail.platform === 'instagram') { setIgOk(true); setIgSession(storeGet('mba_ig_session', '')); setIgCsrf(storeGet('mba_ig_csrf', '')); setCookieMsg('IG: Sessao capturada automaticamente!'); }
+        if (e.detail.platform === 'facebook') { setFbOk(true); setFbCookie(storeGet('mba_fb_cookie', '')); setFbDtsg(storeGet('mba_fb_dtsg', '')); setCookieMsg('FB: Sessao capturada automaticamente!'); }
+        setTimeout(function() { setCookieMsg(''); }, 4000);
+      }
+    };
+    window.addEventListener('mba-cookie-captured', handler);
+    return function() { window.removeEventListener('mba-cookie-captured', handler); };
+  }, []);
+
   // Listen for auto-trigger from ProspectingTab
   useEffect(function() {
     var handler = function() {
@@ -891,6 +904,30 @@ function MessagesTab() {
         {cookieMsg && <div style={{ marginTop:8, fontSize:9, color: cookieMsg.indexOf('Erro') >= 0 || cookieMsg.indexOf('expirad') >= 0 || cookieMsg.indexOf('Invalid') >= 0 ? '#ff4444' : P.green }}>{cookieMsg}</div>}
       </div>
 
+      {/* BOOKMARKLETS — 1 toque no telefone */}
+      <div style={{ padding:'12px 14px', borderRadius:8, border:'1px solid rgba(0,192,99,0.3)', background:'rgba(0,192,99,0.04)', marginBottom:14 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+          <span style={{ fontSize:11, fontWeight:700, color:P.text }}>📱 Captura automatica (telemovel)</span>
+          <span style={{ fontSize:9, color:P.green, padding:'2px 6px', borderRadius:3, background:'rgba(0,192,99,0.1)' }}>1 TOQUE</span>
+        </div>
+        <div style={{ fontSize:9, color:P.textSec, marginBottom:10, lineHeight:'14px' }}>
+          1. Abre o Instagram/Facebook no teu telefone<br/>
+          2. Carrega no botao abaixo (guarda como bookmark primeiro)<br/>
+          3. Voltas automaticamente ao MBA com a sessao capturada
+        </div>
+        <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+          <a href="#" onClick={function(e) { e.preventDefault(); var mbaUrl = window.location.origin; var code = "javascript:void(function(){var c=document.cookie,s=c.match(/sessionid=([^;]+)/),k=c.match(/csrftoken=([^;]+)/);if(s&&k)window.location.href='" + mbaUrl + "/?capture=ig&sessionid='+s[1]+'&csrftoken='+k[1];else alert('Faz login no Instagram primeiro.');})()"; navigator.clipboard.writeText(code); setCookieMsg('IG: Codigo copiado! Cria um bookmark no instagram.com com este codigo'); setTimeout(function() { setCookieMsg(''); }, 5000); }} style={{ padding:'8px 14px', borderRadius:6, border:'1px solid #3B82F6', background:'rgba(59,130,246,0.1)', color:'#3B82F6', fontSize:10, fontWeight:700, cursor:'pointer', textDecoration:'none' }}>
+            📸 Capturar IG
+          </a>
+          <a href="#" onClick={function(e) { e.preventDefault(); var mbaUrl = window.location.origin; var code = "javascript:void(function(){var d=document.querySelector('input[name=fb_dtsg]');if(d)window.location.href='" + mbaUrl + "/?capture=fb&cookie='+encodeURIComponent(document.cookie)+'&fb_dtsg='+d.value;else alert('Faz login no Facebook primeiro.');})()"; navigator.clipboard.writeText(code); setCookieMsg('FB: Codigo copiado! Cria um bookmark no facebook.com com este codigo'); setTimeout(function() { setCookieMsg(''); }, 5000); }} style={{ padding:'8px 14px', borderRadius:6, border:'1px solid #1877F2', background:'rgba(24,119,242,0.1)', color:'#1877F2', fontSize:10, fontWeight:700, cursor:'pointer', textDecoration:'none' }}>
+            👤 Capturar FB
+          </a>
+        </div>
+        <div style={{ marginTop:8, fontSize:8, color:P.textDim, lineHeight:'12px' }}>
+          <b>Como usar no telemovel:</b> Clica no botao acima &gt; o codigo e copiado &gt; Abre instagram.com &gt; Adiciona aos favoritos/bookmarks &gt; Edita o URL do bookmark e cola o codigo &gt; Vai a instagram.com (logado) &gt; Clica no bookmark &gt; Done!
+        </div>
+      </div>
+
       {/* AUTO-SEND PANEL */}
       <Panel style={{ marginBottom:14 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
@@ -1037,6 +1074,33 @@ export default function MBAApp() {
     var handler = function(e: any) { if (e.detail) setActiveTab(e.detail); };
     window.addEventListener('mba-switch-tab', handler);
     return function() { window.removeEventListener('mba-switch-tab', handler); };
+  }, []);
+
+  // Auto-capture cookies from bookmarklet (URL params)
+  useEffect(function() {
+    if (typeof window === 'undefined') return;
+    var params = new URLSearchParams(window.location.search);
+    var captureType = params.get('capture');
+    if (captureType === 'ig') {
+      var sid = params.get('sessionid') || '';
+      var csrf = params.get('csrftoken') || '';
+      if (sid && csrf) {
+        storeSet('mba_ig_session', sid);
+        storeSet('mba_ig_csrf', csrf);
+        window.history.replaceState({}, '', window.location.pathname);
+        window.dispatchEvent(new CustomEvent('mba-cookie-captured', { detail: { platform: 'instagram', ok: true } }));
+      }
+    }
+    if (captureType === 'fb') {
+      var cookie = params.get('cookie') || '';
+      var dtsg = params.get('fb_dtsg') || '';
+      if (cookie && dtsg) {
+        storeSet('mba_fb_cookie', cookie);
+        storeSet('mba_fb_dtsg', dtsg);
+        window.history.replaceState({}, '', window.location.pathname);
+        window.dispatchEvent(new CustomEvent('mba-cookie-captured', { detail: { platform: 'facebook', ok: true } }));
+      }
+    }
   }, []);
 
   if (!isAuthenticated) return <LoginScreen />;
