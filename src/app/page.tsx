@@ -552,23 +552,21 @@ function MessagesTab() {
   const [selProfile, setSelProfile] = useState('');
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
-  const [blStatus, setBlStatus] = useState<any>({ online: false, loading: true });
-  const [diagResult, setDiagResult] = useState<any>(null);
-  const [diagRunning, setDiagRunning] = useState(false);
 
-  // Auto-send state
-  const [igCookieSession, setIgCookieSession] = useState('');
-  const [igCookieCsrf, setIgCookieCsrf] = useState('');
-  const [igCookieLoading, setIgCookieLoading] = useState(false);
-  const [igCookieMsg, setIgCookieMsg] = useState('');
+  // Cookies state
+  const [igSession, setIgSession] = useState(function() { return storeGet('mba_ig_session', ''); });
+  const [igCsrf, setIgCsrf] = useState(function() { return storeGet('mba_ig_csrf', ''); });
+  const [fbCookie, setFbCookie] = useState(function() { return storeGet('mba_fb_cookie', ''); });
+  const [fbDtsg, setFbDtsg] = useState(function() { return storeGet('mba_fb_dtsg', ''); });
+  const [cookieLoading, setCookieLoading] = useState(false);
+  const [cookieMsg, setCookieMsg] = useState('');
+  const [igOk, setIgOk] = useState(!!storeGet('mba_ig_session'));
+  const [fbOk, setFbOk] = useState(!!storeGet('mba_fb_cookie'));
   const [autoSending, setAutoSending] = useState(false);
   const [autoProgress, setAutoProgress] = useState<any>(null);
   const [autoLog, setAutoLog] = useState<any[]>([]);
   const [autoDone, setAutoDone] = useState(false);
   const autoStopRef = useRef(false);
-
-  // Login status per platform
-  const [loginStatus, setLoginStatus] = useState<Record<string,any>>({});
 
   // Listen for auto-trigger from ProspectingTab
   useEffect(function() {
@@ -583,15 +581,12 @@ function MessagesTab() {
     return function() { window.removeEventListener('mba-auto-trigger', handler); clearInterval(interval); };
   }, []);
 
-  useEffect(function() {
-    fetch('/api/send-message', { headers:{'x-mba-session':'active'} }).then(function(r) { return r.json().catch(function() { return null; }); }).then(function(data) {
-      setBlStatus({ online: !!data && data.browserless && data.browserless.online, loading: false });
-    }).catch(function() { setBlStatus({ online: false, loading: false }); });
-    // Restore login status
-    try { var saved = storeGet('mba_login_status', ''); if (saved) setLoginStatus(JSON.parse(saved)); } catch(e) {}
-  }, []);
-
-  const saveLoginStatus = function(st: any) { setLoginStatus(st); storeSet('mba_login_status', JSON.stringify(st)); };
+  // Helper: get cookies for a platform
+  const getPlatformCookies = function(platform: string): any {
+    if (platform === 'instagram' && igSession && igCsrf) return { igSessionid: igSession, igCsrf: igCsrf };
+    if (platform === 'facebook' && fbCookie && fbDtsg) return { fbCookie: fbCookie, fbDtsg: fbDtsg };
+    return null;
+  };
 
   const loadMessages = function() {
     var allProfiles = getProfiles(); var msgs: any[] = [];
@@ -606,7 +601,10 @@ function MessagesTab() {
     var saved = getProfiles(); var targetProfile = null;
     for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
     if (!targetProfile) { setSending(false); return; }
-    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 }) }).catch(function() { return null; });
+    var sendBody: any = { username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 };
+    var cookies = getPlatformCookies(targetProfile.platform);
+    if (cookies) Object.assign(sendBody, cookies);
+    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(sendBody) }).catch(function() { return null; });
     var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
     if (!targetProfile.messages) targetProfile.messages = [];
     var dmOk = !!(sd && sd.dmSent);
@@ -622,24 +620,14 @@ function MessagesTab() {
   const autoSendRef = useRef<() => Promise<void>>(async function(){});
 
   const doLoginForPlatform = async function(pf: string, username: string, password: string): Promise<boolean> {
-    if ((loginStatus[pf] || {}).loggedIn) return true;
-    setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' A fazer login no ' + PLAT_NAMES[pf] + '...' }]); });
-    setAutoProgress({ step: 'login', text: 'Login ' + PLAT_NAMES[pf] + '...', platform: pf });
-    try {
-      var res = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'login', platform: pf }) });
-      var data = await res.json().catch(function() { return { success:false, error:'Erro de conexao' }; });
-      if (data.success) {
-        var newSt = { ...loginStatus }; newSt[pf] = { loggedIn: true, label: data.message || 'Logado' }; saveLoginStatus(newSt);
-        setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: PLAT_ICONS[pf] + ' Login ' + PLAT_NAMES[pf] + ' feito!' }]); });
-        return true;
-      } else {
-        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' Login ' + PLAT_NAMES[pf] + ' falhou: ' + (data.error || 'erro') }]); });
-        return false;
-      }
-    } catch(e) {
-      setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' Erro de conexao: ' + ((e as any).message || '') }]); });
-      return false;
+    // Com cookies, "login" = verificar se tem cookies
+    var hasCookies = getPlatformCookies(pf);
+    if (hasCookies) {
+      setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: PLAT_ICONS[pf] + ' ' + PLAT_NAMES[pf] + ': cookies prontas' }]); });
+      return true;
     }
+    setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' ' + PLAT_NAMES[pf] + ': sem cookies configuradas' }]); });
+    return false;
   };
 
   const sendDMWithRetry = async function(username: string, message: string, platform: string, sentCount: number): Promise<{ ok: boolean; msg: string }> {
@@ -649,14 +637,14 @@ function MessagesTab() {
     for (var attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       if (autoStopRef.current) return { ok: false, msg: 'Parado pelo utilizador' };
 
-      // Every 3rd attempt, force a fresh re-login
+      // Every 3rd attempt, re-check cookies
       if (attempt > 1 && attempt % 3 === 1) {
-        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Re-login preventivo (tentativa ' + attempt + ')...' }]); });
-        var prevSt = JSON.parse(JSON.stringify(loginStatus)); prevSt[platform] = { loggedIn: false }; setLoginStatus(prevSt);
-        await doLoginForPlatform(platform, '', '');
+        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Re-verificando cookies (tentativa ' + attempt + ')...' }]); });
       }
 
       var body: any = { username: username, message: message, platform: platform, sentToday: sentCount };
+      var dmc = getPlatformCookies(platform);
+      if (dmc) Object.assign(body, dmc);
 
       var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(body) }).catch(function() { return null; });
       var sd = sr ? await sr.json().catch(function() { return null; }) : null;
@@ -672,13 +660,10 @@ function MessagesTab() {
         setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '@' + username + ' tentativa ' + attempt + '/' + MAX_RETRIES + ' falhou (' + errMsg.substring(0, 60) + '). A tentar novamente...' }]); });
         await new Promise(function(r) { setTimeout(r, RETRY_DELAY); });
 
-        // If session expired, try re-login
-        if (errMsg.indexOf('Nao esta logado') >= 0 || errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('needLogin') >= 0 || errMsg.indexOf('Login falhou') >= 0) {
-          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Sessao expirou. A fazer re-login...' }]); });
-          var reLoggedIn = await doLoginForPlatform(platform, '', '');
-          if (!reLoggedIn) {
-            return { ok: false, msg: '@' + username + ' Re-login falhou. Impossivel enviar.' };
-          }
+        // If cookies expired, stop trying this platform
+        if (errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('Cookies expiradas') >= 0) {
+          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Cookies expiradas. Para e cola novas cookies no painel.' }]); });
+          return { ok: false, msg: '@' + username + ' Cookies expiradas. Parando ' + PLAT_NAMES[platform] + '.' };
         }
         continue;
       }
@@ -694,16 +679,13 @@ function MessagesTab() {
     var cfg = getAutoConfig();
     if (!cfg.enabled) { setAutoLog([{ ok: false, msg: 'Automacao desactivada. Activa no Dashboard.' }]); return; }
 
-    // Login to all active platforms first
+    // Check which platforms have cookies
     var loggedInPlats: string[] = [];
     for (var i = 0; i < ALL_PLATFORMS.length; i++) {
       var pf = ALL_PLATFORMS[i];
-      var pc = cfg.platforms && cfg.platforms[pf];
-      if (pc && pc.enabled && pc.username && (pc.password || pf === 'tiktok')) {
-        if (autoStopRef.current) break;
-        var ok = await doLoginForPlatform(pf, pc.username, pc.password || '');
-        if (ok) loggedInPlats.push(pf);
-      }
+      if (autoStopRef.current) break;
+      var ok = await doLoginForPlatform(pf, '', '');
+      if (ok) loggedInPlats.push(pf);
     }
     if (loggedInPlats.length === 0) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Nenhuma plataforma com login bem sucedido.' }]); }); setAutoSending(false); return; }
 
@@ -772,16 +754,11 @@ function MessagesTab() {
       setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '--- SEGUNDA PASSAGEM: ' + failedProfiles.length + ' perfis falhados, a tentar novamente ---' }]); });
       await new Promise(function(r) { setTimeout(r, 3000); }); // Pause before second pass
 
-      // Re-login to all platforms for fresh sessions
+      // Re-check cookies for all platforms
       for (var ri = 0; ri < loggedInPlats.length; ri++) {
         if (autoStopRef.current) break;
         var rpf = loggedInPlats[ri];
-        var rpc = cfg.platforms && cfg.platforms[rpf];
-        if (rpc && rpc.username && (rpc.password || rpf === 'tiktok')) {
-          var resetSt = JSON.parse(JSON.stringify(loginStatus)); resetSt[rpf] = { loggedIn: false };
-          setLoginStatus(resetSt);
-          await doLoginForPlatform(rpf, rpc.username, rpc.password || '');
-        }
+        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[rpf] + ' Re-verificando cookies...' }]); });
       }
 
       for (var fi = 0; fi < failedProfiles.length; fi++) {
@@ -834,64 +811,84 @@ function MessagesTab() {
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      {/* Browserless Status */}
-      <div style={{ padding:'10px 14px', borderRadius:8, border:'1px solid '+(blStatus.online ? 'rgba(0,192,99,0.3)' : 'rgba(255,68,68,0.3)'), background: blStatus.online ? 'rgba(0,192,99,0.06)' : 'rgba(255,68,68,0.06)', marginBottom:14 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:6 }}>
-          <div style={{ width:8, height:8, borderRadius:'50%', background: blStatus.loading ? '#888' : blStatus.online ? P.green : '#ff4444', flexShrink:0 }} />
-          <div style={{ fontSize:11, fontWeight:700, color: blStatus.online ? P.green : '#ff4444' }}>{blStatus.loading ? 'Verificando...' : blStatus.online ? 'Browserless Online - DMs activos' : 'Browserless Offline'}</div>
-          {!blStatus.loading && <button onClick={async function() { setDiagRunning(true); setDiagResult(null); try { var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'diagnostic' }) }); var d = await r.json().catch(function() { return { error: 'Resposta nao e JSON (HTML error page?)' }; }); setDiagResult(d); } catch(e) { setDiagResult({ error: (e as any).message }); } setDiagRunning(false); }} style={{ padding:'2px 8px', borderRadius:4, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:9, cursor:'pointer', marginLeft:'auto' }}>{diagRunning ? '...' : 'Diag'}</button>}
+      {/* Cookies Panel — GRATIS, sem browser */}
+      <div style={{ padding:'12px 14px', borderRadius:8, border:'1px solid '+P.border, background:P.surface, marginBottom:14 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:10 }}>
+          <span style={{ fontSize:11, fontWeight:700, color:P.text }}>🔑 Cookies para DMs (grátis)</span>
+          <span style={{ fontSize:9, color:P.green, padding:'2px 6px', borderRadius:3, background:'rgba(0,192,99,0.1)' }}>SEM BROWSER</span>
         </div>
-        <div style={{ display:'flex', gap:12, flexWrap:'wrap' }}>
-          {ALL_PLATFORMS.map(function(pf) {
-            var st = loginStatus[pf] || { loggedIn: false };
-            return <div key={pf} style={{ display:'flex', alignItems:'center', gap:5, fontSize:10, color: st.loggedIn ? P.green : P.textDim }}>
-              <span>{PLAT_ICONS[pf]} {PLAT_NAMES[pf]}:</span>
-              <span style={{ fontWeight:700, color: st.loggedIn ? P.green : '#ff4444' }}>{st.loggedIn ? '\u2713 Logado' : '\u2717 Nao logado'}</span>
-            </div>;
-          })}
-        </div>
-        {diagResult && <div style={{ marginTop:8, padding:8, borderRadius:6, background:P.surface2, fontSize:9, fontFamily:"'JetBrains Mono',monospace", lineHeight:'16px' }}>
-          <div style={{ fontWeight:700, marginBottom:4, color:P.textSec }}>Diagnostico:</div>
-          {diagResult.steps ? diagResult.steps.map(function(s: any, i: number) {
-            return <div key={i} style={{ color: s.ok ? P.green : '#ff4444' }}>{s.ok ? '\u2713' : '\u2717'} {s.step}: {s.ok ? 'OK' + (s.status ? ' (HTTP '+s.status+')' : '') + (s.url ? ' url='+s.url : '') + (s.hasForm !== undefined ? ' form='+s.hasForm : '') : (s.error || 'falhou')}</div>;
-          }) : <div style={{ color:'#ff4444' }}>Erro: {JSON.stringify(diagResult)}</div>}
-        </div>}
-      </div>
 
-      {/* IG Cookies Manual (bypass captcha) */}
-      <div style={{ padding:'10px 14px', borderRadius:8, border:'1px solid rgba(59,130,246,0.3)', background:'rgba(59,130,246,0.06)', marginBottom:14 }}>
-        <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
-          <span style={{ fontSize:13 }}>📸</span>
-          <span style={{ fontSize:11, fontWeight:700, color:'#3B82F6' }}>Colar Cookies IG (bypass captcha)</span>
+        {/* Status das plataformas */}
+        <div style={{ display:'flex', gap:12, marginBottom:12, flexWrap:'wrap' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:10 }}>
+            <span>📸 IG:</span>
+            <span style={{ fontWeight:700, color: igOk ? P.green : '#ff4444' }}>{igOk ? '✓ Pronto' : '✗ Sem cookies'}</span>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:10 }}>
+            <span>👤 FB:</span>
+            <span style={{ fontWeight:700, color: fbOk ? P.green : '#ff4444' }}>{fbOk ? '✓ Pronto' : '✗ Sem cookies'}</span>
+          </div>
+          <div style={{ display:'flex', alignItems:'center', gap:5, fontSize:10 }}>
+            <span>🎵 TT:</span>
+            <span style={{ fontWeight:700, color:'#ff4444' }}>✗ Precisa browser</span>
+          </div>
         </div>
-        <div style={{ fontSize:9, color:P.textSec, marginBottom:6, lineHeight:'14px' }}>
-          1. Abre instagram.com no teu browser &gt; F12 &gt; Application &gt; Cookies &gt; copia <b>sessionid</b> e <b>csrftoken</b>
+
+        {/* Instagram Cookies */}
+        <div style={{ marginBottom:10 }}>
+          <div style={{ fontSize:10, fontWeight:600, color:'#3B82F6', marginBottom:4 }}>📸 Instagram</div>
+          <div style={{ fontSize:9, color:P.textSec, marginBottom:4, lineHeight:'13px' }}>
+            Abre instagram.com &gt; F12 &gt; Application &gt; Cookies &gt; copia <b>sessionid</b> e <b>csrftoken</b>
+          </div>
+          <div style={{ display:'flex', gap:4, alignItems:'center', flexWrap:'wrap' }}>
+            <input placeholder="sessionid" value={igSession} onChange={function(e) { setIgSession(e.target.value); }} style={{ ...INP, flex:2, minWidth:100, fontSize:10, padding:'5px 8px' }} />
+            <input placeholder="csrftoken" value={igCsrf} onChange={function(e) { setIgCsrf(e.target.value); }} style={{ ...INP, flex:2, minWidth:100, fontSize:10, padding:'5px 8px' }} />
+            <button onClick={async function() {
+              if (!igSession || !igCsrf) return;
+              setCookieLoading(true); setCookieMsg('');
+              try {
+                var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'validate-cookies', platform:'instagram', sessionid: igSession, csrftoken: igCsrf }) });
+                var d = await r.json();
+                if (d.success) {
+                  storeSet('mba_ig_session', igSession); storeSet('mba_ig_csrf', igCsrf); setIgOk(true);
+                  setCookieMsg('IG: ' + (d.message || 'Cookies validas!'));
+                } else { setCookieMsg('IG: ' + (d.error || 'Invalidas')); }
+              } catch(e) { setCookieMsg('IG: ' + ((e as any).message || '')); }
+              setCookieLoading(false);
+            }} disabled={cookieLoading || !igSession || !igCsrf} style={{ padding:'5px 12px', borderRadius:6, border:'none', background: cookieLoading ? '#333' : igOk ? P.green : '#3B82F6', color:'#fff', fontSize:10, cursor:'pointer', fontWeight:700 }}>
+              {cookieLoading ? '...' : igOk ? '✓' : 'Validar'}
+            </button>
+          </div>
         </div>
-        <div style={{ display:'flex', gap:6, alignItems:'center', flexWrap:'wrap' }}>
-          <input placeholder="sessionid=..." value={igCookieSession || ''} onChange={function(e) { setIgCookieSession(e.target.value); }} style={{ ...INP, flex:2, minWidth:120, fontSize:10, padding:'6px 8px' }} />
-          <input placeholder="csrftoken=..." value={igCookieCsrf || ''} onChange={function(e) { setIgCookieCsrf(e.target.value); }} style={{ ...INP, flex:2, minWidth:120, fontSize:10, padding:'6px 8px' }} />
-          <button onClick={async function() {
-            if (!igCookieSession || !igCookieCsrf) return;
-            setIgCookieLoading(true);
-            try {
-              var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ action:'set-cookies', platform:'instagram', sessionid: igCookieSession, csrftoken: igCookieCsrf }) });
-              var d = await r.json();
-              if (d.success) {
-                storeSet('mba_cookies_instagram', d.cookiesJson || '');
-                storeSet('mba_session_instagram', d.sessionid || '');
-                storeSet('mba_csrf_instagram', d.csrftoken || '');
-                var newSt = { ...loginStatus }; newSt.instagram = { loggedIn: true, label: d.message || 'Cookies OK' }; saveLoginStatus(newSt);
-                setIgCookieMsg(d.message || 'Cookies validas!');
-              } else {
-                setIgCookieMsg('Erro: ' + (d.error || 'invalidas'));
-              }
-            } catch(e) { setIgCookieMsg('Erro: ' + ((e as any).message || '')); }
-            setIgCookieLoading(false);
-          }} disabled={igCookieLoading || !igCookieSession || !igCookieCsrf} style={{ padding:'6px 12px', borderRadius:6, border:'none', background: igCookieLoading ? '#333' : '#3B82F6', color:'#fff', fontSize:10, cursor: igCookieLoading ? 'wait' : 'pointer', fontWeight:700 }}>
-            {igCookieLoading ? '...' : 'Validar'}
-          </button>
+
+        {/* Facebook Cookies */}
+        <div>
+          <div style={{ fontSize:10, fontWeight:600, color:'#1877F2', marginBottom:4 }}>👤 Facebook</div>
+          <div style={{ fontSize:9, color:P.textSec, marginBottom:4, lineHeight:'13px' }}>
+            Abre facebook.com &gt; F12 &gt; Console &gt; escreve <b>document.cookie</b> &gt; copia tudo. Depois F12 &gt; Elements &gt; procura <b>fb_dtsg</b> no HTML.
+          </div>
+          <div style={{ display:'flex', gap:4, alignItems:'center', flexWrap:'wrap' }}>
+            <input placeholder="cookie (document.cookie)" value={fbCookie} onChange={function(e) { setFbCookie(e.target.value); }} style={{ ...INP, flex:2, minWidth:100, fontSize:10, padding:'5px 8px' }} />
+            <input placeholder="fb_dtsg" value={fbDtsg} onChange={function(e) { setFbDtsg(e.target.value); }} style={{ ...INP, flex:1, minWidth:80, fontSize:10, padding:'5px 8px' }} />
+            <button onClick={async function() {
+              if (!fbCookie || !fbDtsg) return;
+              setCookieLoading(true); setCookieMsg('');
+              try {
+                var r = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'validate-cookies', platform:'facebook', fbCookie: fbCookie, fbDtsg: fbDtsg }) });
+                var d = await r.json();
+                if (d.success) {
+                  storeSet('mba_fb_cookie', fbCookie); storeSet('mba_fb_dtsg', fbDtsg); setFbOk(true);
+                  setCookieMsg('FB: ' + (d.message || 'Cookies validas!'));
+                } else { setCookieMsg('FB: ' + (d.error || 'Invalidas')); }
+              } catch(e) { setCookieMsg('FB: ' + ((e as any).message || '')); }
+              setCookieLoading(false);
+            }} disabled={cookieLoading || !fbCookie || !fbDtsg} style={{ padding:'5px 12px', borderRadius:6, border:'none', background: cookieLoading ? '#333' : fbOk ? P.green : '#1877F2', color:'#fff', fontSize:10, cursor:'pointer', fontWeight:700 }}>
+              {cookieLoading ? '...' : fbOk ? '✓' : 'Validar'}
+            </button>
+          </div>
         </div>
-        {igCookieMsg && <div style={{ marginTop:6, fontSize:9, color: igCookieMsg.indexOf('Erro') >= 0 ? '#ff4444' : P.green }}>{igCookieMsg}</div>}
+
+        {cookieMsg && <div style={{ marginTop:8, fontSize:9, color: cookieMsg.indexOf('Erro') >= 0 || cookieMsg.indexOf('expirad') >= 0 || cookieMsg.indexOf('Invalid') >= 0 ? '#ff4444' : P.green }}>{cookieMsg}</div>}
       </div>
 
       {/* AUTO-SEND PANEL */}
