@@ -214,6 +214,77 @@ async function fbSendDM(fbCookie: string, fbDtsg: string, recipientId: string, m
 }
 
 // ============================================================
+//  TIKTOK DM VIA HTTP API (GRATIS, SEM BROWSER)
+//  Usa sessionid + tt_csrf_token cookies
+// ============================================================
+
+async function ttValidateCookies(ttSessionid: string, ttCsrf: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+  try {
+    var res = await fetch('https://www.tiktok.com/api/user/profile/self/', {
+      headers: {
+        'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'x-csrftoken': ttCsrf,
+        'referer': 'https://www.tiktok.com/'
+      },
+      signal: AbortSignal.timeout(10000)
+    });
+    if (res.ok) {
+      var data = await res.json();
+      if (data.userName || data.user?.userName) {
+        return { valid: true, username: data.userName || data.user?.userName };
+      }
+      return { valid: false, error: 'Resposta sem username' };
+    }
+    if (res.status === 401 || res.status === 403) return { valid: false, error: 'Cookies expirados. Copia novamente do browser.' };
+    return { valid: false, error: 'Erro HTTP ' + res.status };
+  } catch (e: any) {
+    return { valid: false, error: e.message || 'Erro de conexao' };
+  }
+}
+
+async function ttGetUserId(ttSessionid: string, ttCsrf: string, username: string): Promise<string | null> {
+  try {
+    var res = await fetch('https://www.tiktok.com/api/user/detail/?uniqueId=' + encodeURIComponent(username) + '&needSecUserId=1', {
+      headers: {
+        'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'referer': 'https://www.tiktok.com/@' + encodeURIComponent(username)
+      },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!res.ok) return null;
+    var data = await res.json();
+    return data.userInfo?.user?.id || data.user?.id || null;
+  } catch (e) { return null; }
+}
+
+async function ttSendDM(ttSessionid: string, ttCsrf: string, recipientId: string, message: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    var res = await fetch('https://www.tiktok.com/api/chat/send/', {
+      method: 'POST',
+      headers: {
+        'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
+        'content-type': 'application/x-www-form-urlencoded',
+        'x-csrftoken': ttCsrf,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'referer': 'https://www.tiktok.com/'
+      },
+      body: 'recipient_user_id=' + encodeURIComponent(recipientId) + '&content=' + encodeURIComponent(message) + '&type=text',
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) {
+      var data = await res.json();
+      if (data.status_code === 0 || !data.message) return { success: true };
+      return { success: false, error: data.message || 'Erro no envio' };
+    }
+    return { success: false, error: 'HTTP ' + res.status };
+  } catch (e: any) {
+    return { success: false, error: e.message || 'timeout' };
+  }
+}
+
+// ============================================================
 //  COOKIE STORE (in-memory, por sessao de Vercel)
 //  O frontend envia os cookies em cada pedido DM
 // ============================================================
@@ -296,13 +367,48 @@ export async function POST(request: any) {
     return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: ' + (fbDmResult.error || 'Falhou'), remainingToday: MAX_PER_DAY - fbSentToday });
   }
 
+  // ---- Validar cookies TT ----
+  if (body.action === 'validate-cookies' && body.platform === 'tiktok') {
+    if (!body.ttSessionid || !body.ttCsrf) {
+      return NextResponse.json({ success: false, error: 'Falta ttSessionid ou ttCsrf' });
+    }
+    var tv = await ttValidateCookies(body.ttSessionid, body.ttCsrf);
+    if (tv.valid) {
+      return NextResponse.json({ success: true, message: 'TT cookies validas! (@' + (tv.username || '') + ')', username: tv.username });
+    }
+    return NextResponse.json({ success: false, error: tv.error || 'Cookies invalidas' });
+  }
+
+  // ---- Enviar DM TikTok via HTTP API (GRATIS) ----
+  if (body.platform === 'tiktok' && body.ttSessionid && body.ttCsrf) {
+    var ttUsername = body.username || '';
+    var ttMessage = body.message || '';
+    var ttSentToday = body.sentToday || 0;
+
+    if (!ttUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Username nao fornecido', remainingToday: MAX_PER_DAY - ttSentToday });
+    if (ttSentToday >= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Limite diario atingido', remainingToday: 0 });
+
+    // Passo 1: Buscar ID do utilizador
+    var ttUserId = await ttGetUserId(body.ttSessionid, body.ttCsrf, ttUsername);
+    if (!ttUserId) {
+      return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Nao encontrou @' + ttUsername + ' (cookies expiradas?)', remainingToday: MAX_PER_DAY - ttSentToday });
+    }
+
+    // Passo 2: Enviar DM
+    var ttDmResult = await ttSendDM(body.ttSessionid, body.ttCsrf, String(ttUserId), ttMessage);
+    if (ttDmResult.success) {
+      return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'TT: DM enviado para @' + ttUsername, remainingToday: MAX_PER_DAY - ttSentToday - 1 });
+    }
+    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: ' + (ttDmResult.error || 'Falhou'), remainingToday: MAX_PER_DAY - ttSentToday });
+  }
+
   // ---- Diagnostico ----
   if (body.action === 'diagnostic') {
     return NextResponse.json({
       method: 'HTTP API com cookies (GRATIS, sem browser)',
       ig: { ready: !!(body.igSessionid && body.igCsrf), note: body.igSessionid ? 'Cookies configuradas' : 'Cola sessionid + csrftoken no painel' },
       fb: { ready: !!(body.fbCookie && body.fbDtsg), note: body.fbCookie ? 'Cookies configuradas' : 'Cola cookie + fb_dtsg no painel' },
-      tt: { ready: false, note: 'TikTok precisa de browser (n8n ou VPS)' },
+      tt: { ready: !!(body.ttSessionid && body.ttCsrf), note: body.ttSessionid ? 'Cookies configuradas' : 'Cola sessionid + tt_csrf_token no painel' },
       maxPerDay: MAX_PER_DAY,
       note: 'DMs via HTTP directa — 100% gratis, sem servidor externo'
     });
@@ -327,7 +433,7 @@ export async function POST(request: any) {
     ? 'Falta cookies IG. Cola sessionid + csrftoken no painel.'
     : dmPlatform === 'facebook'
     ? 'Falta cookies FB. Cola cookie + fb_dtsg no painel.'
-    : 'TikTok precisa de browser (n8n). Ve n8n/SETUP.md';
+    : 'Falta cookies TT. Cola sessionid + tt_csrf_token no painel.';
 
   return NextResponse.json({
     success: false,
