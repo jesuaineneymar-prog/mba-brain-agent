@@ -1,0 +1,17 @@
+{
+  "services": {
+    "mba-dm-service": {
+      "root": "dm-service",
+      "entrypoint": "server.js"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/(.*)",
+      "destination": {
+        "type": "service",
+        "service": "mba-dm-service"
+      }
+    }
+  ]
+}
