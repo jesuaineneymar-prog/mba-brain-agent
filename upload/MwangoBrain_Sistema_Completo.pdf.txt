@@ -1,0 +1,1737 @@
+I MWANGO BRAIN
+Sistema Completo de Envio Automático
+Plataformas: Instagram + Facebook + TikTok
+Versão: Máximo Arriscado
+Data: Julho 2026
+I Estrutura do Projeto:
+• lib/campaign-engine.ts — Motor de campanhas
+• app/api/campaign/route.ts — API de campanhas
+• app/campaign/page.tsx — Interface de campanhas
+• app/test/page.tsx — Página de teste
+• .env — Variáveis de ambiente
+II AVISO: Este sistema envia mensagens automáticas via cookies HTTP. Use por sua conta e risco. Pode
+resultar em ban de contas.
+1. lib/campaign-engine.ts
+Motor central que integra o social-scrapers.ts com o send-message API. Gere filas, anti-block, estatísticas e
+mensagens rotativas.
+//============================================================
+// MBA BRAIN AGENT — CAMPAIGN ENGINE
+// Integra social-scrapers.ts com send-message API
+// Fila inteligente, anti-block, estatísticas
+// VERSÃO MÁXIMO ARRISCADO — use por sua conta e risco
+//============================================================
+import { scrapeInstagram, scrapeFacebook, scrapeLinkedIn, scrapeTikTok, calculateScore } from './social-scrapers';
+export interface Campaign {
+  id: string;
+  name: string;
+  platforms: ('instagram' | 'facebook' | 'tiktok' | 'linkedin')[];
+  messageTemplate: string;
+  filters: {
+    query: string;
+    minFollowers: number;
+    maxFollowers: number;
+    minMonthsActive: number;
+    requireRegular: boolean;
+    targetCount: number;
+    excludeVerified: boolean;
+    excludeBusiness: boolean;
+  };
+  cookies: {
+    igSessionid?: string;
+    igCsrf?: string;
+    fbCookie?: string;
+    fbDtsg?: string;
+    ttSessionid?: string;
+    ttCsrf?: string;
+  };
+  status: 'pending' | 'scraping' | 'sending' | 'paused' | 'completed' | 'failed';
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+}
+export interface CampaignLead {
+  id: string;
+  campaignId: string;
+  platform: string;
+  username: string;
+  displayName: string | null;
+  followers: number;
+  score: number;
+  profileUrl: string;
+  externalId: string;
+  status: 'pending' | 'queued' | 'sending' | 'sent' | 'failed' | 'skipped';
+  sentAt?: number;
+  error?: string;
+  message?: string;
+}
+export interface CampaignStats {
+  totalLeads: number;
+  pending: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  sending: number;
+  queued: number;
+  byPlatform: Record<string, { sent: number; failed: number; pending: number }>;
+  lastSendAt?: number;
+  nextSendAt?: number;
+  estimatedCompletion?: number;
+}
+// ============================================================
+// CONFIG MÁXIMO ARRISCADO
+// ============================================================
+const CONFIG = {
+  // Instagram: máximo arriscado
+  igMaxPerDay: 20,
+  igMinInterval: 60000,    // 1 min
+  igMaxInterval: 120000,   // 2 min
+  igPauseAfter: 8,
+  igPauseDuration: 300000, // 5 min
+  // Facebook: máximo arriscado
+  fbMaxPerDay: 30,
+  fbMinInterval: 45000,    // 45s
+  fbMaxInterval: 90000,    // 1.5 min
+  fbPauseAfter: 10,
+  fbPauseDuration: 300000,  // 5 min
+  // TikTok: máximo arriscado (muito sensível)
+  ttMaxPerDay: 15,
+  ttMinInterval: 90000,    // 1.5 min
+  ttMaxInterval: 180000,   // 3 min
+  ttPauseAfter: 6,
+  ttPauseDuration: 600000, // 10 min
+  maxRetries: 1,
+};
+// MENSAGEM SOFT MWANGO BRAIN
+export const DEFAULT_MESSAGE_SOFT = `Ola {{name}},
+Acompanho o teu trabalho ha algum tempo e gosto muito do que fazes.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos sempre a procurar criadores com talento para colaborar em projetos in
+Se estiveres aberto a conversar sobre possiveis parcerias, ficava feliz em trocar algumas ideias contigo.
+Sem compromisso, claro — so uma conversa.
+Cumprimentos,
+Equipa Mwango Brain`;
+// Variantes da mensagem para rotação (evita padrões repetidos)
+export const MESSAGE_VARIANTS = [
+  `Ola {{name}},
+Tenho seguido o teu conteudo e gosto muito da forma como trabalhas.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos a expandir a nossa rede de criadores e o teu perfil chamou-nos a aten
+Gostavas de conversar sobre como podemos trabalhar juntos? Sem pressa, so quando te for conveniente.
+Um abraco,
+Equipa Mwango Brain`,
+  `Ola {{name}},
+Admiro a consistencia e qualidade do teu trabalho. E notavel.
+Somos a Mwango Brain em Luanda — uma equipa que apoia criadores a crescer. O teu perfil parece encaixar perfeitamente no que procur
+Se te interessar saber mais sobre nos, estamos por aqui.
+Cumprimentos,
+Equipa Mwango Brain`,
+  `Ola {{name}},
+Desculpa o contacto directo, mas nao resisti. O teu trabalho e inspirador.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos a construir algo especial e gostavamos muito de contar contigo.
+Quando tiveres um momento, gostavas de saber mais?
+Um abraco,
+Equipa Mwango Brain`,
+  `Ola {{name}},
+Encontrei o teu perfil por acaso e fiquei impressionado com a qualidade do teu conteudo.
+Somos a Mwango Brain em Luanda. Trabalhamos com criadores talentosos e o teu trabalho tem exactamente o tipo de autenticidade que v
+Gostavas de explorar uma possivel colaboracao? Fico a espera do teu feedback.
+Cumprimentos,
+Equipa Mwango Brain`,
+  `Ola {{name}},
+O teu perfil apareceu-me nas sugestoes e tive de parar para apreciar o que fazes.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos sempre de olho em criadores com potencial e o teu e definitivamente u
+Se estiveres curioso sobre o que fazemos, ficava feliz em apresentar-te a nossa visao.
+Um abraco,
+Equipa Mwango Brain`,
+];
+// Estado em memória
+const campaigns: Map<string, Campaign> = new Map();
+const leads: Map<string, CampaignLead[]> = new Map();
+const sendState: Record<string, {
+  dailyCount: number;
+  dailyReset: string;
+  lastSend: number;
+  count: number;
+}> = {};
+function generateId(): string {
+  return 'camp_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
+}
+function generateLeadId(): string {
+  return 'lead_' + Date.now().toString(36) + '_' + Math.random().toString(36).substr(2, 5);
+}
+function getToday(): string {
+  return new Date().toISOString().split('T')[0];
+}
+function getPlatformConfig(platform: string) {
+  switch (platform) {
+    case 'instagram':
+      return {
+        maxPerDay: CONFIG.igMaxPerDay,
+        minInterval: CONFIG.igMinInterval,
+        maxInterval: CONFIG.igMaxInterval,
+        pauseAfter: CONFIG.igPauseAfter,
+        pauseDuration: CONFIG.igPauseDuration,
+      };
+    case 'facebook':
+      return {
+        maxPerDay: CONFIG.fbMaxPerDay,
+        minInterval: CONFIG.fbMinInterval,
+        maxInterval: CONFIG.fbMaxInterval,
+        pauseAfter: CONFIG.fbPauseAfter,
+        pauseDuration: CONFIG.fbPauseDuration,
+      };
+    case 'tiktok':
+      return {
+        maxPerDay: CONFIG.ttMaxPerDay,
+        minInterval: CONFIG.ttMinInterval,
+        maxInterval: CONFIG.ttMaxInterval,
+        pauseAfter: CONFIG.ttPauseAfter,
+        pauseDuration: CONFIG.ttPauseDuration,
+      };
+    default:
+      return {
+        maxPerDay: 10,
+        minInterval: 120000,
+        maxInterval: 240000,
+        pauseAfter: 5,
+        pauseDuration: 300000,
+      };
+  }
+}
+function getRandomInterval(platform: string): number {
+  const cfg = getPlatformConfig(platform);
+  return Math.floor(Math.random() * (cfg.maxInterval - cfg.minInterval)) + cfg.minInterval;
+}
+// Seleciona variante aleatória da mensagem
+export function getRandomMessageVariant(name: string, username: string, followers: number): string {
+  const variants = [DEFAULT_MESSAGE_SOFT, ...MESSAGE_VARIANTS];
+  const variant = variants[Math.floor(Math.random() * variants.length)];
+  return variant
+    .replace(/{{username}}/g, username)
+    .replace(/{{name}}/g, name || username)
+    .replace(/{{followers}}/g, followers.toLocaleString('pt-PT'));
+}
+function getPlatformCookieKey(platform: string, cookies: Campaign['cookies']): string {
+  switch (platform) {
+    case 'instagram': return cookies.igSessionid || '';
+    case 'facebook': return cookies.fbCookie || '';
+    case 'tiktok': return cookies.ttSessionid || '';
+    default: return '';
+  }
+}
+function canSendToday(platform: string, cookieKey: string): boolean {
+  const today = getToday();
+  const stateKey = `${platform}_${cookieKey}_${today}`;
+  const cfg = getPlatformConfig(platform);
+  if (!sendState[stateKey]) {
+    sendState[stateKey] = { dailyCount: 0, dailyReset: today, lastSend: 0, count: 0 };
+  }
+  if (sendState[stateKey].dailyReset !== today) {
+    sendState[stateKey] = { dailyCount: 0, dailyReset: today, lastSend: 0, count: 0 };
+  }
+  return sendState[stateKey].dailyCount < cfg.maxPerDay;
+}
+function recordSend(platform: string, cookieKey: string): void {
+  const today = getToday();
+  const stateKey = `${platform}_${cookieKey}_${today}`;
+  if (!sendState[stateKey]) {
+    sendState[stateKey] = { dailyCount: 0, dailyReset: today, lastSend: 0, count: 0 };
+  }
+  sendState[stateKey].dailyCount++;
+  sendState[stateKey].count++;
+  sendState[stateKey].lastSend = Date.now();
+}
+function getNextAvailableSlot(platform: string, cookieKey: string): number {
+  const today = getToday();
+  const stateKey = `${platform}_${cookieKey}_${today}`;
+  const state = sendState[stateKey];
+  const cfg = getPlatformConfig(platform);
+  if (!state || state.lastSend === 0) return Date.now() + getRandomInterval(platform);
+  let nextSlot = state.lastSend + getRandomInterval(platform);
+  if (state.count > 0 && state.count % cfg.pauseAfter === 0) {
+    nextSlot += cfg.pauseDuration;
+  }
+  return nextSlot;
+}
+//============================================================
+// CRIAR CAMPANHA
+//============================================================
+export async function createCampaign(
+  name: string,
+  platforms: Campaign['platforms'],
+  messageTemplate: string,
+  filters: Campaign['filters'],
+  cookies: Campaign['cookies']
+): Promise<{ success: boolean; campaign?: Campaign; error?: string }> {
+  try {
+    const hasIG = cookies.igSessionid && cookies.igCsrf;
+    const hasFB = cookies.fbCookie && cookies.fbDtsg;
+    const hasTT = cookies.ttSessionid && cookies.ttCsrf;
+    const needed = platforms.filter(p => {
+      if (p === 'instagram') return hasIG;
+      if (p === 'facebook') return hasFB;
+      if (p === 'tiktok') return hasTT;
+      return false;
+    });
+    if (needed.length === 0) {
+      return { success: false, error: 'Nenhuma plataforma tem cookies configurados. Vai a /setup-cookies primeiro.' };
+    }
+    // Calcular máximo seguro baseado nas plataformas escolhidas
+    let maxSafe = 0;
+    for (const p of needed) {
+      maxSafe += getPlatformConfig(p).maxPerDay;
+    }
+    const safeTargetCount = Math.min(filters.targetCount, maxSafe);
+    const campaign: Campaign = {
+      id: generateId(),
+      name,
+      platforms: needed,
+      messageTemplate: messageTemplate || DEFAULT_MESSAGE_SOFT,
+      filters: { ...filters, targetCount: safeTargetCount },
+      cookies,
+      status: 'pending',
+      createdAt: Date.now(),
+    };
+    campaigns.set(campaign.id, campaign);
+    leads.set(campaign.id, []);
+    return { success: true, campaign };
+  } catch (e: any) {
+    return { success: false, error: e.message };
+  }
+}
+//============================================================
+// FASE 1: SCRAPING DE LEADS
+//============================================================
+export async function scrapeLeadsForCampaign(campaignId: string): Promise<{ success: boolean; leadsFound?: number; error?: string 
+  const campaign = campaigns.get(campaignId);
+  if (!campaign) return { success: false, error: 'Campanha não encontrada' };
+  campaign.status = 'scraping';
+  const allLeads: CampaignLead[] = [];
+  const existingLeads = leads.get(campaignId) || [];
+  const excludeIds = existingLeads.map(l => l.externalId);
+  const filters = {
+    ...campaign.filters,
+    excludeAlreadyContacted: excludeIds,
+  };
+  for (const platform of campaign.platforms) {
+    try {
+      let scraped: any[] = [];
+      switch (platform) {
+        case 'instagram':
+          scraped = await scrapeInstagram(campaign.filters.query, filters);
+          break;
+        case 'facebook':
+          scraped = await scrapeFacebook(campaign.filters.query, filters);
+          break;
+        case 'tiktok':
+          scraped = await scrapeTikTok(campaign.filters.query, filters);
+          break;
+        case 'linkedin':
+          scraped = await scrapeLinkedIn(campaign.filters.query, filters);
+          break;
+      }
+      for (const profile of scraped) {
+        const lead: CampaignLead = {
+          id: generateLeadId(),
+          campaignId,
+          platform,
+          username: profile.username.replace('@', ''),
+          displayName: profile.displayName,
+          followers: profile.followers,
+          score: calculateScore(profile),
+          profileUrl: profile.profileUrl,
+          externalId: profile.externalId,
+          status: 'pending',
+        };
+        allLeads.push(lead);
+      }
+    } catch (e) {
+      console.error(`[Scrape ${platform}]`, e);
+    }
+  }
+  allLeads.sort((a, b) => b.score - a.score);
+  const current = leads.get(campaignId) || [];
+  leads.set(campaignId, [...current, ...allLeads]);
+  campaign.status = allLeads.length > 0 ? 'pending' : 'failed';
+  if (allLeads.length === 0) campaign.error = 'Nenhum lead encontrado com os filtros atuais';
+  return { success: allLeads.length > 0, leadsFound: allLeads.length };
+}
+//============================================================
+// FASE 2: ENVIAR MENSAGENS (MÁXIMO ARRISCADO)
+//============================================================
+export async function startSending(campaignId: string): Promise<{ success: boolean; error?: string }> {
+  const campaign = campaigns.get(campaignId);
+  if (!campaign) return { success: false, error: 'Campanha não encontrada' };
+  const campaignLeads = leads.get(campaignId) || [];
+  const pendingLeads = campaignLeads.filter(l => l.status === 'pending');
+  if (pendingLeads.length === 0) {
+    campaign.status = 'completed';
+    campaign.completedAt = Date.now();
+    return { success: false, error: 'Nenhum lead pendente' };
+  }
+  campaign.status = 'sending';
+  campaign.startedAt = campaign.startedAt || Date.now();
+  processQueue(campaignId);
+  return { success: true };
+}
+async function processQueue(campaignId: string): Promise<void> {
+  const campaign = campaigns.get(campaignId);
+  if (!campaign || campaign.status !== 'sending') return;
+  const campaignLeads = leads.get(campaignId) || [];
+  const pendingLeads = campaignLeads.filter(l => l.status === 'pending');
+  if (pendingLeads.length === 0) {
+    campaign.status = 'completed';
+    campaign.completedAt = Date.now();
+    return;
+  }
+  const lead = pendingLeads[0];
+  const cookieKey = getPlatformCookieKey(lead.platform, campaign.cookies);
+  if (!canSendToday(lead.platform, cookieKey)) {
+    campaign.status = 'paused';
+    // Agenda retomada para amanhã
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    tomorrow.setHours(9, 0, 0, 0);
+    const msUntilTomorrow = tomorrow.getTime() - Date.now();
+    setTimeout(() => {
+      campaign.status = 'sending';
+      processQueue(campaignId);
+    }, Math.min(msUntilTomorrow, 3600000));
+    return;
+  }
+  const nextSlot = getNextAvailableSlot(lead.platform, cookieKey);
+  const waitTime = Math.max(0, nextSlot - Date.now());
+  if (waitTime > 0) {
+    setTimeout(() => processQueue(campaignId), waitTime);
+    return;
+  }
+  // Usa variante aleatória da mensagem
+  const message = getRandomMessageVariant(
+    lead.displayName || lead.username,
+    lead.username,
+    lead.followers
+  );
+  lead.status = 'sending';
+  lead.message = message;
+  try {
+    const body: any = {
+      platform: lead.platform,
+      username: lead.username,
+      message: message,
+      sentToday: getSentTodayCount(lead.platform, cookieKey),
+    };
+    if (lead.platform === 'instagram') {
+      body.igSessionid = campaign.cookies.igSessionid;
+      body.igCsrf = campaign.cookies.igCsrf;
+    } else if (lead.platform === 'facebook') {
+      body.fbCookie = campaign.cookies.fbCookie;
+      body.fbDtsg = campaign.cookies.fbDtsg;
+    } else if (lead.platform === 'tiktok') {
+      body.ttSessionid = campaign.cookies.ttSessionid;
+      body.ttCsrf = campaign.cookies.ttCsrf;
+    }
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/send-message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (data.success && data.dmSent) {
+      lead.status = 'sent';
+      lead.sentAt = Date.now();
+      recordSend(lead.platform, cookieKey);
+    } else {
+      lead.status = 'failed';
+      lead.error = data.deliveryMsg || data.error || 'Erro desconhecido';
+      if (data.needCookies || 
+          (data.deliveryMsg || '').includes('cookie') ||
+          (data.deliveryMsg || '').includes('limit') ||
+          (data.deliveryMsg || '').includes('spam') ||
+          res.status === 429) {
+        campaign.status = 'paused';
+        return;
+      }
+    }
+  } catch (e: any) {
+    lead.status = 'failed';
+    lead.error = e.message;
+  }
+  setTimeout(() => processQueue(campaignId), getRandomInterval(lead.platform));
+}
+function getSentTodayCount(platform: string, cookieKey: string): number {
+  const today = getToday();
+  const stateKey = `${platform}_${cookieKey}_${today}`;
+  return sendState[stateKey]?.dailyCount || 0;
+}
+//============================================================
+// ESTATÍSTICAS E GESTÃO
+//============================================================
+export function getCampaignStats(campaignId: string): CampaignStats | null {
+  const campaign = campaigns.get(campaignId);
+  if (!campaign) return null;
+  const campaignLeads = leads.get(campaignId) || [];
+  const byPlatform: CampaignStats['byPlatform'] = {};
+  for (const platform of campaign.platforms) {
+    const platformLeads = campaignLeads.filter(l => l.platform === platform);
+    byPlatform[platform] = {
+      sent: platformLeads.filter(l => l.status === 'sent').length,
+      failed: platformLeads.filter(l => l.status === 'failed').length,
+      pending: platformLeads.filter(l => l.status === 'pending' || l.status === 'queued').length,
+    };
+  }
+  const sentLeads = campaignLeads.filter(l => l.status === 'sent');
+  const lastSent = sentLeads.length > 0 ? Math.max(...sentLeads.map(l => l.sentAt || 0)) : undefined;
+  const pendingCount = campaignLeads.filter(l => l.status === 'pending').length;
+  let avgInterval = 0;
+  for (const p of campaign.platforms) {
+    const cfg = getPlatformConfig(p);
+    avgInterval += (cfg.minInterval + cfg.maxInterval) / 2;
+  }
+  avgInterval = avgInterval / campaign.platforms.length;
+  const estimatedMs = pendingCount * avgInterval;
+  return {
+    totalLeads: campaignLeads.length,
+    pending: campaignLeads.filter(l => l.status === 'pending').length,
+    sent: campaignLeads.filter(l => l.status === 'sent').length,
+    failed: campaignLeads.filter(l => l.status === 'failed').length,
+    skipped: campaignLeads.filter(l => l.status === 'skipped').length,
+    sending: campaignLeads.filter(l => l.status === 'sending').length,
+    queued: campaignLeads.filter(l => l.status === 'queued').length,
+    byPlatform,
+    lastSendAt: lastSent,
+    nextSendAt: lastSent ? lastSent + avgInterval : undefined,
+    estimatedCompletion: pendingCount > 0 ? Date.now() + estimatedMs : undefined,
+  };
+}
+export function getCampaign(campaignId: string): Campaign | undefined {
+  return campaigns.get(campaignId);
+}
+export function getCampaignLeads(campaignId: string): CampaignLead[] {
+  return leads.get(campaignId) || [];
+}
+export function getAllCampaigns(): Campaign[] {
+  return Array.from(campaigns.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+export function pauseCampaign(campaignId: string): boolean {
+  const campaign = campaigns.get(campaignId);
+  if (!campaign) return false;
+  campaign.status = 'paused';
+  return true;
+}
+export function resumeCampaign(campaignId: string): boolean {
+  const campaign = campaigns.get(campaignId);
+  if (!campaign) return false;
+  campaign.status = 'sending';
+  processQueue(campaignId);
+  return true;
+}
+export function deleteCampaign(campaignId: string): boolean {
+  campaigns.delete(campaignId);
+  leads.delete(campaignId);
+  return true;
+}
+export function skipLead(campaignId: string, leadId: string): boolean {
+  const campaignLeads = leads.get(campaignId);
+  if (!campaignLeads) return false;
+  const lead = campaignLeads.find(l => l.id === leadId);
+  if (!lead) return false;
+  lead.status = 'skipped';
+  return true;
+}
+// Exporta config para a UI
+export function getPlatformLimits() {
+  return {
+    instagram: { maxPerDay: CONFIG.igMaxPerDay, minInterval: CONFIG.igMinInterval, maxInterval: CONFIG.igMaxInterval },
+    facebook: { maxPerDay: CONFIG.fbMaxPerDay, minInterval: CONFIG.fbMinInterval, maxInterval: CONFIG.fbMaxInterval },
+    tiktok: { maxPerDay: CONFIG.ttMaxPerDay, minInterval: CONFIG.ttMinInterval, maxInterval: CONFIG.ttMaxInterval },
+  };
+}
+2. app/api/campaign/route.ts
+API Next.js que orquestra scrape, criação de campanhas e envio de mensagens. Endpoints: create, scrape,
+start, pause, resume, delete.
+//============================================================
+// MBA BRAIN AGENT — CAMPAIGN API
+// Orquestra scrape + envio de mensagens
+//============================================================
+import { NextResponse } from 'next/server';
+import {
+  createCampaign,
+  scrapeLeadsForCampaign,
+  startSending,
+  getCampaignStats,
+  getCampaign,
+  getCampaignLeads,
+  getAllCampaigns,
+  pauseCampaign,
+  resumeCampaign,
+  deleteCampaign,
+  skipLead,
+} from '@/lib/campaign-engine';
+export const maxDuration = 300; // 5 min para scraping
+export async function POST(request: Request) {
+  try {
+    const body = await request.json();
+    const { action } = body;
+    // ---- CRIAR CAMPANHA ----
+    if (action === 'create') {
+      const { name, platforms, messageTemplate, filters, cookies } = body;
+      if (!name || !filters || !platforms?.length) {
+        return NextResponse.json(
+          { success: false, error: 'Faltam campos obrigatórios (name, platforms, filters)' },
+          { status: 400 }
+        );
+      }
+      const result = await createCampaign(name, platforms, messageTemplate, filters, cookies || {});
+      if (!result.success) {
+        return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+      }
+      return NextResponse.json({
+        success: true,
+        campaign: result.campaign,
+        message: 'Campanha criada. Agora faz scrape para encontrar leads.',
+      });
+    }
+    // ---- SCRAPE LEADS ----
+    if (action === 'scrape') {
+      const { campaignId } = body;
+      if (!campaignId) {
+        return NextResponse.json({ success: false, error: 'Falta campaignId' }, { status: 400 });
+      }
+      const result = await scrapeLeadsForCampaign(campaignId);
+      if (!result.success) {
+        return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+      }
+      return NextResponse.json({
+        success: true,
+        leadsFound: result.leadsFound,
+        message: `${result.leadsFound} leads encontrados!`,
+      });
+    }
+    // ---- INICIAR ENVIO ----
+    if (action === 'start') {
+      const { campaignId } = body;
+      if (!campaignId) {
+        return NextResponse.json({ success: false, error: 'Falta campaignId' }, { status: 400 });
+      }
+      const result = await startSending(campaignId);
+      if (!result.success) {
+        return NextResponse.json({ success: false, error: result.error }, { status: 400 });
+      }
+      return NextResponse.json({
+        success: true,
+        message: 'Envio iniciado. As mensagens vão ser enviadas automaticamente com delays.',
+      });
+    }
+    // ---- PAUSAR ----
+    if (action === 'pause') {
+      const { campaignId } = body;
+      if (!campaignId) return NextResponse.json({ success: false, error: 'Falta campaignId' }, { status: 400 });
+      const ok = pauseCampaign(campaignId);
+      return NextResponse.json({ success: ok, message: ok ? 'Campanha pausada' : 'Campanha não encontrada' });
+    }
+    // ---- RESUME ----
+    if (action === 'resume') {
+      const { campaignId } = body;
+      if (!campaignId) return NextResponse.json({ success: false, error: 'Falta campaignId' }, { status: 400 });
+      const ok = resumeCampaign(campaignId);
+      return NextResponse.json({ success: ok, message: ok ? 'Campanha retomada' : 'Campanha não encontrada' });
+    }
+    // ---- SKIP LEAD ----
+    if (action === 'skip-lead') {
+      const { campaignId, leadId } = body;
+      if (!campaignId || !leadId) return NextResponse.json({ success: false, error: 'Faltam IDs' }, { status: 400 });
+      const ok = skipLead(campaignId, leadId);
+      return NextResponse.json({ success: ok });
+    }
+    // ---- DELETE ----
+    if (action === 'delete') {
+      const { campaignId } = body;
+      if (!campaignId) return NextResponse.json({ success: false, error: 'Falta campaignId' }, { status: 400 });
+      deleteCampaign(campaignId);
+      return NextResponse.json({ success: true, message: 'Campanha eliminada' });
+    }
+    return NextResponse.json({ success: false, error: 'Ação desconhecida' }, { status: 400 });
+  } catch (error: any) {
+    console.error('[Campaign API]', error);
+    return NextResponse.json(
+      { success: false, error: error.message || 'Erro interno' },
+      { status: 500 }
+    );
+  }
+}
+// ---- GET: LISTAR CAMPANHAS E STATS ----
+export async function GET(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const campaignId = searchParams.get('id');
+    const includeLeads = searchParams.get('leads') === 'true';
+    if (campaignId) {
+      const campaign = getCampaign(campaignId);
+      if (!campaign) {
+        return NextResponse.json({ success: false, error: 'Campanha não encontrada' }, { status: 404 });
+      }
+      const stats = getCampaignStats(campaignId);
+      const response: any = {
+        success: true,
+        campaign,
+        stats,
+      };
+      if (includeLeads) {
+        response.leads = getCampaignLeads(campaignId);
+      }
+      return NextResponse.json(response);
+    }
+    // Listar todas
+    const all = getAllCampaigns();
+    const withStats = all.map(c => ({
+      ...c,
+      stats: getCampaignStats(c.id),
+    }));
+    return NextResponse.json({
+      success: true,
+      campaigns: withStats,
+      total: withStats.length,
+    });
+  } catch (error: any) {
+    console.error('[Campaign API GET]', error);
+    return NextResponse.json(
+      { success: false, error: error.message || 'Erro interno' },
+      { status: 500 }
+    );
+  }
+}
+3. app/campaign/page.tsx
+Interface React para criar, gerir e monitorizar campanhas. Inclui formulário de criação, lista de campanhas,
+detalhes de leads e estatísticas em tempo real.
+'use client';
+import { useState, useEffect } from 'react';
+//============================================================
+// PAINEL DE CAMPANHAS — Versão MÁXIMO ARRISCADO
+// Mwango Brain — Aquisição de perfis
+// II Use por sua conta e risco
+//============================================================
+interface Campaign {
+  id: string;
+  name: string;
+  platforms: string[];
+  messageTemplate: string;
+  status: string;
+  createdAt: number;
+  startedAt?: number;
+  completedAt?: number;
+  stats?: CampaignStats;
+}
+interface CampaignStats {
+  totalLeads: number;
+  pending: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  sending: number;
+  queued: number;
+  byPlatform: Record<string, { sent: number; failed: number; pending: number }>;
+  lastSendAt?: number;
+  nextSendAt?: number;
+  estimatedCompletion?: number;
+}
+interface Lead {
+  id: string;
+  platform: string;
+  username: string;
+  displayName: string | null;
+  followers: number;
+  score: number;
+  status: string;
+  sentAt?: number;
+  error?: string;
+  message?: string;
+}
+const PLATFORM_COLORS: Record<string, string> = {
+  instagram: '#E1306C',
+  facebook: '#1877F2',
+  tiktok: '#25F4EE',
+  linkedin: '#0A66C2',
+};
+const PLATFORM_ICONS: Record<string, string> = {
+  instagram: 'I',
+  facebook: 'I',
+  tiktok: 'I',
+  linkedin: 'I',
+};
+// MENSAGEM SOFT MWANGO BRAIN
+const DEFAULT_MWANGO_MESSAGE = `Ola {{name}},
+Acompanho o teu trabalho ha algum tempo e gosto muito do que fazes.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos sempre a procurar criadores com talento para colaborar em projetos in
+Se estiveres aberto a conversar sobre possiveis parcerias, ficava feliz em trocar algumas ideias contigo.
+Sem compromisso, claro — so uma conversa.
+Cumprimentos,
+Equipa Mwango Brain`;
+// LIMITES MÁXIMO ARRISCADO
+const PLATFORM_LIMITS: Record<string, { maxPerDay: number; minInterval: number; maxInterval: number }> = {
+  instagram: { maxPerDay: 20, minInterval: 60, maxInterval: 120 },
+  facebook: { maxPerDay: 30, minInterval: 45, maxInterval: 90 },
+  tiktok: { maxPerDay: 15, minInterval: 90, maxInterval: 180 },
+};
+export default function CampaignPage() {
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedCampaign, setSelectedCampaign] = useState<Campaign | null>(null);
+  const [leads, setLeads] = useState<Lead[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState<NodeJS.Timeout | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [formName, setFormName] = useState('');
+  const [formPlatforms, setFormPlatforms] = useState<string[]>(['instagram']);
+  const [formMessage, setFormMessage] = useState(DEFAULT_MWANGO_MESSAGE);
+  const [formQuery, setFormQuery] = useState('');
+  const [formMinFollowers, setFormMinFollowers] = useState(500);
+  const [formMaxFollowers, setFormMaxFollowers] = useState(50000);
+  const [formTargetCount, setFormTargetCount] = useState(20);
+  const [useDefaultMessage, setUseDefaultMessage] = useState(true);
+  const [cookies, setCookies] = useState<Record<string, string>>({});
+  useEffect(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem('mba_cookies') || '{}');
+      setCookies(d);
+    } catch {}
+    loadCampaigns();
+  }, []);
+  useEffect(() => {
+    if (refreshInterval) {
+      clearInterval(refreshInterval);
+      setRefreshInterval(null);
+    }
+    const hasActive = campaigns.some(c => c.status === 'sending' || c.status === 'scraping');
+    if (hasActive) {
+      const interval = setInterval(() => {
+        loadCampaigns();
+        if (selectedCampaign) loadLeads(selectedCampaign.id);
+      }, 5000);
+      setRefreshInterval(interval);
+    }
+    return () => { if (refreshInterval) clearInterval(refreshInterval); };
+  }, [campaigns, selectedCampaign]);
+  function getHeaders() {
+    const session = localStorage.getItem('mba_session') || '';
+    return {
+      'Content-Type': 'application/json',
+      ...(session ? { 'x-mba-session': session } : { 'Authorization': 'Bearer MBA2026' }),
+    };
+  }
+  async function loadCampaigns() {
+    try {
+      const res = await fetch('/api/campaign', { headers: getHeaders() });
+      const data = await res.json();
+      if (data.success) setCampaigns(data.campaigns || []);
+    } catch (e) {}
+  }
+  async function loadLeads(campaignId: string) {
+    try {
+      const res = await fetch(`/api/campaign?id=${campaignId}&leads=true`, { headers: getHeaders() });
+      const data = await res.json();
+      if (data.success) {
+        setSelectedCampaign(data.campaign);
+        setLeads(data.leads || []);
+      }
+    } catch (e) {}
+  }
+  function getMaxTargetCount(): number {
+    let total = 0;
+    for (const p of formPlatforms) {
+      total += PLATFORM_LIMITS[p]?.maxPerDay || 10;
+    }
+    return total;
+  }
+  async function createCampaign() {
+    if (!formName || !formQuery) {
+      alert('Preenche nome e query de pesquisa');
+      return;
+    }
+    const messageToSend = useDefaultMessage ? DEFAULT_MWANGO_MESSAGE : formMessage;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/campaign', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({
+          action: 'create',
+          name: formName,
+          platforms: formPlatforms,
+          messageTemplate: messageToSend,
+          filters: {
+            query: formQuery,
+            minFollowers: formMinFollowers,
+            maxFollowers: formMaxFollowers,
+            minMonthsActive: 3,
+            requireRegular: true,
+            targetCount: formTargetCount,
+            excludeVerified: false,
+            excludeBusiness: false,
+          },
+          cookies,
+        }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setShowForm(false);
+        setFormName('');
+        setFormQuery('');
+        setFormMessage(DEFAULT_MWANGO_MESSAGE);
+        setUseDefaultMessage(true);
+        loadCampaigns();
+        alert('Campanha Mwango Brain criada! Agora faz Scrape para encontrar leads.');
+      } else {
+        alert(data.error || 'Erro ao criar campanha');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setLoading(false);
+  }
+  async function scrapeCampaign(campaignId: string) {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/campaign', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ action: 'scrape', campaignId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadCampaigns();
+        alert(`${data.leadsFound} leads encontrados!`);
+      } else {
+        alert(data.error || 'Erro no scraping');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setLoading(false);
+  }
+  async function startCampaign(campaignId: string) {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/campaign', {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ action: 'start', campaignId }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        loadCampaigns();
+        alert('Envio iniciado no modo MAXIMO ARRISCADO!');
+      } else {
+        alert(data.error || 'Erro ao iniciar');
+      }
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setLoading(false);
+  }
+  async function pauseCampaign(campaignId: string) {
+    await fetch('/api/campaign', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ action: 'pause', campaignId }),
+    });
+    loadCampaigns();
+  }
+  async function resumeCampaign(campaignId: string) {
+    await fetch('/api/campaign', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ action: 'resume', campaignId }),
+    });
+    loadCampaigns();
+  }
+  async function deleteCampaign(campaignId: string) {
+    if (!confirm('Eliminar esta campanha?')) return;
+    await fetch('/api/campaign', {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ action: 'delete', campaignId }),
+    });
+    setSelectedCampaign(null);
+    loadCampaigns();
+  }
+  function formatTime(ms: number): string {
+    if (!ms) return '-';
+    const d = new Date(ms);
+    return d.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  }
+  function formatDuration(ms: number): string {
+    if (!ms || ms <= 0) return '-';
+    const mins = Math.ceil(ms / 60000);
+    if (mins < 60) return `${mins}min`;
+    const hours = Math.ceil(mins / 60);
+    return `${hours}h`;
+  }
+  const statusColors: Record<string, string> = {
+    pending: '#FFA726',
+    scraping: '#AB47BC',
+    sending: '#42A5F5',
+    paused: '#EF5350',
+    completed: '#66BB6A',
+    failed: '#ef5350',
+  };
+  const leadStatusColors: Record<string, string> = {
+    pending: '#666',
+    queued: '#FFA726',
+    sending: '#42A5F5',
+    sent: '#66BB6A',
+    failed: '#EF5350',
+    skipped: '#888',
+  };
+  return (
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui, -apple-system, sans-serif', 
+      {/* Header */}
+      <div style={{ padding: '24px 20px', borderBottom: '1px solid #222', display: 'flex', justifyContent: 'space-between', alignIt
+        <div>
+          <h1 style={{ margin: 0, fontSize: '22px', color: '#fff' }}>I Mwango Brain — Campanhas</h1>
+          <p style={{ margin: '4px 0 0', fontSize: '13px', color: '#888' }}>Prospecao para aquisicao de perfis</p>
+        </div>
+        <button
+          onClick={() => setShowForm(!showForm)}
+          style={{
+            background: 'linear-gradient(135deg, #4FC3F7, #0288D1)',
+            border: 'none',
+            color: '#fff',
+            padding: '12px 24px',
+            borderRadius: '12px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            fontSize: '14px',
+          }}
+        >
+          + Nova Campanha
+        </button>
+      </div>
+      {/* Banner MÁXIMO ARRISCADO */}
+      <div style={{ padding: '12px 20px', background: '#2e1a1a', borderBottom: '1px solid #4a2d2d', display: 'flex', alignItems: 'c
+        <span>II</span>
+        <span>
+          <strong>MODO MAXIMO ARRISCADO ATIVO</strong> — 
+          IG: {PLATFORM_LIMITS.instagram.maxPerDay}/dia ({PLATFORM_LIMITS.instagram.minInterval/60}-{PLATFORM_LIMITS.instagram.max
+          FB: {PLATFORM_LIMITS.facebook.maxPerDay}/dia ({PLATFORM_LIMITS.facebook.minInterval/60}-{PLATFORM_LIMITS.facebook.maxInte
+          TT: {PLATFORM_LIMITS.tiktok.maxPerDay}/dia ({PLATFORM_LIMITS.tiktok.minInterval/60}-{PLATFORM_LIMITS.tiktok.maxInterval/
+        </span>
+      </div>
+      {/* Form Nova Campanha */}
+      {showForm && (
+        <div style={{ padding: '20px', background: '#111', borderBottom: '1px solid #222' }}>
+          <div style={{ maxWidth: '700px', margin: '0 auto' }}>
+            <h3 style={{ color: '#fff', margin: '0 0 16px' }}>Criar Campanha de Aquisicao</h3>
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '6px', textTransform: 'uppercase', l
+              <input
+                value={formName}
+                onChange={e => setFormName(e.target.value)}
+                placeholder="Ex: Aquisicao Julho - Criadores Luanda"
+                style={{ width: '100%', padding: '12px', background: '#0a0a0a', border: '1px solid #333', borderRadius: '10px', col
+              />
+            </div>
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '6px', textTransform: 'uppercase', l
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {(['instagram', 'facebook', 'tiktok'] as const).map(p => {
+                  const hasCookies = p === 'instagram' ? !!(cookies.igSessionid && cookies.igCsrf)
+                    : p === 'facebook' ? !!(cookies.fbCookie && cookies.fbDtsg)
+                    : !!(cookies.ttSessionid && cookies.ttCsrf);
+                  const selected = formPlatforms.includes(p);
+                  const limit = PLATFORM_LIMITS[p];
+                  return (
+                    <button
+                      key={p}
+                      onClick={() => {
+                        if (!hasCookies) {
+                          alert(`Vai a /setup-cookies para configurar cookies do ${p}`);
+                          return;
+                        }
+                        setFormPlatforms(prev => selected ? prev.filter(x => x !== p) : [...prev, p]);
+                      }}
+                      style={{
+                        padding: '10px 16px',
+                        borderRadius: '10px',
+                        border: '1px solid ' + (selected ? PLATFORM_COLORS[p] : '#333'),
+                        background: selected ? PLATFORM_COLORS[p] + '22' : '#0a0a0a',
+                        color: selected ? PLATFORM_COLORS[p] : hasCookies ? '#888' : '#444',
+                        cursor: hasCookies ? 'pointer' : 'not-allowed',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      {PLATFORM_ICONS[p]} {p}
+                      <span style={{ fontSize: '10px', opacity: 0.7 }}>({limit.maxPerDay}/dia)</span>
+                      {!hasCookies && ' I'}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            {/* Mensagem */}
+            <div style={{ marginBottom: '12px', padding: '12px', background: '#0a0a0a', borderRadius: '10px', border: '1px solid #2
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
+                <input
+                  type="checkbox"
+                  checked={useDefaultMessage}
+                  onChange={e => {
+                    setUseDefaultMessage(e.target.checked);
+                    if (e.target.checked) setFormMessage(DEFAULT_MWANGO_MESSAGE);
+                  }}
+                  style={{ width: '18px', height: '18px', accentColor: '#4FC3F7' }}
+                />
+                <label style={{ color: '#fff', fontSize: '14px', fontWeight: 600 }}>Usar mensagem Mwango Brain (recomendado)</label
+              </div>
+              <div style={{ fontSize: '11px', color: '#8BC34A', marginBottom: '8px', padding: '6px 10px', background: '#1a2e1a', bo
+                I Sem palavras de risco • I 5 variantes rotativas automaticas • I Sem links na 1a mensagem
+              </div>
+              <textarea
+                value={formMessage}
+                onChange={e => {
+                  setFormMessage(e.target.value);
+                  if (e.target.value !== DEFAULT_MWANGO_MESSAGE) setUseDefaultMessage(false);
+                }}
+                rows={useDefaultMessage ? 8 : 10}
+                readOnly={useDefaultMessage}
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  background: useDefaultMessage ? '#0a0a0a' : '#111',
+                  border: '1px solid ' + (useDefaultMessage ? '#333' : '#444'),
+                  borderRadius: '10px',
+                  color: '#fff',
+                  fontSize: '14px',
+                  outline: 'none',
+                  resize: 'vertical',
+                  opacity: useDefaultMessage ? 0.8 : 1,
+                }}
+              />
+              <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
+                Variaveis: {'{{username}}'} {'{{name}}'} {'{{followers}}'} • 5 variantes rotativas automaticas para cada lead
+              </div>
+            </div>
+            <div style={{ marginBottom: '12px' }}>
+              <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '6px', textTransform: 'uppercase', l
+              <input
+                value={formQuery}
+                onChange={e => setFormQuery(e.target.value)}
+                placeholder="Ex: influencer Luanda, criador de conteudo Angola, tech startup..."
+                style={{ width: '100%', padding: '12px', background: '#0a0a0a', border: '1px solid #333', borderRadius: '10px', col
+              />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '6px' }}>Min Followers</label>
+                <input type="number" value={formMinFollowers} onChange={e => setFormMinFollowers(Number(e.target.value))} style={{ 
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '6px' }}>Max Followers</label>
+                <input type="number" value={formMaxFollowers} onChange={e => setFormMaxFollowers(Number(e.target.value))} style={{ 
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '6px' }}>Quantidade (max {getMaxTa
+                <input 
+                  type="number" 
+                  value={formTargetCount} 
+                  onChange={e => setFormTargetCount(Math.min(Number(e.target.value), getMaxTargetCount()))} 
+                  min={1} 
+                  max={getMaxTargetCount()} 
+                  style={{ width: '100%', padding: '10px', background: '#0a0a0a', border: '1px solid #333', borderRadius: '10px', c
+                />
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button
+                onClick={createCampaign}
+                disabled={loading}
+                style={{ flex: 1, padding: '14px', background: 'linear-gradient(135deg, #4FC3F7, #0288D1)', border: 'none', borderR
+              >
+                {loading ? '...' : 'Criar Campanha'}
+              </button>
+              <button
+                onClick={() => setShowForm(false)}
+                style={{ padding: '14px 24px', background: '#1a1a2e', border: '1px solid #333', borderRadius: '12px', color: '#888
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Lista de Campanhas */}
+      <div style={{ padding: '20px' }}>
+        {campaigns.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px 20px', color: '#666' }}>
+            <div style={{ fontSize: '48px', marginBottom: '16px' }}>I</div>
+            <p style={{ fontSize: '16px' }}>Nenhuma campanha Mwango Brain ainda</p>
+            <p style={{ fontSize: '13px' }}>Cria uma campanha para comecar a prospectar perfis</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {campaigns.map(campaign => {
+              const stats = campaign.stats;
+              const progress = stats && stats.totalLeads > 0
+                ? Math.round(((stats.sent + stats.failed + stats.skipped) / stats.totalLeads) * 100)
+                : 0;
+              return (
+                <div
+                  key={campaign.id}
+                  onClick={() => loadLeads(campaign.id)}
+                  style={{
+                    background: selectedCampaign?.id === campaign.id ? '#1a1a2e' : '#111',
+                    border: '1px solid ' + (selectedCampaign?.id === campaign.id ? '#4FC3F7' : '#222'),
+                    borderRadius: '16px',
+                    padding: '20px',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                        <h3 style={{ margin: 0, color: '#fff', fontSize: '16px' }}>{campaign.name}</h3>
+                        <span style={{
+                          padding: '3px 10px',
+                          borderRadius: '20px',
+                          fontSize: '11px',
+                          fontWeight: 700,
+                          textTransform: 'uppercase',
+                          background: (statusColors[campaign.status] || '#666') + '22',
+                          color: statusColors[campaign.status] || '#666',
+                          border: '1px solid ' + (statusColors[campaign.status] || '#666') + '44',
+                        }}>
+                          {campaign.status}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        {campaign.platforms.map(p => (
+                          <span key={p} style={{ fontSize: '12px', color: PLATFORM_COLORS[p] || '#888' }}>
+                            {PLATFORM_ICONS[p]} {p}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                      <div style={{ fontSize: '12px', color: '#666' }}>{new Date(campaign.createdAt).toLocaleDateString('pt-PT')}<
+                      {stats && (
+                        <div style={{ fontSize: '13px', color: '#4CAF50', fontWeight: 600, marginTop: '4px' }}>
+                          {stats.sent}/{stats.totalLeads} enviados
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {stats && stats.totalLeads > 0 && (
+                    <div style={{ marginBottom: '12px' }}>
+                      <div style={{ height: '6px', background: '#0a0a0a', borderRadius: '3px', overflow: 'hidden' }}>
+                        <div style={{
+                          width: `${progress}%`,
+                          height: '100%',
+                          background: campaign.status === 'completed' ? '#66BB6A' : '#4FC3F7',
+                          borderRadius: '3px',
+                          transition: 'width 0.5s',
+                        }} />
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px', fontSize: '11px', color: '#
+                        <span>{progress}% completo</span>
+                        {stats.estimatedCompletion && campaign.status === 'sending' && (
+                          <span>Termina em ~{formatDuration(stats.estimatedCompletion - Date.now())}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    {campaign.status === 'pending' && stats && stats.totalLeads === 0 && (
+                      <button
+                        onClick={e => { e.stopPropagation(); scrapeCampaign(campaign.id); }}
+                        disabled={loading}
+                        style={{ padding: '8px 16px', background: '#AB47BC22', border: '1px solid #AB47BC44', color: '#AB47BC', bor
+                      >
+                        I Scrape Leads
+                      </button>
+                    )}
+                    {campaign.status === 'pending' && stats && stats.totalLeads > 0 && (
+                      <button
+                        onClick={e => { e.stopPropagation(); startCampaign(campaign.id); }}
+                        disabled={loading}
+                        style={{ padding: '8px 16px', background: '#42A5F522', border: '1px solid #42A5F544', color: '#42A5F5', bor
+                      >
+                        I Iniciar Envio
+                      </button>
+                    )}
+                    {campaign.status === 'sending' && (
+                      <button
+                        onClick={e => { e.stopPropagation(); pauseCampaign(campaign.id); }}
+                        style={{ padding: '8px 16px', background: '#EF535022', border: '1px solid #EF535044', color: '#EF5350', bor
+                      >
+                        II Pausar
+                      </button>
+                    )}
+                    {campaign.status === 'paused' && (
+                      <button
+                        onClick={e => { e.stopPropagation(); resumeCampaign(campaign.id); }}
+                        style={{ padding: '8px 16px', background: '#66BB6A22', border: '1px solid #66BB6A44', color: '#66BB6A', bor
+                      >
+                        II Retomar
+                      </button>
+                    )}
+                    <button
+                      onClick={e => { e.stopPropagation(); deleteCampaign(campaign.id); }}
+                      style={{ padding: '8px 16px', background: '#ef535022', border: '1px solid #ef535044', color: '#ef5350', borde
+                    >
+                      II
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {/* Detalhes */}
+      {selectedCampaign && (
+        <div style={{ padding: '0 20px 20px' }}>
+          <div style={{ background: '#111', border: '1px solid #222', borderRadius: '16px', padding: '20px' }}>
+            <h3 style={{ color: '#fff', margin: '0 0 16px', fontSize: '16px' }}>
+              Leads — {selectedCampaign.name}
+            </h3>
+            {selectedCampaign.stats?.byPlatform && (
+              <div style={{ display: 'flex', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
+                {Object.entries(selectedCampaign.stats.byPlatform).map(([platform, s]) => (
+                  <div key={platform} style={{ background: '#0a0a0a', padding: '10px 16px', borderRadius: '10px', border: '1px soli
+                    <div style={{ fontSize: '12px', color: PLATFORM_COLORS[platform] || '#888', fontWeight: 600 }}>
+                      {PLATFORM_ICONS[platform]} {platform}
+                    </div>
+                    <div style={{ fontSize: '13px', color: '#aaa', marginTop: '4px' }}>
+                      I {s.sent} I {s.failed} I {s.pending}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {leads.length === 0 ? (
+                <p style={{ color: '#666', textAlign: 'center', padding: '20px' }}>Nenhum lead ainda. Faz Scrape primeiro.</p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {leads.map(lead => (
+                    <div key={lead.id} style={{
+                      background: '#0a0a0a',
+                      border: '1px solid #222',
+                      borderRadius: '10px',
+                      padding: '12px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '12px',
+                    }}>
+                      <div style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '50%',
+                        background: PLATFORM_COLORS[lead.platform] + '22',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '16px',
+                        flexShrink: 0,
+                      }}>
+                        {PLATFORM_ICONS[lead.platform]}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '2px' }}>
+                          <strong style={{ color: '#fff', fontSize: '14px' }}>@{lead.username}</strong>
+                          <span style={{
+                            padding: '2px 8px',
+                            borderRadius: '10px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            background: (leadStatusColors[lead.status] || '#666') + '22',
+                            color: leadStatusColors[lead.status] || '#666',
+                          }}>
+                            {lead.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '12px', color: '#888' }}>
+                          {lead.displayName || ''} • {lead.followers.toLocaleString('pt-PT')} followers • Score: {lead.score}
+                        </div>
+                        {lead.error && (
+                          <div style={{ fontSize: '11px', color: '#EF5350', marginTop: '2px' }}>II {lead.error}</div>
+                        )}
+                        {lead.message && lead.status === 'sent' && (
+                          <div style={{ fontSize: '11px', color: '#666', marginTop: '4px', fontStyle: 'italic' }}>"{lead.message.su
+                        )}
+                      </div>
+                      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                        {lead.sentAt && (
+                          <div style={{ fontSize: '11px', color: '#666' }}>{formatTime(lead.sentAt)}</div>
+                        )}
+                        {lead.status === 'pending' && (
+                          <button
+                            onClick={() => skipLead(selectedCampaign.id, lead.id)}
+                            style={{ fontSize: '11px', background: 'none', border: '1px solid #333', color: '#666', padding: '4px 
+                          >
+                            Skip
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      <div style={{ padding: '16px 20px', borderTop: '1px solid #222', marginTop: '20px', textAlign: 'center', fontSize: '12px', co
+        Modo MAXIMO ARRISCADO — Mwango Brain
+      </div>
+    </div>
+  );
+}
+4. app/test/page.tsx
+Página de teste para verificar cookies e enviar mensagem de teste para JesuaineCristiano78. Pergunta
+confirmação antes de enviar.
+'use client';
+import { useState } from 'react';
+//============================================================
+// PÁGINA DE TESTE — Mwango Brain
+// Verifica cookies e envia mensagem de teste
+// Destinatário: JesuaineCristiano78
+//============================================================
+const TEST_MESSAGE = `Ola {{name}},
+Acompanho o teu trabalho ha algum tempo e gosto muito do que fazes.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos sempre a procurar criadores com talento para colaborar em projetos in
+Se estiveres aberto a conversar sobre possiveis parcerias, ficava feliz em trocar algumas ideias contigo.
+Sem compromisso, claro — so uma conversa.
+Cumprimentos,
+Equipa Mwango Brain`;
+const TEST_USERNAME = "JesuaineCristiano78";
+export default function TestPage() {
+  const [results, setResults] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [customUsername, setCustomUsername] = useState(TEST_USERNAME);
+  function getHeaders() {
+    const session = localStorage.getItem('mba_session') || '';
+    return {
+      'Content-Type': 'application/json',
+      ...(session ? { 'x-mba-session': session } : { 'Authorization': 'Bearer MBA2026' }),
+    };
+  }
+  function getCookies() {
+    try {
+      return JSON.parse(localStorage.getItem('mba_cookies') || '{}');
+    } catch {
+      return {};
+    }
+  }
+  function addResult(icon: string, text: string, color: string = '#fff') {
+    setResults(prev => [...prev, { icon, text, color, time: new Date().toLocaleTimeString('pt-PT') }]);
+  }
+  async function runTests() {
+    setResults([]);
+    setLoading(true);
+    const cookies = getCookies();
+    addResult('I', 'A verificar cookies...', '#888');
+    const hasIG = cookies.igSessionid && cookies.igCsrf;
+    const hasTT = cookies.ttSessionid && cookies.ttCsrf;
+    if (!hasIG && !hasTT) {
+      addResult('I', 'Nenhum cookie encontrado! Vai a /setup-cookies primeiro.', '#EF5350');
+      setLoading(false);
+      return;
+    }
+    if (hasIG) addResult('I', `Instagram: sessionid encontrado`, '#8BC34A');
+    if (hasTT) addResult('I', `TikTok: sessionid encontrado`, '#8BC34A');
+    // Teste Instagram
+    if (hasIG) {
+      addResult('I', 'A testar cookies do Instagram...', '#888');
+      try {
+        const res = await fetch('/api/send-message', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({
+            action: 'validate-cookies',
+            platform: 'instagram',
+            sessionid: cookies.igSessionid,
+            csrftoken: cookies.igCsrf,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          addResult('I', `Instagram: Cookies VÁLIDOS! (@${data.username || 'OK'})`, '#66BB6A');
+          // Perguntar antes de enviar
+          if (confirm(`Enviar mensagem de teste para @${customUsername} no Instagram?`)) {
+            addResult('I', `A enviar mensagem de teste para @${customUsername}...`, '#888');
+            const sendRes = await fetch('/api/send-message', {
+              method: 'POST',
+              headers: getHeaders(),
+              body: JSON.stringify({
+                platform: 'instagram',
+                username: customUsername,
+                message: TEST_MESSAGE,
+                sentToday: 0,
+                igSessionid: cookies.igSessionid,
+                igCsrf: cookies.igCsrf,
+              }),
+            });
+            const sendData = await sendRes.json();
+            if (sendData.success && sendData.dmSent) {
+              addResult('I', `Instagram: MENSAGEM ENVIADA! ${sendData.deliveryMsg}`, '#66BB6A');
+              addResult('I', `Restantes hoje: ${sendData.remainingToday}`, '#4FC3F7');
+            } else {
+              addResult('I', `Instagram: Falha — ${sendData.deliveryMsg || sendData.error}`, '#EF5350');
+            }
+          } else {
+            addResult('II', 'Envio cancelado pelo utilizador', '#888');
+          }
+        } else {
+          addResult('I', `Instagram: Cookies inválidos — ${data.error}`, '#EF5350');
+        }
+      } catch (e: any) {
+        addResult('I', `Instagram: Erro — ${e.message}`, '#EF5350');
+      }
+    }
+    // Teste TikTok
+    if (hasTT) {
+      addResult('I', 'A testar cookies do TikTok...', '#888');
+      try {
+        const res = await fetch('/api/send-message', {
+          method: 'POST',
+          headers: getHeaders(),
+          body: JSON.stringify({
+            action: 'validate-cookies',
+            platform: 'tiktok',
+            ttSessionid: cookies.ttSessionid,
+            ttCsrf: cookies.ttCsrf,
+          }),
+        });
+        const data = await res.json();
+        if (data.success) {
+          addResult('I', `TikTok: Cookies VÁLIDOS! (@${data.username || 'OK'})`, '#66BB6A');
+          if (confirm(`Enviar mensagem de teste para @${customUsername} no TikTok?`)) {
+            addResult('I', `A enviar mensagem de teste para @${customUsername}...`, '#888');
+            const sendRes = await fetch('/api/send-message', {
+              method: 'POST',
+              headers: getHeaders(),
+              body: JSON.stringify({
+                platform: 'tiktok',
+                username: customUsername,
+                message: TEST_MESSAGE,
+                sentToday: 0,
+                ttSessionid: cookies.ttSessionid,
+                ttCsrf: cookies.ttCsrf,
+              }),
+            });
+            const sendData = await sendRes.json();
+            if (sendData.success && sendData.dmSent) {
+              addResult('I', `TikTok: MENSAGEM ENVIADA! ${sendData.deliveryMsg}`, '#66BB6A');
+              addResult('I', `Restantes hoje: ${sendData.remainingToday}`, '#4FC3F7');
+            } else {
+              addResult('I', `TikTok: Falha — ${sendData.deliveryMsg || sendData.error}`, '#EF5350');
+            }
+          } else {
+            addResult('II', 'Envio cancelado pelo utilizador', '#888');
+          }
+        } else {
+          addResult('I', `TikTok: Cookies inválidos — ${data.error}`, '#EF5350');
+        }
+      } catch (e: any) {
+        addResult('I', `TikTok: Erro — ${e.message}`, '#EF5350');
+      }
+    }
+    setLoading(false);
+  }
+  return (
+    <div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui, sans-serif', padding: '24px 
+      <h1 style={{ color: '#fff', margin: '0 0 8px', fontSize: '24px' }}>I Teste de Envio</h1>
+      <p style={{ color: '#888', fontSize: '13px', margin: '0 0 16px' }}>Verifica se os cookies funcionam e envia mensagem de teste
+      <div style={{ background: '#111', border: '1px solid #222', borderRadius: '12px', padding: '16px', marginBottom: '20px' }}>
+        <label style={{ display: 'block', fontSize: '12px', color: '#888', marginBottom: '8px', textTransform: 'uppercase' }}>Usern
+        <input
+          value={customUsername}
+          onChange={e => setCustomUsername(e.target.value)}
+          style={{ width: '100%', padding: '12px', background: '#0a0a0a', border: '1px solid #333', borderRadius: '10px', color: '#
+        />
+        <p style={{ color: '#666', fontSize: '11px', margin: '8px 0 0' }}>Predefinido: JesuaineCristiano78 (podes mudar)</p>
+      </div>
+      <button
+        onClick={runTests}
+        disabled={loading}
+        style={{
+          width: '100%',
+          padding: '16px',
+          background: loading ? '#333' : 'linear-gradient(135deg, #4FC3F7, #0288D1)',
+          border: 'none',
+          borderRadius: '12px',
+          color: '#fff',
+          fontWeight: 700,
+          fontSize: '16px',
+          cursor: loading ? 'wait' : 'pointer',
+          marginBottom: '24px',
+        }}
+      >
+        {loading ? 'I A testar...' : 'I Iniciar Teste Completo'}
+      </button>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {results.map((r, i) => (
+          <div key={i} style={{ background: '#111', border: '1px solid #222', borderRadius: '10px', padding: '12px', display: 'flex
+            <span style={{ fontSize: '18px' }}>{r.icon}</span>
+            <div style={{ flex: 1 }}>
+              <span style={{ color: r.color, fontSize: '14px' }}>{r.text}</span>
+            </div>
+            <span style={{ color: '#444', fontSize: '11px' }}>{r.time}</span>
+          </div>
+        ))}
+      </div>
+      {results.length > 0 && !loading && (
+        <div style={{ marginTop: '20px', padding: '16px', background: '#111', border: '1px solid #222', borderRadius: '12px', textA
+          <a href="/campaign" style={{ color: '#4FC3F7', textDecoration: 'none', fontWeight: 600, fontSize: '15px' }}>
+            → Ir para Campanhas
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+5. .env — Variáveis de Ambiente
+Ficheiro de configuração com os cookies extraídos do telemóvel. Copiar para a raiz do projeto.
+# MBA BRAIN AGENT — Variáveis de Ambiente
+# Cookies extraídos do telemóvel
+# Facebook: NÃO CONFIGURADO (fb_dtsg não conseguido)
+# Instagram + TikTok: PRONTOS
+# ============================================================
+# COOKIES INSTAGRAM I
+# ============================================================
+IG_SESSIONID=22987806071:SbVEWcl5Vv6U3M:7:AYi...
+IG_CSRFTOKEN=m6Aj_q2JVN0VbXpC2rZDf6
+# ============================================================
+# COOKIES TIKTOK I
+# ============================================================
+TT_SESSIONID=80d4dc2bfd686d8548d2ab9d832e1281
+TT_CSRF_TOKEN=QrMC0bFf-e29MPNL8xRYkfhCf_scRVlc...
+# ============================================================
+# COOKIES FACEBOOK I (opcional)
+# ============================================================
+# FB_COOKIE=
+# FB_DTSG=
+# 
+# Para adicionar Facebook depois:
+# 1. Tira fb_dtsg pelo telemóvel
+# 2. Adiciona aqui
+# 3. Reinicia o servidor
+# ============================================================
+# OUTRAS CONFIGURAÇÕES
+# ============================================================
+NEXT_PUBLIC_API_URL=http://localhost:3000
+ACCESS_CODE=MBA2026
+6. Como Instalar e Usar
+Passo 1: Copiar os ficheiros
+Copia cada ficheiro para a pasta correspondente no teu projeto:
+lib/campaign-engine.ts → /lib/campaign-engine.ts
+app/api/campaign/route.ts → /app/api/campaign/route.ts
+app/campaign/page.tsx → /app/campaign/page.tsx
+app/test/page.tsx → /app/test/page.tsx
+.env → /.env (raiz do projeto)
+Passo 2: Instalar dependências
+npm install
+Passo 3: Iniciar o servidor
+npm run dev
+Passo 4: Configurar cookies
+Vai a http://localhost:3000/setup-cookies
+Cola os cookies das plataformas
+Ou cola o conteúdo de cookies_localstorage.json no localStorage
+Passo 5: Testar
+Vai a http://localhost:3000/test
+Clica "Iniciar Teste Completo"
+Confirma o envio para JesuaineCristiano78
+Passo 6: Criar campanha
+Vai a http://localhost:3000/campaign
+Clica "Nova Campanha"
+Preenche nome, plataformas, mensagem, query
+Clica "Scrape Leads" → "Iniciar Envio"
+Limites (Máximo Arriscado):
+Instagram: 20 mensagens/dia, 1-2min entre envios
+Facebook: 30 mensagens/dia, 45s-1.5min entre envios
+TikTok: 15 mensagens/dia, 1.5-3min entre envios
+Mensagem padrão (Mwango Brain):
+5 variantes rotativas automáticas
+Sem palavras de risco (oferta, aquisicao, dinheiro)
+Tom conversacional e personalizado
+7. Cookies Extraídos
+I Instagram
+sessionid: 22987806071:SbVEWcl5Vv6U3M:7:AYi...
+csrftoken: m6Aj_q2JVN0VbXpC2rZDf6
+ds_user_id: 22987806071
+I TikTok
+sessionid: 80d4dc2bfd686d8548d2ab9d832e1281
+tt_csrf_token: QrMC0bFf-e29MPNL8xRYkfhCf_scRVlc...
+I Facebook
+c_user: 61586441893162
+xs: 27:A7PKBBUBzB29yg:2:1783868771:-1:-1
+datr: wmdLav8Pg8O7SJ2gXLLEUEG8
+II fb_dtsg: NÃO EXTRAÍDO (necessário para envio)
+Como tirar fb_dtsg:
+1. Chrome → facebook.com → login
+2. Barra de endereço: view-source:https://www.facebook.com/
+3. Ctrl+F → procura 'fb_dtsg'
+4. Copia o valor
+8. Arquitetura do Sistema
+Frontend (React/Next.js)
+/setup-cookies → Configura cookies no localStorage
+/campaign → Cria e gere campanhas
+/test → Testa cookies e envia mensagem de teste
+API Routes (Next.js)
+/api/send-message → Envia DMs via HTTP + cookies (TEU CÓDIGO)
+/api/campaign → Orquestra campanhas (NOVO)
+/api/scrape → Busca perfis (TEU CÓDIGO)
+/api/inbox → Verifica mensagens recebidas (TEU CÓDIGO)
+Libraries
+lib/social-scrapers.ts → Scrape de perfis (TEU CÓDIGO)
+lib/campaign-engine.ts → Motor de campanhas (NOVO)
+Fluxo Completo:
+1. Utilizador configura cookies em /setup-cookies
+2. Cria campanha em /campaign
+3. Campaign Engine chama social-scrapers.ts
+4. Perfis encontrados → ordenados por score
+5. Leads adicionados à fila com delays anti-block
+6. Envia DMs via /api/send-message (teu código!)
+7. Estatísticas em tempo real na interface
+9. Mensagens Mwango Brain (5 Variantes)
+Variante 1 (Padrão):
+Ola {{name}},
+Acompanho o teu trabalho ha algum tempo e gosto muito do que fazes.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos sempre a procurar criadores com talento para colaborar em projetos in
+Se estiveres aberto a conversar sobre possiveis parcerias, ficava feliz em trocar algumas ideias contigo.
+Sem compromisso, claro — so uma conversa.
+Cumprimentos,
+Equipa Mwango Brain
+Variante 2:
+Ola {{name}},
+Tenho seguido o teu conteudo e gosto muito da forma como trabalhas.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos a expandir a nossa rede de criadores e o teu perfil chamou-nos a aten
+Gostavas de conversar sobre como podemos trabalhar juntos? Sem pressa, so quando te for conveniente.
+Um abraco,
+Equipa Mwango Brain
+Variante 3:
+Ola {{name}},
+Admiro a consistencia e qualidade do teu trabalho. E notavel.
+Somos a Mwango Brain em Luanda — uma equipa que apoia criadores a crescer. O teu perfil parece encaixar perfeitamente no que procur
+Se te interessar saber mais sobre nos, estamos por aqui.
+Cumprimentos,
+Equipa Mwango Brain
+Variante 4:
+Ola {{name}},
+Encontrei o teu perfil por acaso e fiquei impressionado com a qualidade do teu conteudo.
+Somos a Mwango Brain em Luanda. Trabalhamos com criadores talentosos e o teu trabalho tem exactamente o tipo de autenticidade que v
+Gostavas de explorar uma possivel colaboracao? Fico a espera do teu feedback.
+Cumprimentos,
+Equipa Mwango Brain
+Variante 5:
+Ola {{name}},
+O teu perfil apareceu-me nas sugestoes e tive de parar para apreciar o que fazes.
+Somos a Mwango Brain, uma agencia criativa em Luanda. Estamos sempre de olho em criadores com potencial e o teu e definitivamente u
+Se estiveres curioso sobre o que fazemos, ficava feliz em apresentar-te a nossa visao.
+Um abraco,
+Equipa Mwango Brain
+I Mwango Brain
+Sistema Completo de Prospecção e Envio Automático
+Documento gerado em Julho 2026
+Use por sua conta e risco
