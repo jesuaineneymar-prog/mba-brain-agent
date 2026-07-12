@@ -137,8 +137,68 @@ async function sendIGViaCookies(username: string, message: string, sentToday: nu
 //  Usa fb_dtsg + cookie para enviar mensagem
 // ============================================================
 
-async function fbValidateCookies(fbCookie: string, fbDtsg: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+// Obter fb_dtsg automaticamente a partir dos cookies
+async function fbFetchDtsg(fbCookie: string): Promise<{ dtsg: string; error?: string }> {
   try {
+    // Metodo 1: Buscar na pagina de messages do FB Lite
+    var res = await fetch('https://m.facebook.com/messages/', {
+      headers: {
+        'cookie': fbCookie,
+        'user-agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'accept-language': 'en-US,en;q=0.9',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'none'
+      },
+      signal: AbortSignal.timeout(15000),
+      redirect: 'follow'
+    });
+    var html = await res.text();
+
+    // Procurar fb_dtsg no HTML: input hidden ou data attribute
+    var patterns = [
+      /name="fb_dtsg"[^>]*value="([^"]+)"/i,
+      /fb_dtsg["']\s*:\s*["']([^"']+)["']/i,
+      /"dtsg"\s*:\s*\{[^}]*"token"\s*:\s*"([^"]+)"/i,
+      /DTSGInitData.*?token["']\s*:\s*["']([^"']+)["']/i
+    ];
+    for (var p of patterns) {
+      var m = html.match(p);
+      if (m && m[1]) return { dtsg: m[1] };
+    }
+
+    // Metodo 2: Buscar na pagina normal do FB
+    var res2 = await fetch('https://www.facebook.com/', {
+      headers: {
+        'cookie': fbCookie,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      },
+      signal: AbortSignal.timeout(15000),
+      redirect: 'follow'
+    });
+    var html2 = await res2.text();
+    for (var p2 of patterns) {
+      var m2 = html2.match(p2);
+      if (m2 && m2[1]) return { dtsg: m2[1] };
+    }
+
+    return { dtsg: '', error: 'Nao encontrou fb_dtsg nas paginas do Facebook' };
+  } catch (e: any) {
+    return { dtsg: '', error: e.message || 'Erro ao buscar fb_dtsg' };
+  }
+}
+
+async function fbValidateCookies(fbCookie: string, fbDtsg?: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+  try {
+    // Se nao tem dtsg, tentar buscar automaticamente
+    var dtsg = fbDtsg || '';
+    if (!dtsg) {
+      var dtsgResult = await fbFetchDtsg(fbCookie);
+      if (!dtsgResult.dtsg) return { valid: false, error: 'Nao conseguiu obter fb_dtsg: ' + (dtsgResult.error || '') };
+      dtsg = dtsgResult.dtsg;
+    }
     var res = await fetch('https://www.facebook.com/api/graphql/', {
       method: 'POST',
       headers: {
@@ -146,7 +206,7 @@ async function fbValidateCookies(fbCookie: string, fbDtsg: string): Promise<{ va
         'content-type': 'application/x-www-form-urlencoded',
         'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
-      body: 'fb_dtsg=' + encodeURIComponent(fbDtsg) + '&doc_id=4364992440242396&variables=%7B%22scale%22%3A3%7D',
+      body: 'fb_dtsg=' + encodeURIComponent(dtsg) + '&doc_id=4364992440242396&variables=%7B%22scale%22%3A3%7D',
       signal: AbortSignal.timeout(10000)
     });
     if (res.ok) {
@@ -160,7 +220,7 @@ async function fbValidateCookies(fbCookie: string, fbDtsg: string): Promise<{ va
   }
 }
 
-async function fbGetUserId(fbCookie: string, fbDtsg: string, username: string): Promise<string | null> {
+async function fbGetUserId(fbCookie: string, fbDtsg?: string, username?: string): Promise<string | null> {
   try {
     // Buscar user ID do FB pelo username
     var res = await fetch('https://www.facebook.com/' + encodeURIComponent(username), {
@@ -311,10 +371,10 @@ export async function POST(request: any) {
 
   // ---- Validar cookies FB ----
   if (body.action === 'validate-cookies' && body.platform === 'facebook') {
-    if (!body.fbCookie || !body.fbDtsg) {
-      return NextResponse.json({ success: false, error: 'Falta cookie ou fb_dtsg' });
+    if (!body.fbCookie) {
+      return NextResponse.json({ success: false, error: 'Falta cookie do Facebook' });
     }
-    var fv = await fbValidateCookies(body.fbCookie, body.fbDtsg);
+    var fv = await fbValidateCookies(body.fbCookie, body.fbDtsg || undefined);
     if (fv.valid) {
       return NextResponse.json({ success: true, message: 'FB cookies validas!' });
     }
@@ -345,7 +405,7 @@ export async function POST(request: any) {
   }
 
   // ---- Enviar DM Facebook via HTTP API (GRATIS) ----
-  if (body.platform === 'facebook' && body.fbCookie && body.fbDtsg) {
+  if (body.platform === 'facebook' && body.fbCookie) {
     var fbUsername = body.username || '';
     var fbMessage = body.message || '';
     var fbSentToday = body.sentToday || 0;
@@ -353,14 +413,24 @@ export async function POST(request: any) {
     if (!fbUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Username nao fornecido', remainingToday: MAX_PER_DAY - fbSentToday });
     if (fbSentToday >= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Limite diario atingido', remainingToday: 0 });
 
+    // Passo 0: Obter fb_dtsg automaticamente se nao fornecido
+    var fbDtsg = body.fbDtsg || '';
+    if (!fbDtsg) {
+      var dtsgRes = await fbFetchDtsg(body.fbCookie);
+      if (!dtsgRes.dtsg) {
+        return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Nao conseguiu obter fb_dtsg automaticamente - ' + (dtsgRes.error || 'cookies expirados?'), remainingToday: MAX_PER_DAY - fbSentToday });
+      }
+      fbDtsg = dtsgRes.dtsg;
+    }
+
     // Passo 1: Buscar ID do utilizador
-    var fbUserId = await fbGetUserId(body.fbCookie, body.fbDtsg, fbUsername);
+    var fbUserId = await fbGetUserId(body.fbCookie, fbDtsg, fbUsername);
     if (!fbUserId) {
       return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Nao encontrou perfil de ' + fbUsername, remainingToday: MAX_PER_DAY - fbSentToday });
     }
 
     // Passo 2: Enviar DM
-    var fbDmResult = await fbSendDM(body.fbCookie, body.fbDtsg, String(fbUserId), fbMessage);
+    var fbDmResult = await fbSendDM(body.fbCookie, fbDtsg, String(fbUserId), fbMessage);
     if (fbDmResult.success) {
       return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'FB: DM enviado para ' + fbUsername, remainingToday: MAX_PER_DAY - fbSentToday - 1 });
     }
@@ -407,7 +477,7 @@ export async function POST(request: any) {
     return NextResponse.json({
       method: 'HTTP API com cookies (GRATIS, sem browser)',
       ig: { ready: !!(body.igSessionid && body.igCsrf), note: body.igSessionid ? 'Cookies configuradas' : 'Cola sessionid + csrftoken no painel' },
-      fb: { ready: !!(body.fbCookie && body.fbDtsg), note: body.fbCookie ? 'Cookies configuradas' : 'Cola cookie + fb_dtsg no painel' },
+      fb: { ready: !!body.fbCookie, note: body.fbCookie ? 'Cookies configuradas (fb_dtsg auto)' : 'Cola cookies no painel' },
       tt: { ready: !!(body.ttSessionid && body.ttCsrf), note: body.ttSessionid ? 'Cookies configuradas' : 'Cola sessionid + tt_csrf_token no painel' },
       maxPerDay: MAX_PER_DAY,
       note: 'DMs via HTTP directa — 100% gratis, sem servidor externo'

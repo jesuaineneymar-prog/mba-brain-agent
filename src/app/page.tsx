@@ -344,7 +344,11 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   const saveNotes = async function() { var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].notes = notes; saved[i].status = status; break; } } saveProfiles(saved); onUpdate(); };
   const sendMessage = async function() {
     if (!msg.trim()) return; setSending(true);
-    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
+    var reqBody: any = { username: profile.username, message: msg, platform: profile.platform, sentToday: 0 };
+    if (profile.platform === 'instagram') { reqBody.igSessionid = HARDCODED_COOKIES.instagram.sessionid; reqBody.igCsrf = HARDCODED_COOKIES.instagram.csrftoken; }
+    if (profile.platform === 'tiktok') { reqBody.ttSessionid = HARDCODED_COOKIES.tiktok.sessionid; reqBody.ttCsrf = HARDCODED_COOKIES.tiktok.csrftoken; }
+    if (profile.platform === 'facebook') { reqBody.fbCookie = HARDCODED_COOKIES.facebook.cookie; }
+    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(reqBody) }).catch(function() { return null; });
     var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
     var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { if (!saved[i].messages) saved[i].messages = []; var dmOk = !!(sd && sd.dmSent); saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' }); if (saved[i].status === 'prospect' && dmOk) saved[i].status = 'contacted'; break; } }
     saveProfiles(saved); setMsg(''); onUpdate(); setSending(false);
@@ -538,6 +542,13 @@ function MessagesTab() {
       if (p.platform === 'instagram' && igOk) {
         body.igSessionid = HARDCODED_COOKIES.instagram.sessionid;
         body.igCsrf = HARDCODED_COOKIES.instagram.csrftoken;
+      }
+      if (p.platform === 'tiktok' && ttOk) {
+        body.ttSessionid = HARDCODED_COOKIES.tiktok.sessionid;
+        body.ttCsrf = HARDCODED_COOKIES.tiktok.csrftoken;
+      }
+      if (p.platform === 'facebook' && fbOk) {
+        body.fbCookie = HARDCODED_COOKIES.facebook.cookie;
       }
 
       // Try sending (up to 3 attempts)
