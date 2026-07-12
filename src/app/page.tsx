@@ -16,9 +16,26 @@ const P = {
 const INP: React.CSSProperties = { width:'100%', padding:'9px 13px', background:P.surface2, border:'1px solid '+P.border, borderRadius:6, color:P.text, fontSize:13, outline:'none', fontFamily:"'JetBrains Mono',monospace" };
 const SEL: React.CSSProperties = { ...INP, appearance:'none' as any, cursor:'pointer' };
 const LIMIT_DIARIO = 30;
-const PROPOSTA = 'Ola,\nSomos a Mwango Brain, uma agencia criativa sediada em Luanda, Angola.\nAcompanhamos o seu perfil com interesse e gostariamos de lhe apresentar uma proposta de aquisicao da sua conta.\n\nEstamos dispostos a fazer uma oferta justa pelo seu perfil. Caso tenha interesse em saber mais detalhes, basta responder a esta mensagem e entraremos em contacto rapidamente.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
+const PROPOSTA = 'Ola,\nO meu nome e Jesuaine Cristiano e represento a Mwango Brain, uma agencia criativa sediada em Luanda, Angola.\nTenho acompanhado o seu perfil com interesse e gostaria de lhe apresentar uma proposta de aquisicao da sua conta.\n\nEstamos dispostos a fazer uma oferta justa pelo seu perfil. Caso tenha interesse em saber mais detalhes, basta responder a esta mensagem e entraremos em contacto rapidamente.\n\nAguardamos o seu contacto.\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 const FOLLOWUP_MSG_1 = 'Ola,\n\nEnviei-lhe uma mensagem ha alguns dias sobre uma proposta da Mwango Brain. Gostaria de saber se teve a oportunidade de a considerar.\n\nCaso tenha interesse, basta responder a esta mensagem.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 const FOLLOWUP_MSG_2 = 'Ola,\n\nEsta e a minha ultima mensagem. Entendo que pode nao ter interesse ou nao ter tido tempo.\n\nCaso mude de ideia, a Mwango Brain continua disponivel. Basta responder.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
+
+/* ===== COOKIES HARDCODED (do PDF) ===== */
+var HARDCODED_COOKIES = {
+  instagram: {
+    sessionid: '22987806071:SbVEWcl5Vv6U3M:7:AYiNjFxdElkZjlSc3RLaUxhUzVONnN1UkhQZzRPSXJFYzd2YkNaNFZtN1ZETUtzR3Uwa1lYRkVXa0dXRHd3UjA=',
+    csrftoken: 'm6Aj_q2JVN0VbXpC2rZDf6',
+    dsUserId: '22987806071'
+  },
+  tiktok: {
+    sessionid: '80d4dc2bfd686d8548d2ab9d832e1281',
+    csrftoken: ''
+  },
+  facebook: {
+    cookie: '',
+    fbDtsg: ''
+  }
+};
 const TABS = [
   {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},{id:'followups',label:'FOLLOW-UPS'},{id:'agent',label:'AGENTE IA'},
 ];
@@ -267,26 +284,14 @@ function LoginScreen() {
   );
 }
 
-/* ===== DASHBOARD TAB (with Automation Config) ===== */
+/* ===== DASHBOARD TAB (Stats only) ===== */
 function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh: () => void }) {
   const [dashData, setDashData] = useState<any>(null);
   const loadDash = function() { setDashData(computeDashboard()); };
   useEffect(function() { loadDash(); }, [refreshKey]);
-  const [autoCfg, setAutoCfg] = useState<any>(getAutoConfig());
-  const [showCfg, setShowCfg] = useState(false);
-  const [cfgSaved, setCfgSaved] = useState(false);
 
   if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="Sem dados" sub="Execute uma prospeccao para ver resultados." /></Panel></div>;
   var d = dashData; var o = d.overview || {};
-  var activePlats = ALL_PLATFORMS.filter(function(pf) { var pc = autoCfg.platforms && autoCfg.platforms[pf]; return autoCfg.enabled && pc && pc.enabled && pc.username; });
-
-  function updatePlat(pf: string, field: string, val: string | boolean) {
-    var c = JSON.parse(JSON.stringify(autoCfg));
-    if (!c.platforms) c.platforms = {};
-    if (!c.platforms[pf]) c.platforms[pf] = { username:'', password:'', enabled:false };
-    (c.platforms[pf] as any)[field] = val;
-    setAutoCfg(c);
-  }
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
@@ -412,32 +417,7 @@ function ProspectingTab() {
       var merged = saved.concat(newOnes);
       saveProfiles(merged); setProfiles(merged); setTotal(merged.length); setSelected(new Set());
 
-      // ===== AUTO-TRIGGER: se automacao ON, disparar envio de DMs =====
-      var autoCfg = getAutoConfig();
-      if (autoCfg.enabled && newOnes.length > 0) {
-        // Verificar se ha pelo menos uma plataforma activa com credenciais
-        var hasActivePlat = false;
-        for (var i = 0; i < ALL_PLATFORMS.length; i++) {
-          var pc = autoCfg.platforms[ALL_PLATFORMS[i]];
-          if (pc && pc.enabled && pc.username) { hasActivePlat = true; break; }
-        }
-        if (hasActivePlat) {
-          var platCounts: Record<string,number> = {};
-          for (var j = 0; j < newOnes.length; j++) {
-            var np = newOnes[j].platform || 'unknown';
-            platCounts[np] = (platCounts[np] || 0) + 1;
-          }
-          var platSummary = Object.keys(platCounts).map(function(k) { return platCounts[k] + ' ' + k; }).join(', ');
-          setProspectMsg('Prospeccao feita! ' + newOnes.length + ' novos perfis (' + platSummary + '). A iniciar envio automatico de DMs...');
-          setAutoTrigger();
-          // Switch to messages tab
-          setTimeout(function() {
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('mba-switch-tab', { detail: 'messages' }));
-            }
-          }, 800);
-        }
-      }
+      setProspectMsg('Prospeccao feita! ' + newOnes.length + ' novos perfis (' + (newOnes.length > 0 ? newOnes.map(function(p: any) { return p.platform; }).filter(function(v: string, i: number, a: string[]) { return a.indexOf(v) === i; }).map(function(p: string) { return PLAT_NAMES[p] || p; }).join(', ') : 'nenhuma') + '). Vai a MENSAGENS para enviar.');
     }
     setLoading(false);
   };
@@ -478,345 +458,187 @@ function ProspectingTab() {
   );
 }
 
-/* ===== MESSAGES TAB (with Auto-Send + 3x Retry per DM) ===== */
+/* ===== MESSAGES TAB (Simplificado - Enviar Mensagem Automatica) ===== */
 function MessagesTab() {
-  const [subtab, setSubtab] = useState('all');
-  const [messages, setMessages] = useState<any[]>([]);
-  const [selProfile, setSelProfile] = useState('');
   const [msgText, setMsgText] = useState(PROPOSTA);
   const [sending, setSending] = useState(false);
+  const [log, setLog] = useState<any[]>([]);
+  const [done, setDone] = useState(false);
+  const [progress, setProgress] = useState<any>(null);
+  const stopRef = useRef(false);
 
-  // Cookies state
-  const [igSession, setIgSession] = useState(function() { return storeGet('mba_ig_session', ''); });
-  const [igCsrf, setIgCsrf] = useState(function() { return storeGet('mba_ig_csrf', ''); });
-  const [fbCookie, setFbCookie] = useState(function() { return storeGet('mba_fb_cookie', ''); });
-  const [fbDtsg, setFbDtsg] = useState(function() { return storeGet('mba_fb_dtsg', ''); });
-  const [cookieLoading, setCookieLoading] = useState(false);
-  const [cookieMsg, setCookieMsg] = useState('');
-  const [igOk, setIgOk] = useState(!!storeGet('mba_ig_session'));
-  const [fbOk, setFbOk] = useState(!!storeGet('mba_fb_cookie'));
-  const [autoSending, setAutoSending] = useState(false);
-  const [autoProgress, setAutoProgress] = useState<any>(null);
-  const [autoLog, setAutoLog] = useState<any[]>([]);
-  const [autoDone, setAutoDone] = useState(false);
-  const autoStopRef = useRef(false);
-
-  // Listen for cookie capture event (from bookmarklet redirect)
-  useEffect(function() {
-    var handler = function(e: any) {
-      if (e.detail) {
-        if (e.detail.platform === 'instagram') { setIgOk(true); setIgSession(storeGet('mba_ig_session', '')); setIgCsrf(storeGet('mba_ig_csrf', '')); setCookieMsg('IG: Sessao capturada automaticamente!'); }
-        if (e.detail.platform === 'facebook') { setFbOk(true); setFbCookie(storeGet('mba_fb_cookie', '')); setFbDtsg(storeGet('mba_fb_dtsg', '')); setCookieMsg('FB: Sessao capturada automaticamente!'); }
-        setTimeout(function() { setCookieMsg(''); }, 4000);
-      }
-    };
-    window.addEventListener('mba-cookie-captured', handler);
-    return function() { window.removeEventListener('mba-cookie-captured', handler); };
-  }, []);
-
-  // Listen for auto-trigger from ProspectingTab
-  useEffect(function() {
-    var handler = function() {
-      if (consumeAutoTrigger()) {
-        setTimeout(function() { autoSendRef.current(); }, 500);
-      }
-    };
-    handler();
-    window.addEventListener('mba-auto-trigger', handler);
-    var interval = setInterval(handler, 1000);
-    return function() { window.removeEventListener('mba-auto-trigger', handler); clearInterval(interval); };
-  }, []);
-
-  // Helper: get cookies for a platform
-  const getPlatformCookies = function(platform: string): any {
-    if (platform === 'instagram' && igSession && igCsrf) return { igSessionid: igSession, igCsrf: igCsrf };
-    if (platform === 'facebook' && fbCookie && fbDtsg) return { fbCookie: fbCookie, fbDtsg: fbDtsg };
-    return null;
+  const addLog = function(ok: boolean, msg: string) {
+    setLog(function(prev) { return prev.concat([{ ok: ok, msg: msg, ts: new Date().toLocaleTimeString('pt-PT') }]); });
   };
 
-  const loadMessages = function() {
-    var allProfiles = getProfiles(); var msgs: any[] = [];
-    allProfiles.forEach(function(p: any) { if (p.messages) p.messages.forEach(function(m: any) { msgs.push({ content: m.content, direction: m.direction, sentAt: m.sentAt, type: m.type, sendAttempted: m.sendAttempted, delivered: m.delivered, deliveryMsg: m.deliveryMsg, _username: p.username, _platform: p.platform, _profileId: p.id }); }); });
-    msgs.sort(function(a: any, b: any) { return new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(); });
-    setMessages(msgs);
-  };
-  useEffect(function() { loadMessages(); }, []);
-
-  const sendMessage = async function() {
-    if (!selProfile || !msgText.trim()) return; setSending(true);
-    var saved = getProfiles(); var targetProfile = null;
-    for (var i = 0; i < saved.length; i++) { if (saved[i].id === selProfile) { targetProfile = saved[i]; break; } }
-    if (!targetProfile) { setSending(false); return; }
-    var sendBody: any = { username: targetProfile.username, message: msgText, platform: targetProfile.platform, sentToday: 0 };
-    var cookies = getPlatformCookies(targetProfile.platform);
-    if (cookies) Object.assign(sendBody, cookies);
-    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(sendBody) }).catch(function() { return null; });
-    var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
-    if (!targetProfile.messages) targetProfile.messages = [];
-    var dmOk = !!(sd && sd.dmSent);
-    targetProfile.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' });
-    if (targetProfile.status === 'prospect' && dmOk) targetProfile.status = 'contacted';
-    saveProfiles(saved); setMsgText(PROPOSTA); loadMessages(); setSending(false);
-  };
-
-  /* ===== AUTO-SEND WITH 5x RETRY + SECOND PASS ===== */
-  const MAX_RETRIES = 5;
-  const RETRY_DELAY = 4000;
-
-  const autoSendRef = useRef<() => Promise<void>>(async function(){});
-
-  const doLoginForPlatform = async function(pf: string, username: string, password: string): Promise<boolean> {
-    // Com cookies, "login" = verificar se tem cookies
-    var hasCookies = getPlatformCookies(pf);
-    if (hasCookies) {
-      setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: PLAT_ICONS[pf] + ' ' + PLAT_NAMES[pf] + ': cookies prontas' }]); });
-      return true;
-    }
-    setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[pf] + ' ' + PLAT_NAMES[pf] + ': sem cookies configuradas' }]); });
-    return false;
-  };
-
-  const sendDMWithRetry = async function(username: string, message: string, platform: string, sentCount: number): Promise<{ ok: boolean; msg: string }> {
-    var cfg = getAutoConfig();
-    var pc = cfg.platforms && cfg.platforms[platform];
-
-    for (var attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      if (autoStopRef.current) return { ok: false, msg: 'Parado pelo utilizador' };
-
-      // Every 3rd attempt, re-check cookies
-      if (attempt > 1 && attempt % 3 === 1) {
-        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Re-verificando cookies (tentativa ' + attempt + ')...' }]); });
-      }
-
-      var body: any = { username: username, message: message, platform: platform, sentToday: sentCount };
-      var dmc = getPlatformCookies(platform);
-      if (dmc) Object.assign(body, dmc);
-
-      var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(body) }).catch(function() { return null; });
-      var sd = sr ? await sr.json().catch(function() { return null; }) : null;
-      var dmOk = !!(sd && sd.dmSent);
-
-      if (dmOk) {
-        return { ok: true, msg: '@' + username + ' DM enviado (tentativa ' + attempt + '/' + MAX_RETRIES + ', DM Service)' };
-      }
-
-      // If failed and not last attempt, wait and retry
-      var errMsg = (sd && sd.deliveryMsg) || 'Erro desconhecido';
-      if (attempt < MAX_RETRIES) {
-        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '@' + username + ' tentativa ' + attempt + '/' + MAX_RETRIES + ' falhou (' + errMsg.substring(0, 60) + '). A tentar novamente...' }]); });
-        await new Promise(function(r) { setTimeout(r, RETRY_DELAY); });
-
-        // If cookies expired, stop trying this platform
-        if (errMsg.indexOf('expirad') >= 0 || errMsg.indexOf('Cookies expiradas') >= 0) {
-          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[platform] + ' Cookies expiradas. Para e cola novas cookies no painel.' }]); });
-          return { ok: false, msg: '@' + username + ' Cookies expiradas. Parando ' + PLAT_NAMES[platform] + '.' };
-        }
-        continue;
-      }
-
-      // Last attempt failed
-      return { ok: false, msg: '@' + username + ' FALHOU apos ' + MAX_RETRIES + ' tentativas: ' + errMsg.substring(0, 80) };
-    }
-    return { ok: false, msg: '@' + username + ' FALHOU' };
-  };
-
-  const autoSend = async function() {
-    autoStopRef.current = false; setAutoDone(false); setAutoLog([]);
-    var cfg = getAutoConfig();
-    if (!cfg.enabled) { setAutoLog([{ ok: false, msg: 'Automacao desactivada. Activa no Dashboard.' }]); return; }
+  const sendAutomaticDMs = async function() {
+    if (!msgText.trim()) { addLog(false, 'Escreve uma mensagem primeiro'); return; }
+    stopRef.current = false;
+    setDone(false);
+    setLog([]);
+    setSending(true);
 
     // Check which platforms have cookies
-    var loggedInPlats: string[] = [];
-    for (var i = 0; i < ALL_PLATFORMS.length; i++) {
-      var pf = ALL_PLATFORMS[i];
-      if (autoStopRef.current) break;
-      var ok = await doLoginForPlatform(pf, '', '');
-      if (ok) loggedInPlats.push(pf);
+    var igOk = !!(HARDCODED_COOKIES.instagram.sessionid && HARDCODED_COOKIES.instagram.csrftoken);
+    var ttOk = !!HARDCODED_COOKIES.tiktok.sessionid;
+    var fbOk = !!HARDCODED_COOKIES.facebook.cookie;
+
+    if (igOk) addLog(true, 'Instagram: cookies prontos');
+    else addLog(false, 'Instagram: sem cookies configurados');
+    if (ttOk) addLog(true, 'TikTok: sessionid pronto');
+    else addLog(false, 'TikTok: sem cookies configurados');
+    if (fbOk) addLog(true, 'Facebook: cookies prontos');
+    else addLog(false, 'Facebook: sem cookies configurados');
+
+    if (!igOk && !ttOk && !fbOk) {
+      addLog(false, 'Nenhuma plataforma com cookies. Impossivel enviar.');
+      setSending(false);
+      setDone(true);
+      return;
     }
-    if (loggedInPlats.length === 0) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Nenhuma plataforma com login bem sucedido.' }]); }); setAutoSending(false); return; }
 
-    setAutoSending(true);
-    setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: loggedInPlats.map(function(p) { return PLAT_NAMES[p]; }).join(', ') + ' prontos. A enviar DMs...' }]); });
-
-    // Get uncontacted prospects from logged-in platforms
-    await new Promise(function(r) { setTimeout(r, 500); });
+    // Get uncontacted prospects
     var allProfiles = getProfiles();
-    var activePlatSet = new Set(loggedInPlats);
+    var activePlats = new Set<string>();
+    if (igOk) activePlats.add('instagram');
+    if (ttOk) activePlats.add('tiktok');
+    if (fbOk) activePlats.add('facebook');
+
     var prospects = allProfiles.filter(function(p: any) {
-      if (!activePlatSet.has(p.platform)) return false;
+      if (!activePlats.has(p.platform)) return false;
       if (p.status === 'contacted' || p.status === 'replied' || p.status === 'accepted') return false;
       var msgs = p.messages || [];
-      for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].direction === 'outbound' && msgs[mi].sendAttempted && msgs[mi].delivered) return false; }
+      for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].direction === 'outbound' && msgs[mi].sendAttempted) return false; }
       return true;
     });
 
-    // Sort by angolaScore descending
     prospects.sort(function(a: any, b: any) { return (b.angolaScore || 0) - (a.angolaScore || 0); });
-    if (prospects.length === 0) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Sem prospects por contactar nas plataformas activas' }]); }); setAutoProgress(null); setAutoSending(false); setAutoDone(true); return; }
+
+    if (prospects.length === 0) {
+      addLog(false, 'Sem prospects por contactar. Faz prospeccao primeiro.');
+      setSending(false);
+      setDone(true);
+      return;
+    }
 
     var todayKey = 'mba_daily_' + new Date().toISOString().slice(0, 10);
     var dailySent = parseInt(storeGet(todayKey, '0') || '0') || 0;
     var batch = prospects.slice(0, LIMIT_DIARIO - dailySent);
     var sent = 0; var failed = 0;
-    var failedProfiles: any[] = []; // Track failed for second pass
 
-    setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: batch.length + ' perfis para contactar (' + dailySent + '/' + LIMIT_DIARIO + ' usados hoje)' }]); });
+    addLog(true, batch.length + ' perfis para contactar (' + dailySent + '/' + LIMIT_DIARIO + ' hoje)');
 
-    // ===== FIRST PASS =====
     for (var idx = 0; idx < batch.length; idx++) {
-      if (autoStopRef.current) { setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Parado pelo utilizador' }]); }); break; }
+      if (stopRef.current) { addLog(false, 'Parado pelo utilizador'); break; }
       var p = batch[idx];
-      setAutoProgress({ step: 'sending', current: idx + 1, total: batch.length, username: p.username, platform: p.platform, sent: sent, failed: failed });
+      setProgress({ current: idx + 1, total: batch.length, username: p.username, platform: p.platform, sent: sent, failed: failed });
 
-      var result = await sendDMWithRetry(p.username, msgText, p.platform, dailySent + sent);
+      // Build cookies for this platform
+      var body: any = { username: p.username, message: msgText, platform: p.platform, sentToday: dailySent + sent };
+      if (p.platform === 'instagram' && igOk) {
+        body.sessionid = HARDCODED_COOKIES.instagram.sessionid;
+        body.csrftoken = HARDCODED_COOKIES.instagram.csrftoken;
+      }
 
-      // Update profile in localStorage
+      // Try sending (up to 3 attempts)
+      var dmOk = false;
+      var errMsg = '';
+      for (var attempt = 1; attempt <= 3; attempt++) {
+        if (stopRef.current) break;
+        try {
+          var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+          var sd = await sr.json().catch(function() { return null; });
+          if (sd && sd.dmSent) { dmOk = true; break; }
+          errMsg = (sd && sd.deliveryMsg) || 'Erro desconhecido';
+          if (attempt < 3) {
+            addLog(false, '@' + p.username + ' tentativa ' + attempt + '/3 falhou. A tentar...');
+            await new Promise(function(r) { setTimeout(r, 3000); });
+          }
+        } catch(e) {
+          errMsg = 'Erro de conexao';
+          if (attempt < 3) await new Promise(function(r) { setTimeout(r, 3000); });
+        }
+      }
+
+      // Update profile
       var saved = getProfiles(); var target = null;
       for (var j = 0; j < saved.length; j++) { if (saved[j].id === p.id) { target = saved[j]; break; } }
       if (target) {
         if (!target.messages) target.messages = [];
-        // Remove previous failed attempts for this batch (clean slate for second pass)
-        target.messages = target.messages.filter(function(m: any) { return !(m.direction === 'outbound' && m.type === 'auto' && !m.delivered && m._secondPass); });
-        target.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto', sendAttempted: true, delivered: result.ok, deliveryMsg: result.msg });
-        if (result.ok && target.status === 'prospect') target.status = 'contacted';
+        target.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto', sendAttempted: true, delivered: dmOk, deliveryMsg: dmOk ? 'DM enviado' : errMsg });
+        if (dmOk && target.status === 'prospect') target.status = 'contacted';
         saveProfiles(saved);
       }
 
-      if (result.ok) {
+      if (dmOk) {
         sent++; dailySent++;
-        setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: result.msg }]); });
+        addLog(true, PLAT_ICONS[p.platform] + ' @' + p.username + ' - DM enviado!');
       } else {
         failed++;
-        failedProfiles.push(p);
-        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: result.msg }]); });
+        addLog(false, PLAT_ICONS[p.platform] + ' @' + p.username + ' - FALHOU: ' + errMsg.substring(0, 60));
       }
       storeSet(todayKey, String(dailySent));
-      loadMessages();
       if (idx < batch.length - 1) await new Promise(function(r) { setTimeout(r, 2500); });
     }
 
-    // ===== SECOND PASS: Retry ALL failed profiles =====
-    if (failedProfiles.length > 0 && !autoStopRef.current) {
-      setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '--- SEGUNDA PASSAGEM: ' + failedProfiles.length + ' perfis falhados, a tentar novamente ---' }]); });
-      await new Promise(function(r) { setTimeout(r, 3000); }); // Pause before second pass
-
-      // Re-check cookies for all platforms
-      for (var ri = 0; ri < loggedInPlats.length; ri++) {
-        if (autoStopRef.current) break;
-        var rpf = loggedInPlats[ri];
-        setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: PLAT_ICONS[rpf] + ' Re-verificando cookies...' }]); });
-      }
-
-      for (var fi = 0; fi < failedProfiles.length; fi++) {
-        if (autoStopRef.current) break;
-        var fp = failedProfiles[fi];
-        // Check if we still have daily quota
-        if (dailySent >= LIMIT_DIARIO) {
-          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Limite diario atingido. ' + (failedProfiles.length - fi) + ' perfis ficaram pendentes.' }]); });
-          break;
-        }
-        setAutoProgress({ step: 'sending', current: fi + 1, total: failedProfiles.length, username: fp.username, platform: fp.platform, sent: sent, failed: failed, secondPass: true });
-
-        var retryResult = await sendDMWithRetry(fp.username, msgText, fp.platform, dailySent + sent);
-
-        // Update profile
-        var saved2 = getProfiles(); var target2 = null;
-        for (var k = 0; k < saved2.length; k++) { if (saved2[k].id === fp.id) { target2 = saved2[k]; break; } }
-        if (target2) {
-          if (!target2.messages) target2.messages = [];
-          target2.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto', sendAttempted: true, delivered: retryResult.ok, deliveryMsg: '[2a passagem] ' + retryResult.msg, _secondPass: true });
-          if (retryResult.ok) {
-            if (target2.status === 'prospect') target2.status = 'contacted';
-            failed--; // Decrement failed count
-          }
-          saveProfiles(saved2);
-        }
-
-        if (retryResult.ok) {
-          sent++; dailySent++;
-          setAutoLog(function(prev) { return prev.concat([{ ok: true, msg: '[2a passagem] ' + retryResult.msg }]); });
-        } else {
-          setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: '[2a passagem] ' + retryResult.msg }]); });
-        }
-        storeSet(todayKey, String(dailySent));
-        loadMessages();
-        if (fi < failedProfiles.length - 1) await new Promise(function(r) { setTimeout(r, 3000); });
-      }
-    }
-
-    setAutoProgress({ step: 'done', sent: sent, failed: failed, total: batch.length });
-    setAutoSending(false); setAutoDone(true);
+    setProgress({ current: batch.length, total: batch.length, sent: sent, failed: failed });
+    setSending(false);
+    setDone(true);
   };
-
-  const stopAutoSend = function() { autoStopRef.current = true; setAutoSending(false); setAutoProgress(null); setAutoLog(function(prev) { return prev.concat([{ ok: false, msg: 'Parado pelo utilizador' }]); }); };
-
-  autoSendRef.current = autoSend;
-
-  var filtered = messages.filter(function(m) { return subtab === 'all' || m.direction === subtab; });
-  var profiles = getProfiles();
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <Panel style={{ marginBottom:14 }}>
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
-          <STitle>Auto-Enviar DMs (Zero Falhas)</STitle>
-          {autoSending && <button onClick={stopAutoSend} style={{ padding:'4px 10px', borderRadius:4, border:'1px solid #ff4444', background:'transparent', color:'#ff4444', fontSize:10, cursor:'pointer' }}>Parar</button>}
+        <STitle>Enviar Mensagem Automatica</STitle>
+        <div style={{ fontSize:10, color:P.textSec, marginBottom:12, lineHeight:'16px' }}>
+          Escreve a mensagem e clica no botao. O sistema envia para todos os prospects nao contactados nas plataformas com cookies configurados.
         </div>
-        <div style={{ fontSize:10, color:P.textSec, marginBottom:10, lineHeight:'16px' }}>
-          Cada DM tenta 3 vezes antes de falhar. Se a sessao expirar, faz re-login automatico.
-          Usa as credenciais configuradas no Dashboard para cada plataforma.
-        </div>
+        <textarea value={msgText} onChange={function(e) { setMsgText(e.target.value); }} rows={6} placeholder="Escreve a mensagem aqui..." style={{ ...INP, resize:'vertical', marginBottom:12, minHeight:120 }} />
 
-        {!autoSending && !autoDone && (
-          <Btn onClick={autoSend} style={{ width:'100%', background:'linear-gradient(135deg, '+P.red+', #800010)' }}>
-            Auto-Enviar DMs em Todas as Plataformas
+        {!sending && !done && (
+          <Btn onClick={sendAutomaticDMs} style={{ width:'100%', background:'linear-gradient(135deg, '+P.red+', #800010)', padding:'12px', fontSize:14, fontWeight:700 }}>
+            Enviar Mensagem Automatica
           </Btn>
         )}
-
-        {/* Progress */}
-        {autoProgress && autoProgress.step === 'sending' && (
-          <div style={{ marginTop:10 }}>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:10, color:P.textSec, marginBottom:4 }}>
-              <span>{PLAT_ICONS[autoProgress.platform] || ''} @{autoProgress.username}</span>
-              <span>{autoProgress.current}/{autoProgress.total} ({autoProgress.sent} ok, {autoProgress.failed} falhou)</span>
-            </div>
-            <div style={{ height:6, borderRadius:3, background:P.surface2, overflow:'hidden' }}>
-              <div style={{ height:'100%', borderRadius:3, background:'linear-gradient(90deg, '+P.red+', '+P.redB+')', width: ((autoProgress.current / autoProgress.total) * 100) + '%', transition:'width 0.3s' }} />
-            </div>
-          </div>
+        {sending && (
+          <button onClick={function() { stopRef.current = true; setSending(false); addLog(false, 'Parado pelo utilizador'); }} style={{ width:'100%', padding:'12px', borderRadius:6, border:'1px solid #ff4444', background:'transparent', color:'#ff4444', fontSize:13, fontWeight:700, cursor:'pointer' }}>
+            Parar Envio
+          </button>
         )}
-        {autoProgress && autoProgress.step === 'login' && (
-          <div style={{ marginTop:10, padding:10, borderRadius:6, background:P.surface2, fontSize:11, color:P.textSec, textAlign:'center' }}>
-            <span style={{ animation:'blink 1s infinite' }}>{autoProgress.text}</span>
-          </div>
-        )}
-        {autoProgress && autoProgress.step === 'done' && (
-          <div style={{ marginTop:10, padding:12, borderRadius:6, background: autoProgress.sent > 0 ? 'rgba(0,192,99,0.08)' : 'rgba(255,68,68,0.08)', border: '1px solid ' + (autoProgress.sent > 0 ? 'rgba(0,192,99,0.2)' : 'rgba(255,68,68,0.2)'), fontSize:12, fontWeight:700, color: autoProgress.sent > 0 ? P.green : '#ff6b6b', textAlign:'center' }}>
-            {autoProgress.sent} DMs enviados, {autoProgress.failed} falharam (de {autoProgress.total})
-            <button onClick={function() { setAutoDone(false); setAutoProgress(null); setAutoLog([]); }} style={{ display:'block', margin:'8px auto 0', padding:'4px 14px', borderRadius:4, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:10, cursor:'pointer' }}>Enviar mais</button>
-          </div>
-        )}
-
-        {/* Log */}
-        {autoLog.length > 0 && (
-          <div style={{ marginTop:10, maxHeight:200, overflowY:'auto', padding:8, borderRadius:6, background:'rgba(0,0,0,0.3)', fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>
-            {autoLog.map(function(l: any, i: number) { return <div key={i} style={{ color: l.ok ? P.green : '#ff6b6b', padding:'2px 0', borderBottom: i < autoLog.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>{l.ok ? '\u2713' : '\u2717'} {l.msg}</div>; })}
-          </div>
+        {done && (
+          <button onClick={function() { setDone(false); setLog([]); setProgress(null); }} style={{ width:'100%', padding:'12px', borderRadius:6, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:13, cursor:'pointer', marginTop:8 }}>
+            Enviar Novamente
+          </button>
         )}
       </Panel>
 
-      {/* Manual Send */}
-      <Panel style={{ marginBottom:14 }}>
-        <STitle>Enviar Mensagem (manual)</STitle>
-        <div style={{ marginBottom:10 }}><Lbl>Perfil</Lbl><select value={selProfile} onChange={function(e) { setSelProfile(e.target.value); }} style={SEL as any}><option value="">Seleccionar perfil...</option>{profiles.map(function(p: any) { return <option key={p.id} value={p.id}>{p.username} ({p.platform}) - {p.followers > 0 ? p.followers.toLocaleString() : '\u2014'} seg</option>; })}</select></div>
-        <textarea value={msgText} onChange={function(e) { setMsgText(e.target.value); }} rows={4} style={{ ...INP, resize:'vertical', marginBottom:8 }} />
-        <Btn onClick={sendMessage} disabled={sending || !selProfile}>{sending ? 'A enviar...' : 'Enviar agora'}</Btn>
-      </Panel>
+      {/* Progress */}
+      {progress && progress.total && (
+        <div style={{ marginBottom:14, padding:'10px 14px', borderRadius:8, background:P.surface2, border:'1px solid '+P.border }}>
+          <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:P.textSec, marginBottom:6 }}>
+            <span>{PLAT_ICONS[progress.platform] || ''} @{progress.username || ''}</span>
+            <span>{progress.current}/{progress.total} ({(progress.sent||0)} ok, {(progress.failed||0)} falhou)</span>
+          </div>
+          <div style={{ height:6, borderRadius:3, background:P.bg, overflow:'hidden' }}>
+            <div style={{ height:'100%', borderRadius:3, background:'linear-gradient(90deg, '+P.red+', '+P.redB+')', width: ((progress.current / progress.total) * 100) + '%', transition:'width 0.3s' }} />
+          </div>
+        </div>
+      )}
 
-      {/* History */}
-      <Panel><STitle>Historico ({filtered.length})</STitle>
-        {filtered.length > 0 ? filtered.slice(0, 100).map(function(m: any, i: number) { return <div key={i} style={{ padding:'10px 0', borderBottom:i<99?'1px solid '+P.redDim:'none' }}><div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}><span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:10, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span><span style={{ color:P.redB, fontSize:11, fontWeight:600 }}>{m._username}</span><span style={{ color:P.textDim, fontSize:10 }}>{m._platform}</span>{m.direction === 'outbound' && <DeliveryBadge msg={m} />}{m.type && <span style={{ color:P.textDim, fontSize:9 }}>({m.type})</span>}</div><div style={{ color:P.textSec, fontSize:11, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.content}</div><div style={{ color:P.textDim, fontSize:10, marginTop:4 }}>{fmtDt(m.sentAt)}</div></div>; }) : <EmptyState icon="\u2709" title="Sem mensagens" sub="As mensagens aparecerao aqui depois de enviar DMs" />}
-      </Panel>
+      {/* Log */}
+      {log.length > 0 && (
+        <Panel>
+          <STitle>Log de Envio</STitle>
+          <div style={{ maxHeight:300, overflowY:'auto', padding:8, borderRadius:6, background:'rgba(0,0,0,0.3)', fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>
+            {log.map(function(l: any, i: number) {
+              return <div key={i} style={{ color: l.ok ? P.green : '#ff6b6b', padding:'3px 0', borderBottom: i < log.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
+                <span style={{ color:P.textDim, marginRight:8 }}>{l.ts}</span>
+                {l.ok ? '\u2713' : '\u2717'} {l.msg}
+              </div>;
+            })}
+          </div>
+        </Panel>
+      )}
     </div>
   );
 }
@@ -897,40 +719,6 @@ export default function MBAApp() {
     return function() { clearInterval(tick); };
   }, [isAuthenticated]);
 
-  // Listen for tab switch events from auto-trigger
-  useEffect(function() {
-    var handler = function(e: any) { if (e.detail) setActiveTab(e.detail); };
-    window.addEventListener('mba-switch-tab', handler);
-    return function() { window.removeEventListener('mba-switch-tab', handler); };
-  }, []);
-
-  // Auto-capture cookies from bookmarklet (URL params)
-  useEffect(function() {
-    if (typeof window === 'undefined') return;
-    var params = new URLSearchParams(window.location.search);
-    var captureType = params.get('capture');
-    if (captureType === 'ig') {
-      var sid = params.get('sessionid') || '';
-      var csrf = params.get('csrftoken') || '';
-      if (sid && csrf) {
-        storeSet('mba_ig_session', sid);
-        storeSet('mba_ig_csrf', csrf);
-        window.history.replaceState({}, '', window.location.pathname);
-        window.dispatchEvent(new CustomEvent('mba-cookie-captured', { detail: { platform: 'instagram', ok: true } }));
-      }
-    }
-    if (captureType === 'fb') {
-      var cookie = params.get('cookie') || '';
-      var dtsg = params.get('fb_dtsg') || '';
-      if (cookie && dtsg) {
-        storeSet('mba_fb_cookie', cookie);
-        storeSet('mba_fb_dtsg', dtsg);
-        window.history.replaceState({}, '', window.location.pathname);
-        window.dispatchEvent(new CustomEvent('mba-cookie-captured', { detail: { platform: 'facebook', ok: true } }));
-      }
-    }
-  }, []);
-
   if (!isAuthenticated) return <LoginScreen />;
 
   return (
@@ -949,10 +737,10 @@ export default function MBAApp() {
       <div style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
         {TABS.map(function(t) { return <button key={t.id} onClick={function() { setActiveTab(t.id); }} style={{ padding:'10px 16px', border:'none', borderBottom:activeTab===t.id?'2px solid '+P.red:'2px solid transparent', background:'transparent', color:activeTab===t.id?P.redB:P.textDim, fontSize:11, fontWeight:activeTab===t.id?700:500, cursor:'pointer', whiteSpace:'nowrap', letterSpacing:'.5px', transition:'all .15s' }}>{t.label}</button>; })}
       </div>
-      <div style={{ flex:1, overflow:'hidden', position:'relative' }}>
+      <div style={{ flex:1, overflow:'hidden' }}>
         {activeTab === 'dashboard' && <DashboardTab key={dashKey} refreshKey={dashKey} onRefresh={function() { setDashKey(dashKey + 1); }} />}
         {activeTab === 'prospecting' && <ProspectingTab />}
-        <div style={{ display: activeTab === 'messages' ? 'block' : 'none', position: 'absolute', top:0, left:0, right:0, bottom:0, zIndex: activeTab === 'messages' ? 1 : -1 }}><MessagesTab /></div>
+        {activeTab === 'messages' && <MessagesTab />}
         {activeTab === 'followups' && <FollowUpsTab />}
         {activeTab === 'agent' && <AgentChat />}
       </div>
