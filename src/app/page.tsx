@@ -23,7 +23,7 @@ const FOLLOWUP_MSG_2 = 'Ola,\n\nEsta e a minha ultima mensagem. Entendo que pode
 /* ===== COOKIES HARDCODED (do PDF) ===== */
 var HARDCODED_COOKIES = {
   instagram: {
-    sessionid: '22987806071:SbVEWcl5Vv6U3M:7:AYiNjFxdElkZjlSc3RLaUxhUzVONnN1UkhQZzRPSXJFYzd2YkNaNFZtN1ZETUtzR3Uwa1lYRkVXa0dXRHd3UjA=',
+    sessionid: '22987806071:SbVEWcI5Vv6U3M:7:AYiO9pY2IgwR3KfY3IkgNS4FLM9_i2nDo4YsD4qrDAmAYrPHlW-S7JRlND0A5whp2U3eKTv6uplAdE',
     csrftoken: 'm6Aj_q2JVN0VbXpC2rZDf6',
     dsUserId: '22987806071'
   },
@@ -536,8 +536,8 @@ function MessagesTab() {
       // Build cookies for this platform
       var body: any = { username: p.username, message: msgText, platform: p.platform, sentToday: dailySent + sent };
       if (p.platform === 'instagram' && igOk) {
-        body.sessionid = HARDCODED_COOKIES.instagram.sessionid;
-        body.csrftoken = HARDCODED_COOKIES.instagram.csrftoken;
+        body.igSessionid = HARDCODED_COOKIES.instagram.sessionid;
+        body.igCsrf = HARDCODED_COOKIES.instagram.csrftoken;
       }
 
       // Try sending (up to 3 attempts)
