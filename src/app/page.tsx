@@ -32,7 +32,7 @@ var HARDCODED_COOKIES = {
     csrftoken: 'mAYrPHlW-S7JRlND0A5whp2U3eKTv6uplAdE'
   },
   facebook: {
-    cookie: '',
+    cookie: 'sb=wmdLav8Pg8O7SJ2gXLLEUEG8; datr=wmdLapOs2Vi2h7SYpROSkSwe; locale=en_US; wd=2.1988937854766846; c_user=61586441893162; xs=27%3AA7PKBBUBzB29yg%3A2%3A1783868771%3A-1%3A-1%3A%3AAcxYwFiYRIdzQa_JsO0mYp-ux_RoLhbxTfuMr7rqFg; fr=61586441893162%3ATCfQarDxxX; sz=891x1748; spin=1xKvzH0tFJ6e0HELw.AWcks9_ogTw4m3Cmz8-_Z6mLrdcURGpr8AQhYet340FweZMxVHM.BqVAz4..AAA.0.0.BqVBKA.AWcDRNtKIHT8w2Fu0WamG18RD-k; presence=C%7B%22t3%22%3A%5B%5D%2C%22utc3%22%3A1783894663694%2C%22v%22%3A1%7D',
     fbDtsg: ''
   }
 };
