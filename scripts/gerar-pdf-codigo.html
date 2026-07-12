@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+@page { size: A4; margin: 0; }
+:root { --bg: #0d1117; --code-bg: #161b22; --text: #c9d1d9; --accent: #58a6ff; --green: #3fb950; --orange: #d29922; --pink: #f778ba; --border: #30363d; }
+html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; }
+@media screen { html { height: auto; display: flex; justify-content: center; background: #000; } body { transform-origin: top center; margin: 20px auto; } }
+
+.cover {
+  width: 100%; height: 100vh; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center;
+  background: linear-gradient(135deg, #0d1117 0%, #161b22 100%);
+  padding: 60px; box-sizing: border-box; break-after: page; overflow: hidden;
+}
+.cover .tag { font-size: 12px; font-weight: 600; color: var(--accent); letter-spacing: 3px; text-transform: uppercase; margin-bottom: 20px; }
+.cover h1 { font-size: 48px; font-weight: 900; color: #fff; margin: 0 0 12px; }
+.cover .sub { font-size: 16px; color: var(--text); margin-bottom: 50px; }
+.cover .meta { font-size: 12px; color: #8b949e; }
+.cover .line { width: 60px; height: 3px; background: var(--accent); margin: 24px auto; border-radius: 2px; }
+
+.main-content { padding: 40px 50px; }
+.file-header {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 14px 18px; margin-bottom: 10px; break-inside: avoid;
+}
+.file-header .path { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--accent); font-weight: 500; }
+.file-header .desc { font-size: 11px; color: #8b949e; margin-top: 3px; }
+.code-block {
+  background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 16px 18px; margin-bottom: 30px; break-inside: avoid;
+  font-family: 'JetBrains Mono', monospace; font-size: 7.5px; line-height: 1.45;
+  white-space: pre-wrap; word-break: break-all; color: var(--text);
+  max-height: 900px; overflow: hidden;
+}
+.page-num { text-align: center; font-size: 10px; color: #484f58; padding: 10px 0; }
+.ending {
+  width: 100%; height: 100vh; display: flex; flex-direction: column;
+  justify-content: center; align-items: center; text-align: center;
+  background: var(--bg); padding: 60px; box-sizing: border-box;
+  break-before: page; overflow: hidden;
+}
+.ending p { color: #8b949e; font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <div class="tag">MBA Brain Agent</div>
+  <h1>Codigo Fonte</h1>
+  <div class="line"></div>
+  <div class="sub">Sistema completo de DMs automaticos via HTTP com cookies<br>Instagram + Facebook + TikTok</div>
+  <div class="meta">7 ficheiros | ~1.900 linhas | Next.js / TypeScript</div>
+</div>
+
+<div class="main-content">
+
+<div class="file-header"><div class="path">src/middleware.ts</div><div class="desc">Autenticacao: Bearer MBA2026 ou header x-mba-session | 20 linhas</div></div>
+<div class="code-block">import { NextResponse } from 'next/server';
+import type { NextRequest } from 'next/server';
+
+const PUBLIC_PATHS = ['/api/auth/login', '/api/webhook', '/api/auth/check'];
+
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const isPublic = PUBLIC_PATHS.some(p =&gt; pathname.startsWith(p));
+  if (isPublic) return NextResponse.next();
+  if (!pathname.startsWith('/api/')) return NextResponse.next();
+  const authHeader = request.headers.get('authorization');
+  const sessionHeader = request.headers.get('x-mba-session');
+  const validCode = process.env.ACCESS_CODE || 'MBA2026';
+  if (authHeader === 'Bearer ' + validCode) return NextResponse.next();
+  if (sessionHeader &amp;&amp; sessionHeader.length &gt; 0) return NextResponse.next();
+  return NextResponse.json({ error: 'Nao autorizado' }, { status: 401 });
+}
+
+export const config = { matcher: ['/api/:path*'] };</div>
+
+<div class="file-header"><div class="path">src/app/api/cookies/route.ts</div><div class="desc">Stub vazio - 501 nao funcional em serverless | 9 linhas</div></div>
+<div class="code-block">import { NextResponse } from 'next/server';
+
+export async function GET() {
+  return NextResponse.json({ cookies: [] });
+}
+
+export async function PATCH() {
+  return NextResponse.json({ error: 'Gestao de cookies via ficheiro nao disponivel no modo serverless' }, { status: 501 });
+}</div>
+
+<div class="file-header"><div class="path">src/app/api/send-message/route.ts</div><div class="desc">PRINCIPAL - valida cookies, busca user ID, envia DMs por HTTP para IG, FB, TT | 455 linhas</div></div>
+<div class="code-block">import { NextResponse } from 'next/server';
+
+export var maxDuration = 60;
+var MAX_PER_DAY = 30;
+
+async function igGetUserId(sessionid: string, csrftoken: string, username: string): Promise&lt;string | null&gt; {
+  try {
+    var res = await fetch('https://www.instagram.com/api/v1/users/web_profile_info/?username=' + encodeURIComponent(username), {
+      headers: {
+        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
+        'x-csrftoken': csrftoken,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'x-ig-app-id': '936619743392459'
+      },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!res.ok) return null;
+    var data = await res.json();
+    return data.data?.user?.pk || data.data?.user?.id || null;
+  } catch (e) { return null; }
+}
+
+async function igSendDM(sessionid: string, csrftoken: string, recipientId: string, message: string): Promise&lt;{ success: boolean; error?: string }&gt; {
+  try {
+    var threadRes = await fetch('https://www.instagram.com/api/v1/direct_v2/create_thread/', {
+      method: 'POST',
+      headers: {
+        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
+        'x-csrftoken': csrftoken,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'x-ig-app-id': '936619743392459',
+        'content-type': 'application/x-www-form-urlencoded'
+      },
+      body: 'recipient_users=' + JSON.stringify([recipientId]) + '&amp;client_context=' + Date.now() + '&amp;device_id=' + crypto.randomUUID?.() || (Math.random().toString(36) + Date.now().toString(36)),
+      signal: AbortSignal.timeout(15000)
+    });
+    var threadData = await threadRes.json();
+    var threadId = threadData.thread_id || threadData.thread?.thread_id;
+    if (!threadId) {
+      var inboxRes = await fetch('https://www.instagram.com/api/v1/direct_v2/inbox/?user_id=' + recipientId, {
+        headers: {
+          'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
+          'x-csrftoken': csrftoken, 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'x-ig-app-id': '936619743392459'
+        }, signal: AbortSignal.timeout(10000)
+      });
+      if (inboxRes.ok) {
+        var inboxData = await inboxRes.json();
+        if (inboxData.inbox &amp;&amp; inboxData.inbox.threads) {
+          for (var t of inboxData.inbox.threads) {
+            if (t.users &amp;&amp; t.users.length &gt; 0 &amp;&amp; String(t.users[0].pk) === String(recipientId)) {
+              threadId = t.thread_id; break;
+            }
+          }
+        }
+      }
+    }
+    if (!threadId) return { success: false, error: 'Nao conseguiu criar/encontrar thread de DM' };
+    var msgRes = await fetch('https://www.instagram.com/api/v1/direct_v2/threads/' + threadId + '/items/', {
+      method: 'POST',
+      headers: {
+        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
+        'x-csrftoken': csrftoken, 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'x-ig-app-id': '936619743392459', 'content-type': 'application/x-www-form-urlencoded'
+      },
+      body: 'text=' + encodeURIComponent(message) + '&amp;client_context=' + Date.now(),
+      signal: AbortSignal.timeout(15000)
+    });
+    if (msgRes.ok) return { success: true };
+    return { success: false, error: 'Erro ao enviar mensagem (HTTP ' + msgRes.status + ')' };
+  } catch (e: any) { return { success: false, error: e.message || 'timeout' }; }
+}
+
+async function igValidateCookies(sessionid: string, csrftoken: string) {
+  try {
+    var res = await fetch('https://www.instagram.com/api/v1/accounts/current_user/?fields=username', {
+      headers: {
+        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken, 'x-csrftoken': csrftoken,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'x-ig-app-id': '936619743392459'
+      }, signal: AbortSignal.timeout(10000)
+    });
+    if (res.ok) { var data = await res.json(); return { valid: true, username: data.user?.username || data.username || 'OK' }; }
+    if (res.status === 401 || res.status === 403) return { valid: false, error: 'Cookies expirados.' };
+    return { valid: false, error: 'Erro HTTP ' + res.status };
+  } catch (e: any) { return { valid: false, error: e.message || 'Erro de conexao' }; }
+}
+
+async function fbValidateCookies(fbCookie: string, fbDtsg: string) {
+  try {
+    var res = await fetch('https://www.facebook.com/api/graphql/', {
+      method: 'POST',
+      headers: { 'cookie': fbCookie, 'content-type': 'application/x-www-form-urlencoded',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      body: 'fb_dtsg=' + encodeURIComponent(fbDtsg) + '&amp;doc_id=4364992440242396&amp;variables=%7B%22scale%22%3A3%7D',
+      signal: AbortSignal.timeout(10000)
+    });
+    if (res.ok) { var data = await res.json(); if (data.data &amp;&amp; !data.error) return { valid: true, username: 'OK' }; }
+    return { valid: false, error: 'Cookies invalidos (HTTP ' + res.status + ')' };
+  } catch (e: any) { return { valid: false, error: e.message }; }
+}
+
+async function fbGetUserId(fbCookie: string, fbDtsg: string, username: string) {
+  try {
+    var res = await fetch('https://www.facebook.com/' + encodeURIComponent(username), {
+      headers: { 'cookie': fbCookie, 'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(10000), redirect: 'manual'
+    });
+    var location = res.headers.get('location') || '';
+    var idMatch = location.match(/id=(\d+)/);
+    if (idMatch) return idMatch[1];
+    var text = await res.text();
+    var entityMatch = text.match(/"entity_id"\s*:\s*"(\d+)"/);
+    if (entityMatch) return entityMatch[1];
+    return null;
+  } catch (e) { return null; }
+}
+
+async function fbSendDM(fbCookie: string, fbDtsg: string, recipientId: string, message: string) {
+  try {
+    var res = await fetch('https://www.facebook.com/messaging/send/', {
+      method: 'POST',
+      headers: { 'cookie': fbCookie, 'content-type': 'application/x-www-form-urlencoded',
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'origin': 'https://www.facebook.com', 'referer': 'https://www.facebook.com/messages/t/' + recipientId },
+      body: 'fb_dtsg=' + encodeURIComponent(fbDtsg) + '&amp;body=' + encodeURIComponent(message) +
+        '&amp;ids%5B' + recipientId + '%5D=' + recipientId + '&amp;action=send',
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) { var data = await res.json(); if (!data.error) return { success: true }; }
+    return { success: false, error: 'HTTP ' + res.status };
+  } catch (e: any) { return { success: false, error: e.message }; }
+}
+
+async function ttValidateCookies(ttSessionid: string, ttCsrf: string) {
+  try {
+    var res = await fetch('https://www.tiktok.com/api/user/profile/self/', {
+      headers: { 'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'x-csrftoken': ttCsrf, 'referer': 'https://www.tiktok.com/' }, signal: AbortSignal.timeout(10000)
+    });
+    if (res.ok) { var data = await res.json(); if (data.userName || data.user?.userName) return { valid: true, username: data.userName }; }
+    return { valid: false, error: 'Cookies invalidos' };
+  } catch (e: any) { return { valid: false, error: e.message }; }
+}
+
+async function ttGetUserId(ttSessionid: string, ttCsrf: string, username: string) {
+  try {
+    var res = await fetch('https://www.tiktok.com/api/user/detail/?uniqueId=' + encodeURIComponent(username), {
+      headers: { 'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!res.ok) return null;
+    var data = await res.json();
+    return data.userInfo?.user?.id || data.user?.id || null;
+  } catch (e) { return null; }
+}
+
+async function ttSendDM(ttSessionid: string, ttCsrf: string, recipientId: string, message: string) {
+  try {
+    var res = await fetch('https://www.tiktok.com/api/chat/send/', {
+      method: 'POST',
+      headers: { 'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
+        'content-type': 'application/x-www-form-urlencoded', 'x-csrftoken': ttCsrf,
+        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      body: 'recipient_user_id=' + encodeURIComponent(recipientId) + '&amp;content=' + encodeURIComponent(message) + '&amp;type=text',
+      signal: AbortSignal.timeout(15000)
+    });
+    if (res.ok) { var data = await res.json(); if (data.status_code === 0 || !data.message) return { success: true }; }
+    return { success: false, error: 'HTTP ' + res.status };
+  } catch (e: any) { return { success: false, error: e.message }; }
+}
+
+export async function POST(request: any) {
+  var body;
+  try { body = await request.json(); } catch(e) { return NextResponse.json({ error: 'JSON invalido' }, { status: 400 }); }
+
+  if (body.action === 'validate-cookies' &amp;&amp; body.platform === 'instagram') {
+    if (!body.sessionid || !body.csrftoken) return NextResponse.json({ success: false, error: 'Falta sessionid ou csrftoken' });
+    var v = await igValidateCookies(body.sessionid, body.csrftoken);
+    if (v.valid) return NextResponse.json({ success: true, message: 'IG cookies validas! (@' + (v.username||'') + ')', username: v.username });
+    return NextResponse.json({ success: false, error: v.error || 'Cookies invalidas' });
+  }
+
+  if (body.action === 'validate-cookies' &amp;&amp; body.platform === 'facebook') {
+    if (!body.fbCookie || !body.fbDtsg) return NextResponse.json({ success: false, error: 'Falta cookie ou fb_dtsg' });
+    var fv = await fbValidateCookies(body.fbCookie, body.fbDtsg);
+    if (fv.valid) return NextResponse.json({ success: true, message: 'FB cookies validas!' });
+    return NextResponse.json({ success: false, error: fv.error || 'Cookies invalidas' });
+  }
+
+  if (body.platform === 'instagram' &amp;&amp; body.igSessionid &amp;&amp; body.igCsrf) {
+    var igUsername = body.username || ''; var igMessage = body.message || ''; var sentToday = body.sentToday || 0;
+    if (!igUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: Username nao fornecido' });
+    if (sentToday &gt;= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: Limite diario atingido' });
+    var userId = await igGetUserId(body.igSessionid, body.igCsrf, igUsername);
+    if (!userId) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: Nao encontrou @' + igUsername });
+    var dmResult = await igSendDM(body.igSessionid, body.igCsrf, String(userId), igMessage);
+    if (dmResult.success) return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'IG: DM enviado para @' + igUsername });
+    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: ' + (dmResult.error || 'Falhou') });
+  }
+
+  if (body.platform === 'facebook' &amp;&amp; body.fbCookie &amp;&amp; body.fbDtsg) {
+    var fbUsername = body.username || ''; var fbMessage = body.message || ''; var fbSentToday = body.sentToday || 0;
+    if (!fbUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Username nao fornecido' });
+    if (fbSentToday &gt;= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Limite diario atingido' });
+    var fbUserId = await fbGetUserId(body.fbCookie, body.fbDtsg, fbUsername);
+    if (!fbUserId) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Nao encontrou perfil' });
+    var fbDmResult = await fbSendDM(body.fbCookie, body.fbDtsg, String(fbUserId), fbMessage);
+    if (fbDmResult.success) return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'FB: DM enviado' });
+    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: ' + (fbDmResult.error || 'Falhou') });
+  }
+
+  if (body.action === 'validate-cookies' &amp;&amp; body.platform === 'tiktok') {
+    if (!body.ttSessionid || !body.ttCsrf) return NextResponse.json({ success: false, error: 'Falta ttSessionid ou ttCsrf' });
+    var tv = await ttValidateCookies(body.ttSessionid, body.ttCsrf);
+    if (tv.valid) return NextResponse.json({ success: true, message: 'TT cookies validas! (@' + (tv.username||'') + ')' });
+    return NextResponse.json({ success: false, error: tv.error || 'Cookies invalidas' });
+  }
+
+  if (body.platform === 'tiktok' &amp;&amp; body.ttSessionid &amp;&amp; body.ttCsrf) {
+    var ttUsername = body.username || ''; var ttMessage = body.message || ''; var ttSentToday = body.sentToday || 0;
+    if (!ttUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Username nao fornecido' });
+    if (ttSentToday &gt;= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Limite diario atingido' });
+    var ttUserId = await ttGetUserId(body.ttSessionid, body.ttCsrf, ttUsername);
+    if (!ttUserId) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Nao encontrou @' + ttUsername });
+    var ttDmResult = await ttSendDM(body.ttSessionid, body.ttCsrf, String(ttUserId), ttMessage);
+    if (ttDmResult.success) return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'TT: DM enviado' });
+    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: ' + (ttDmResult.error || 'Falhou') });
+  }
+
+  if (body.action === 'diagnostic') {
+    return NextResponse.json({ method: 'HTTP API com cookies (GRATIS)', maxPerDay: MAX_PER_DAY });
+  }
+
+  return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'Falta cookies. Cola no painel.', needCookies: true });
+}
+
+export async function GET() {
+  return NextResponse.json({ maxPerDay: MAX_PER_DAY, method: 'http-cookies' });
+}</div>
+
+<div class="file-header"><div class="path">src/app/api/inbox/route.ts</div><div class="desc">Le mensagens recebidas no inbox do IG e TT via cookies | 210 linhas</div></div>
+<div class="code-block">import { NextResponse } from 'next/server';
+export var maxDuration = 30;
+
+var _igS1 = '22987806071%3AdZfcQqlpEVlzPb%3A17%3AAYh';
+var _igS2 = 'NXm-SkI1Lf16_mMpsfnCYGpcIkKJx0uGdlN6Hpg';
+var DEFAULT_IG_SESSION = _igS1 + _igS2;
+var DEFAULT_IG_CSRF = 'm6Aj_q2JVN0VbXpC2rZDf6';
+var DEFAULT_TT_SESSION = '80d4dc2bfd686d8548d2ab9d832e1281';
+var DEFAULT_TT_CSRF = 'lAXQPAkz-jtEWROwVmW7tec4lCWq2iqX62qc';
+
+function fetchW(url, opts, timeout) {
+  if (!timeout) timeout = 10000;
+  var ac = new AbortController();
+  var tid = setTimeout(function() { ac.abort(); }, timeout);
+  return fetch(url, { ...opts, signal: ac.signal }).then(function(res) { clearTimeout(tid); return res; })
+    .catch(function() { clearTimeout(tid); return null; });
+}
+
+function fetchIGInbox(sessionid, csrftoken) {
+  var dsUserId = sessionid.split('%3A')[0] || '';
+  var cookies = 'sessionid=' + sessionid + '; csrftoken=' + csrftoken + '; ds_user_id=' + dsUserId;
+  return fetchW('https://www.instagram.com/api/v1/direct_v2/inbox/?thread_message_limit=10&amp;limit=20', {
+    headers: { 'Cookie': cookies, 'X-IG-App-ID': '936619743392459', 'X-CSRFToken': csrftoken,
+      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)', 'Accept-Language': 'pt-PT,pt;q=0.9' }
+  }, 12000).then(function(res) {
+    if (!res || !res.ok) return null;
+    return res.json().catch(function() { return null; });
+  });
+}
+
+function parseIGInbox(data, knownUsernames) {
+  var messages = [];
+  if (!data || !data.inbox || !data.inbox.threads) return messages;
+  for (var ti = 0; ti &lt; data.inbox.threads.length; ti++) {
+    var thread = data.inbox.threads[ti]; var items = thread.items || []; var users = thread.users || [];
+    var otherUsername = ''; var otherUserId = '';
+    for (var ui = 0; ui &lt; users.length; ui++) {
+      var un = (users[ui].username || '').toLowerCase();
+      if (knownUsernames.indexOf(un) &gt;= 0) { otherUsername = un; otherUserId = String(users[ui].pk || ''); break; }
+    }
+    if (!otherUsername) continue;
+    for (var mi = 0; mi &lt; items.length; mi++) {
+      var item = items[mi];
+      if (String(item.user_id || item.sender_id || '') !== otherUserId) continue;
+      if (item.item_type !== 'text') continue;
+      var text = item.text || ''; if (!text.trim()) continue;
+      var timestamp = item.timestamp || 0; if (timestamp &lt; 1e12 &amp;&amp; timestamp &gt; 0) timestamp *= 1000;
+      messages.push({ platform: 'instagram', username: otherUsername, content: text, timestamp, threadId: thread.thread_id || '' });
+    }
+  }
+  return messages;
+}
+
+function fetchTTInbox(sessionid, csrftoken) {
+  return fetchW('https://www.tiktok.com/api/chat/inbox/?count=20&amp;cursor=0&amp;unread=0', {
+    headers: { 'Cookie': 'sessionid=' + sessionid + '; tt_csrf_token=' + csrftoken,
+      'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)', 'Referer': 'https://www.tiktok.com/' }
+  }, 10000).then(function(res) {
+    if (!res || !res.ok) return null;
+    return res.json().catch(function() { return null; });
+  });
+}
+
+function parseTTInbox(data, knownUsernames) {
+  var messages = [];
+  if (!data || !data.data) return messages;
+  var chats = data.data.chats || data.data.conversations || [];
+  for (var ci = 0; ci &lt; chats.length; ci++) {
+    var chat = chats[ci]; var roomName = (chat.room_name || '').replace('@', '').toLowerCase();
+    if (knownUsernames.indexOf(roomName) &lt; 0) continue;
+    for (var mi = 0; mi &lt; (chat.messages || []).length; mi++) {
+      var msg = chat.messages[mi];
+      if (msg.from_user_id === chat.to_user_id) continue;
+      var text = msg.msg_content || ''; if (!text.trim()) continue;
+      messages.push({ platform: 'tiktok', username: roomName, content: text,
+        timestamp: msg.create_time ? msg.create_time * 1000 : Date.now(), threadId: chat.room_id || '' });
+    }
+  }
+  return messages;
+}
+
+export async function POST(request) {
+  var body = await request.json();
+  var igSession = body.igSession || DEFAULT_IG_SESSION; var igCsrf = body.igCsrf || DEFAULT_IG_CSRF;
+  var ttSession = body.ttSession || DEFAULT_TT_SESSION; var ttCsrf = body.ttCsrf || DEFAULT_TT_CSRF;
+  var knownUsernames = (body.knownUsernames || []).map(function(u) { return u.toLowerCase(); });
+  var lastCheck = body.lastCheckTimestamp || 0;
+  var allMessages = []; var logs = [];
+  if (igSession &amp;&amp; igCsrf) {
+    var igData = await fetchIGInbox(igSession, igCsrf);
+    if (igData) { var igMsgs = parseIGInbox(igData, knownUsernames); logs.push('IG: ' + igMsgs.length + ' msgs');
+      igMsgs.forEach(function(m) { if (m.timestamp &gt; lastCheck) allMessages.push(m); }); }
+    else { logs.push('IG: falhou'); }
+  }
+  if (ttSession &amp;&amp; ttCsrf) {
+    var ttData = await fetchTTInbox(ttSession, ttCsrf);
+    if (ttData) { var ttMsgs = parseTTInbox(ttData, knownUsernames); logs.push('TT: ' + ttMsgs.length + ' msgs');
+      ttMsgs.forEach(function(m) { if (m.timestamp &gt; lastCheck) allMessages.push(m); }); }
+    else { logs.push('TT: falhou'); }
+  }
+  allMessages.sort(function(a, b) { return a.timestamp - b.timestamp; });
+  return NextResponse.json({ success: true, newMessages: allMessages, total: allMessages.length, log: logs, checkTimestamp: Date.now() });
+}</div>
+
+<div class="file-header"><div class="path">src/app/api/scrape/route.ts</div><div class="desc">Scraping de perfis via cookies (IG, FB, TT) + LinkedIn | 284 linhas</div></div>
+<div class="code-block">import { NextResponse } from 'next/server';
+
+export async function POST(request: Request) {
+  try {
+    const { platform, action, target, data } = await request.json();
+    switch (platform) {
+      case 'instagram': return await scrapeInstagram(action, target, data);
+      case 'facebook': return await scrapeFacebook(action, target, data);
+      case 'linkedin': return await scrapeLinkedIn(action, target, data);
+      case 'tiktok': return await scrapeTikTok(action, target, data);
+      default: return NextResponse.json({ error: 'Plataforma nao suportada' }, { status: 400 });
+    }
+  } catch (error) { return NextResponse.json({ error: 'Erro no scraping' }, { status: 500 }); }
+}
+
+async function scrapeInstagram(action: string, target: string, data: any) {
+  const cookies = 'sessionid=' + process.env.IG_SESSIONID + '; csrftoken=' + process.env.IG_CSRFTOKEN;
+  if (action === 'search') {
+    const res = await fetch('https://www.instagram.com/web/search/topsearch/?query=' + encodeURIComponent(target + ' Angola') + '&amp;context=blended', {
+      headers: { 'Cookie': cookies, 'User-Agent': 'Mozilla/5.0', 'X-CSRFToken': process.env.IG_CSRFTOKEN || '', 'X-IG-App-ID': '936619743392459' }
+    });
+    if (!res.ok) return NextResponse.json({ error: 'Instagram API: ' + res.status }, { status: res.status });
+    const json = await res.json();
+    const users = (json.users || []).map((u: any) =&gt; ({
+      platform: 'instagram', username: u.user?.username || '', displayName: u.user?.full_name || '',
+      followers: u.user?.follower_count || 0, following: u.user?.following_count || 0,
+      postsCount: u.user?.media_count || 0, isVerified: u.user?.is_verified || false,
+      bio: (u.user?.biography || '').substring(0, 200), isBusiness: u.user?.is_business_account || false
+    }));
+    return NextResponse.json({ success: true, platform: 'instagram', results: users });
+  }
+  if (action === 'profile') {
+    const res = await fetch('https://www.instagram.com/api/v1/users/web_profile_info/?username=' + target, {
+      headers: { 'Cookie': cookies, 'User-Agent': 'Mozilla/5.0', 'X-CSRFToken': process.env.IG_CSRFTOKEN || '', 'X-IG-App-ID': '936619743392459' }
+    });
+    if (!res.ok) return NextResponse.json({ error: 'Instagram: ' + res.status }, { status: res.status });
+    const json = await res.json(); const user = json.data?.user;
+    return NextResponse.json({ success: true, platform: 'instagram', profile: { username: user?.username, displayName: user?.full_name, followers: user?.edge_followed_by?.count, bio: user?.biography, isVerified: user?.is_verified } });
+  }
+  return NextResponse.json({ error: 'Accao nao suportada' }, { status: 400 });
+}
+
+async function scrapeFacebook(action: string, target: string, data: any) {
+  const accessToken = process.env.META_ACCESS_TOKEN;
+  if (action === 'search') {
+    const res = await fetch('https://graph.facebook.com/v19.0/pages/search?q=' + encodeURIComponent(target + ' Angola') + '&amp;fields=id,name,username,fan_count,category,description&amp;limit=' + (data?.limit || 50) + '&amp;access_token=' + accessToken);
+    if (!res.ok) return NextResponse.json({ error: 'Facebook: ' + res.status }, { status: res.status });
+    const json = await res.json();
+    const pages = (json.data || []).map((p: any) =&gt; ({
+      platform: 'facebook', username: p.username || 'page_' + p.id, displayName: p.name || '',
+      followers: p.fan_count || 0, bio: (p.description || '').substring(0, 200), category: p.category || '', externalId: p.id
+    }));
+    return NextResponse.json({ success: true, platform: 'facebook', results: pages });
+  }
+  return NextResponse.json({ error: 'Accao nao suportada' }, { status: 400 });
+}
+
+async function scrapeLinkedIn(action: string, target: string, data: any) {
+  const cookies = 'li_at=' + process.env.LI_AT;
+  if (action === 'search') {
+    const res = await fetch('https://www.linkedin.com/graphql?query=' + encodeURIComponent(target + ' Angola'), {
+      headers: { 'Cookie': cookies, 'User-Agent': 'Mozilla/5.0', 'Accept-Language': 'pt-PT,pt;q=0.9' }
+    });
+    if (!res.ok) return NextResponse.json({ success: false, error: 'LinkedIn bloqueou (' + res.status + ').' });
+    const text = await res.text();
+    return NextResponse.json({ success: true, platform: 'linkedin', raw: text.substring(0, 500) });
+  }
+  return NextResponse.json({ error: 'Accao nao suportada' }, { status: 400 });
+}
+
+async function scrapeTikTok(action: string, target: string, data: any) {
+  const cookies = 'sessionid=' + process.env.TT_SESSIONID + '; tt_csrf_token=' + process.env.TT_CSRF_TOKEN;
+  if (action === 'search') {
+    const res = await fetch('https://www.tiktok.com/api/search/user/general/?keyword=' + encodeURIComponent(target + ' Angola') + '&amp;count=' + (data?.limit || 30), {
+      headers: { 'Cookie': cookies, 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://www.tiktok.com/' }
+    });
+    if (!res.ok) return NextResponse.json({ error: 'TikTok: ' + res.status }, { status: res.status });
+    const json = await res.json();
+    const users = (json.user_list || []).map((u: any) =&gt; ({
+      platform: 'tiktok', username: u.user_info?.unique_id || '', displayName: u.user_info?.nickname || '',
+      followers: u.user_info?.follower_count || 0, bio: (u.user_info?.signature || '').substring(0, 200), externalId: u.user_info?.uid || ''
+    }));
+    return NextResponse.json({ success: true, platform: 'tiktok', results: users });
+  }
+  return NextResponse.json({ error: 'Accao nao suportada' }, { status: 400 });
+}</div>
+
+<div class="file-header"><div class="path">src/lib/social-scrapers.ts</div><div class="desc">Scraping via Apify + Meta Graph API + sistema de scoring | 602 linhas</div></div>
+<div class="code-block">const META_TOKEN = process.env.META_ACCESS_TOKEN || '';
+const APIFY_KEY = process.env.APIFY_API_KEY || '';
+
+interface ScrapedProfile {
+  platform: string; username: string; displayName: string | null; followers: number; following: number;
+  postsCount: number; monthsActive: number; isRegular: boolean; isVerified: boolean; bio: string | null;
+  profileUrl: string; avatarUrl: string | null; category: string | null; location: string | null;
+  isBusiness: boolean; externalId: string;
+}
+
+export async function scrapeInstagram(query: string, filters: any): Promise&lt;ScrapedProfile[]&gt; {
+  const profiles: ScrapedProfile[] = [];
+  try {
+    const response = await fetch('https://api.apify.com/v2/acts/apify/instagram-scraper/runs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + APIFY_KEY },
+      body: JSON.stringify({ searchQueries: [query || 'Luanda Angola'], resultsType: 'profiles', resultsLimit: filters.targetCount * 2 })
+    });
+    if (response.ok) {
+      const run = await response.json(); const runId = run.data?.id || run.id;
+      if (runId) { await new Promise(r =&gt; setTimeout(r, 5000));
+        const resultsRes = await fetch('https://api.apify.com/v2/actor-runs/' + runId + '/dataset/items?limit=' + (filters.targetCount * 2), { headers: { 'Authorization': 'Bearer ' + APIFY_KEY } });
+        if (resultsRes.ok) { const items = await resultsRes.json();
+          for (const item of items) { const p = mapInstagramProfile(item); if (p &amp;&amp; passesFilters(p, filters)) profiles.push(p); if (profiles.length &gt;= filters.targetCount) break; } }
+      }
+    }
+  } catch (e) { console.error('[IG Apify] Error:', e); }
+  if (profiles.length &lt; filters.targetCount) {
+    try {
+      const searchUrl = 'https://graph.facebook.com/v21.0/ig_business_discovery/search?user_id=17841400191564710&amp;q=' + encodeURIComponent(query || 'Luanda Angola') + '&amp;fields=business_discovery.username,business_discovery.followers_count,business_discovery.media_count,business_discovery.biography&amp;access_token=' + META_TOKEN;
+      const res = await fetch(searchUrl);
+      if (res.ok) { const data = await res.json(); const bd = data.business_discovery;
+        if (bd?.username) { const p: ScrapedProfile = { platform: 'instagram', username: '@' + bd.username, displayName: bd.name, followers: bd.followers_count || 0, following: 0, postsCount: bd.media_count || 0, monthsActive: 12, isRegular: true, isVerified: false, bio: bd.biography || null, profileUrl: 'https://instagram.com/' + bd.username, avatarUrl: null, category: null, location: 'Angola', isBusiness: true, externalId: bd.username };
+          if (passesFilters(p, filters)) profiles.push(p); } }
+    } catch (e) { console.error('[IG Meta API] Error:', e); }
+  }
+  return profiles.slice(0, filters.targetCount);
+}
+
+export async function scrapeFacebook(query: string, filters: any): Promise&lt;ScrapedProfile[]&gt; {
+  const profiles: ScrapedProfile[] = [];
+  try {
+    const url = 'https://graph.facebook.com/v21.0/pages/search?q=' + encodeURIComponent(query || 'Luanda Angola') + '&amp;fields=id,name,username,fan_count,category,about,created_time&amp;limit=100&amp;access_token=' + META_TOKEN;
+    const res = await fetch(url);
+    if (res.ok) { const data = await res.json();
+      for (const page of (data.data || [])) {
+        const monthsActive = Math.max(1, Math.floor((Date.now() - new Date(page.created_time || Date.now()).getTime()) / 2592000000));
+        const p: ScrapedProfile = { platform: 'facebook', username: page.username ? '@' + page.username : 'page_' + page.id, displayName: page.name, followers: page.fan_count || 0, following: 0, postsCount: 0, monthsActive, isRegular: true, isVerified: false, bio: page.about || null, profileUrl: 'https://facebook.com/' + (page.username || page.id), avatarUrl: null, category: page.category || null, location: 'Angola', isBusiness: true, externalId: page.id };
+        if (passesFilters(p, filters)) profiles.push(p); if (profiles.length &gt;= filters.targetCount) break; } }
+  } catch (e) { console.error('[FB Meta API] Error:', e); }
+  return profiles.slice(0, filters.targetCount);
+}
+
+export async function scrapeTikTok(query: string, filters: any): Promise&lt;ScrapedProfile[]&gt; {
+  const profiles: ScrapedProfile[] = [];
+  try {
+    const response = await fetch('https://api.apify.com/v2/acts/apify/tiktok-scraper/runs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + APIFY_KEY },
+      body: JSON.stringify({ hashtags: [query || 'Luanda'], resultsPerPage: filters.targetCount * 2, shouldDownloadVideos: false })
+    });
+    if (response.ok) { const run = await response.json(); const runId = run.data?.id || run.id;
+      if (runId) { await new Promise(r =&gt; setTimeout(r, 8000));
+        const resultsRes = await fetch('https://api.apify.com/v2/actor-runs/' + runId + '/dataset/items?limit=' + (filters.targetCount * 2), { headers: { 'Authorization': 'Bearer ' + APIFY_KEY } });
+        if (resultsRes.ok) { const items = await resultsRes.json(); const seen = new Set&lt;string&gt;();
+          for (const item of items) { const author = item.author?.uniqueId || item.author?.id;
+            if (author &amp;&amp; !seen.has(author)) { seen.add(author);
+              const p: ScrapedProfile = { platform: 'tiktok', username: '@' + author, displayName: item.author?.nickname || author, followers: item.author?.fans || 0, following: item.author?.following || 0, postsCount: item.author?.videoCount || 0, monthsActive: 12, isRegular: true, isVerified: item.author?.verified || false, bio: item.author?.signature || null, profileUrl: 'https://tiktok.com/@' + author, avatarUrl: null, category: null, location: null, isBusiness: false, externalId: item.author?.id || author };
+              if (passesFilters(p, filters)) profiles.push(p); if (profiles.length &gt;= filters.targetCount) break; } } } }
+  } catch (e) { console.error('[TT Apify] Error:', e); }
+  return profiles.slice(0, filters.targetCount);
+}
+
+export async function scrapeLinkedIn(query: string, filters: any): Promise&lt;ScrapedProfile[]&gt; {
+  const profiles: ScrapedProfile[] = [];
+  try {
+    const response = await fetch('https://api.apify.com/v2/acts/apify/linkedin-profile-scraper/runs', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + APIFY_KEY },
+      body: JSON.stringify({ searchQueries: [query || 'Luanda Angola'], maxResults: filters.targetCount * 2 })
+    });
+    if (response.ok) { const run = await response.json(); const runId = run.data?.id || run.id;
+      if (runId) { await new Promise(r =&gt; setTimeout(r, 8000));
+        const resultsRes = await fetch('https://api.apify.com/v2/actor-runs/' + runId + '/dataset/items?limit=' + (filters.targetCount * 2), { headers: { 'Authorization': 'Bearer ' + APIFY_KEY } });
+        if (resultsRes.ok) { const items = await resultsRes.json();
+          for (const item of items) { const username = item.username || ((item.firstName||'').toLowerCase() + '-' + (item.lastName||'').toLowerCase());
+            const p: ScrapedProfile = { platform: 'linkedin', username: '@' + username, displayName: ((item.firstName||'') + ' ' + (item.lastName||'')).trim(), followers: item.connectionsCount || 0, following: 0, postsCount: item.postsCount || 0, monthsActive: 12, isRegular: true, isVerified: false, bio: item.summary || item.headline || null, profileUrl: item.url || 'https://linkedin.com/in/' + username, avatarUrl: null, category: item.title || null, location: item.location || null, isBusiness: false, externalId: item.id || username };
+            if (passesFilters(p, filters)) profiles.push(p); if (profiles.length &gt;= filters.targetCount) break; } } }
+  } catch (e) { console.error('[LI Apify] Error:', e); }
+  return profiles.slice(0, filters.targetCount);
+}
+
+function passesFilters(p: ScrapedProfile, f: any): boolean {
+  if (p.followers &lt; f.minFollowers || p.followers &gt; f.maxFollowers) return false;
+  if (p.monthsActive &lt; f.minMonthsActive) return false;
+  if (f.requireRegular &amp;&amp; !p.isRegular) return false;
+  if (f.excludeVerified &amp;&amp; p.isVerified) return false;
+  if (f.excludeBusiness &amp;&amp; p.isBusiness) return false;
+  return true;
+}
+
+function mapInstagramProfile(item: any): ScrapedProfile | null {
+  if (!item?.username) return null;
+  return { platform: 'instagram', username: '@' + item.username, displayName: item.fullName || item.username, followers: item.followersCount || 0, following: item.followsCount || 0, postsCount: item.postsCount || 0, monthsActive: 12, isRegular: (item.postsCount||0) &gt; 20, isVerified: item.isVerified || false, bio: item.biography || null, profileUrl: 'https://instagram.com/' + item.username, avatarUrl: item.profilePicUrl || null, category: null, location: item.locationName || null, isBusiness: item.isBusinessAccount || false, externalId: item.id || item.username };
+}
+
+function extractCategory(text: string): string | null {
+  if (!text) return null; const t = text.toLowerCase();
+  const cats: Record&lt;string, string[]&gt; = { 'Restauracao': ['restaurante','comida','food','gastronomia'], 'Tecnologia': ['tech','software','app','digital','startup'], 'Marketing': ['marketing','publicidade','branding'], 'Moda': ['moda','fashion','estilo','roupa'], 'Saude': ['saude','health','clinica','fitness'], 'Educacao': ['educacao','escola','formacao','curso'], 'Imobiliario': ['imovel','imobiliaria','construcao'], 'Eventos': ['evento','festa','wedding','casamento'], 'Consultoria': ['consultoria','consulting','coach','mentoria'], 'Arte': ['arte','musica','fotografia','pintura'] };
+  for (const [cat, keywords] of Object.entries(cats)) { if (keywords.some(k =&gt; t.includes(k))) return cat; }
+  return 'Outro';
+}
+
+export function calculateScore(profile: ScrapedProfile): number {
+  let score = 0;
+  score += Math.min(40, Math.round((profile.followers / 50000) * 40));
+  score += Math.min(30, Math.round((profile.postsCount / 100) * 30));
+  score += Math.min(20, Math.round((profile.monthsActive / 48) * 20));
+  if (!profile.isVerified &amp;&amp; !profile.isBusiness) score += 10;
+  return Math.min(100, score);
+}</div>
+
+<div class="file-header"><div class="path">src/app/setup-cookies/page.tsx</div><div class="desc">UI dark mobile-friendly para colar/validar/guardar cookies no localStorage | 319 linhas</div></div>
+<div class="code-block">'use client';
+import { useState, useEffect } from 'react';
+
+interface CookieStatus { platform: string; valid: boolean; username?: string; error?: string; loading: boolean; }
+
+export default function SetupCookies() {
+  const [igSessionid, setIgSessionid] = useState('');
+  const [igCsrf, setIgCsrf] = useState('');
+  const [fbCookie, setFbCookie] = useState('');
+  const [fbDtsg, setFbDtsg] = useState('');
+  const [ttSessionid, setTtSessionid] = useState('');
+  const [ttCsrf, setTtCsrf] = useState('');
+  const [statuses, setStatuses] = useState&lt;Record&lt;string, CookieStatus&gt;&gt;({});
+  const [saved, setSaved] = useState(false);
+  const [showHelp, setShowHelp] = useState&lt;string | null&gt;(null);
+  const API = '/api/send-message';
+
+  useEffect(() =&gt; {
+    try { const d = JSON.parse(localStorage.getItem('mba_cookies') || '{}');
+      if (d.igSessionid) setIgSessionid(d.igSessionid); if (d.igCsrf) setIgCsrf(d.igCsrf);
+      if (d.fbCookie) setFbCookie(d.fbCookie); if (d.fbDtsg) setFbDtsg(d.fbDtsg);
+      if (d.ttSessionid) setTtSessionid(d.ttSessionid); if (d.ttCsrf) setTtCsrf(d.ttCsrf);
+    } catch(e) {}
+  }, []);
+
+  function getHeaders() {
+    const session = localStorage.getItem('mba_session') || '';
+    return { 'Content-Type': 'application/json', ...(session ? { 'x-mba-session': session } : { 'Authorization': 'Bearer MBA2026' }) };
+  }
+
+  async function validatePlatform(platform: string) {
+    setStatuses(prev =&gt; ({ ...prev, [platform]: { platform, valid: false, loading: true } }));
+    let body: any = { action: 'validate-cookies', platform };
+    if (platform === 'instagram') { body.sessionid = igSessionid.trim(); body.csrftoken = igCsrf.trim(); }
+    else if (platform === 'facebook') { body.fbCookie = fbCookie.trim(); body.fbDtsg = fbDtsg.trim(); }
+    else if (platform === 'tiktok') { body.ttSessionid = ttSessionid.trim(); body.ttCsrf = ttCsrf.trim(); }
+    try { const res = await fetch(API, { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) });
+      const data = await res.json();
+      setStatuses(prev =&gt; ({ ...prev, [platform]: { platform, valid: data.success, username: data.username, error: data.error, loading: false } }));
+    } catch(e: any) { setStatuses(prev =&gt; ({ ...prev, [platform]: { platform, valid: false, error: e.message, loading: false } })); }
+  }
+
+  function saveCookies() {
+    const data: any = {};
+    if (igSessionid.trim()) data.igSessionid = igSessionid.trim(); if (igCsrf.trim()) data.igCsrf = igCsrf.trim();
+    if (fbCookie.trim()) data.fbCookie = fbCookie.trim(); if (fbDtsg.trim()) data.fbDtsg = fbDtsg.trim();
+    if (ttSessionid.trim()) data.ttSessionid = ttSessionid.trim(); if (ttCsrf.trim()) data.ttCsrf = ttCsrf.trim();
+    localStorage.setItem('mba_cookies', JSON.stringify(data)); setSaved(true); setTimeout(() =&gt; setSaved(false), 3000);
+  }
+
+  function testDm(platform: string) {
+    const usernames: Record&lt;string, string&gt; = { instagram: 'meta', facebook: 'zuck', tiktok: 'tiktok' };
+    const testUser = usernames[platform] || 'test';
+    if (confirm('Enviar DM de teste para @' + testUser + '?')) {
+      const cookies = JSON.parse(localStorage.getItem('mba_cookies') || '{}');
+      let body: any = { platform, username: testUser, message: 'Teste DM - ignorar', sentToday: 0 };
+      if (platform === 'instagram') { body.igSessionid = cookies.igSessionid; body.igCsrf = cookies.igCsrf; }
+      if (platform === 'facebook') { body.fbCookie = cookies.fbCookie; body.fbDtsg = cookies.fbDtsg; }
+      if (platform === 'tiktok') { body.ttSessionid = cookies.ttSessionid; body.ttCsrf = cookies.ttCsrf; }
+      fetch(API, { method: 'POST', headers: getHeaders(), body: JSON.stringify(body) })
+        .then(r =&gt; r.json()).then(d =&gt; alert('Resultado: ' + (d.deliveryMsg || JSON.stringify(d)))).catch(e =&gt; alert('Erro: ' + e.message));
+    }
+  }
+
+  const platformConfig = [
+    { id: 'instagram', name: 'Instagram', icon: 'IG', color: '#E1306C', fields: [
+      { label: 'sessionid', value: igSessionid, set: setIgSessionid, placeholder: 'Copiado do browser' },
+      { label: 'csrftoken', value: igCsrf, set: setIgCsrf, placeholder: 'Copiado do browser' } ] },
+    { id: 'facebook', name: 'Facebook', icon: 'FB', color: '#1877F2', fields: [
+      { label: 'cookie (tudo)', value: fbCookie, set: setFbCookie, placeholder: 'Cole TODOS os cookies', big: true },
+      { label: 'fb_dtsg', value: fbDtsg, set: setFbDtsg, placeholder: 'Valor de fb_dtsg' } ] },
+    { id: 'tiktok', name: 'TikTok', icon: 'TT', color: '#25F4EE', fields: [
+      { label: 'sessionid', value: ttSessionid, set: setTtSessionid, placeholder: 'Copiado do browser' },
+      { label: 'tt_csrf_token', value: ttCsrf, set: setTtCsrf, placeholder: 'Copiado do browser' } ] }
+  ];
+
+  return (
+    &lt;div style={{ minHeight: '100vh', background: '#0a0a0a', color: '#e0e0e0', fontFamily: 'system-ui, sans-serif', padding: '16px', paddingBottom: '100px' }}&gt;
+      &lt;div style={{ textAlign: 'center', padding: '24px 0 20px', borderBottom: '1px solid #222', marginBottom: '24px' }}&gt;
+        &lt;h1 style={{ fontSize: '24px', fontWeight: 700, color: '#fff', margin: '0 0 8px' }}&gt;Configurar Cookies&lt;/h1&gt;
+        &lt;p style={{ fontSize: '14px', color: '#888', margin: 0 }}&gt;Cola os cookies de cada plataforma para ativar os DMs&lt;/p&gt;
+      &lt;/div&gt;
+      {platformConfig.map(platform =&gt; {
+        const status = statuses[platform.id];
+        return (
+          &lt;div key={platform.id} style={{ background: '#111', border: '1px solid #222', borderRadius: '16px', padding: '20px', marginBottom: '16px' }}&gt;
+            &lt;div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}&gt;
+              &lt;div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}&gt;
+                &lt;div style={{ width: '44px', height: '44px', borderRadius: '12px', background: platform.color, display: 'flex', alignItems: 'center', justifyContent: 'center', color: platform.id === 'tiktok' ? '#000' : '#fff', fontWeight: 700, fontSize: '16px' }}&gt;{platform.icon}&lt;/div&gt;
+                &lt;div&gt;
+                  &lt;div style={{ fontWeight: 600, fontSize: '17px', color: '#fff' }}&gt;{platform.name}&lt;/div&gt;
+                  {status?.valid &amp;&amp; &lt;div style={{ fontSize: '12px', color: '#4CAF50' }}&gt;Validado @{status.username || 'OK'}&lt;/div&gt;}
+                &lt;/div&gt;
+              &lt;/div&gt;
+              &lt;button onClick={() =&gt; validatePlatform(platform.id)} disabled={status?.loading}
+                style={{ background: status?.valid ? '#1B5E20' : '#1a1a2e', border: '1px solid ' + (status?.valid ? '#4CAF50' : '#333'),
+                  color: status?.valid ? '#4CAF50' : '#4FC3F7', padding: '8px 14px', borderRadius: '8px', fontSize: '13px', cursor: 'pointer', fontWeight: 600 }}&gt;
+                {status?.loading ? '...' : status?.valid ? 'OK' : 'Validar'}
+              &lt;/button&gt;
+            &lt;/div&gt;
+            {platform.fields.map((field: any) =&gt; (
+              &lt;div key={field.label} style={{ marginBottom: '12px' }}&gt;
+                &lt;label style={{ display: 'block', fontSize: '12px', color: '#666', marginBottom: '6px', fontWeight: 500, textTransform: 'uppercase' }}&gt;{field.label}&lt;/label&gt;
+                &lt;textarea value={field.value} onChange={e =&gt; field.set(e.target.value)} placeholder={field.placeholder} rows={field.big ? 3 : 2}
+                  style={{ width: '100%', background: '#0a0a0a', border: '1px solid #222', borderRadius: '10px', padding: '12px', color: '#fff', fontSize: '14px', fontFamily: 'monospace', resize: 'vertical', outline: 'none', boxSizing: 'border-box' }} /&gt;
+              &lt;/div&gt;
+            ))}
+            {status?.valid &amp;&amp; &lt;button onClick={() =&gt; testDm(platform.id)} style={{ width: '100%', background: platform.color + '22', border: '1px solid ' + platform.color + '44', color: platform.color, padding: '10px', borderRadius: '10px', fontSize: '13px', cursor: 'pointer', fontWeight: 600, marginTop: '4px' }}&gt;Enviar DM de teste ({platform.name})&lt;/button&gt;}
+          &lt;/div&gt;
+        );
+      })}
+      &lt;div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, padding: '16px', background: 'linear-gradient(transparent, #0a0a0a 30%)' }}&gt;
+        &lt;button onClick={saveCookies} style={{ width: '100%', padding: '16px', borderRadius: '14px', background: saved ? '#1B5E20' : 'linear-gradient(135deg, #4FC3F7, #0288D1)', color: '#fff', fontSize: '16px', fontWeight: 700, border: 'none', cursor: 'pointer' }}&gt;
+          {saved ? 'Cookies Guardados!' : 'Guardar Cookies'}
+        &lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  );
+}</div>
+
+</div>
+
+<div class="ending">
+  <p>MBA Brain Agent - Codigo Fonte Completo</p>
+  <p style="margin-top:8px; font-size:11px; color:#484f58;">7 ficheiros | Next.js + TypeScript | DMs via HTTP cookies</p>
+</div>
+
+</body>
+</html>
