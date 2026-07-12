@@ -29,7 +29,7 @@ var HARDCODED_COOKIES = {
   },
   tiktok: {
     sessionid: '80d4dc2bfd686d8548d2ab9d832e1281',
-    csrftoken: ''
+    csrftoken: 'mAYrPHlW-S7JRlND0A5whp2U3eKTv6uplAdE'
   },
   facebook: {
     cookie: '',
