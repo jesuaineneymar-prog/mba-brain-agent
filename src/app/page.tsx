@@ -20,22 +20,19 @@ const PROPOSTA = 'Ola,\nO meu nome e Jesuaine Cristiano e represento a Mwango Br
 const FOLLOWUP_MSG_1 = 'Ola,\n\nEnviei-lhe uma mensagem ha alguns dias sobre uma proposta da Mwango Brain. Gostaria de saber se teve a oportunidade de a considerar.\n\nCaso tenha interesse, basta responder a esta mensagem.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 const FOLLOWUP_MSG_2 = 'Ola,\n\nEsta e a minha ultima mensagem. Entendo que pode nao ter interesse ou nao ter tido tempo.\n\nCaso mude de ideia, a Mwango Brain continua disponivel. Basta responder.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 
-/* ===== COOKIES HARDCODED (do PDF) ===== */
-var HARDCODED_COOKIES = {
-  instagram: {
-    sessionid: '22987806071:SbVEWcI5Vv6U3M:7:AYiO9pY2IgwR3KfY3IkgNS4FLM9_i2nDo4YsD4qrDAmAYrPHlW-S7JRlND0A5whp2U3eKTv6uplAdE',
-    csrftoken: 'm6Aj_q2JVN0VbXpC2rZDf6',
-    dsUserId: '22987806071'
-  },
-  tiktok: {
-    sessionid: '80d4dc2bfd686d8548d2ab9d832e1281',
-    csrftoken: 'mAYrPHlW-S7JRlND0A5whp2U3eKTv6uplAdE'
-  },
-  facebook: {
-    cookie: 'sb=wmdLav8Pg8O7SJ2gXLLEUEG8; datr=wmdLapOs2Vi2h7SYpROSkSwe; locale=en_US; wd=2.1988937854766846; c_user=61586441893162; xs=27%3AA7PKBBUBzB29yg%3A2%3A1783868771%3A-1%3A-1%3A%3AAcxYwFiYRIdzQa_JsO0mYp-ux_RoLhbxTfuMr7rqFg; fr=61586441893162%3ATCfQarDxxX; sz=891x1748; spin=1xKvzH0tFJ6e0HELw.AWcks9_ogTw4m3Cmz8-_Z6mLrdcURGpr8AQhYet340FweZMxVHM.BqVAz4..AAA.0.0.BqVBKA.AWcDRNtKIHT8w2Fu0WamG18RD-k; presence=C%7B%22t3%22%3A%5B%5D%2C%22utc3%22%3A1783894663694%2C%22v%22%3A1%7D',
-    fbDtsg: ''
+/* ===== COOKIES (do localStorage) ===== */
+function getCookies() {
+  try {
+    var d = JSON.parse(localStorage.getItem('mba_cookies') || '{}');
+    return {
+      instagram: { sessionid: d.igSessionid || '', csrftoken: d.igCsrf || '', ds_user_id: d.igDsUserId || '' },
+      tiktok: { sessionid: d.ttSessionid || '', csrf: d.ttCsrf || '' },
+      facebook: { cookie: d.fbCookie || '', dtsg: '' },
+    };
+  } catch(e) {
+    return { instagram: { sessionid: '', csrftoken: '', ds_user_id: '' }, tiktok: { sessionid: '', csrf: '' }, facebook: { cookie: '', dtsg: '' } };
   }
-};
+}
 const TABS = [
   {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},{id:'followups',label:'FOLLOW-UPS'},{id:'agent',label:'AGENTE IA'},
 ];
@@ -344,11 +341,8 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   const saveNotes = async function() { var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].notes = notes; saved[i].status = status; break; } } saveProfiles(saved); onUpdate(); };
   const sendMessage = async function() {
     if (!msg.trim()) return; setSending(true);
-    var reqBody: any = { username: profile.username, message: msg, platform: profile.platform, sentToday: 0 };
-    if (profile.platform === 'instagram') { reqBody.igSessionid = HARDCODED_COOKIES.instagram.sessionid; reqBody.igCsrf = HARDCODED_COOKIES.instagram.csrftoken; }
-    if (profile.platform === 'tiktok') { reqBody.ttSessionid = HARDCODED_COOKIES.tiktok.sessionid; reqBody.ttCsrf = HARDCODED_COOKIES.tiktok.csrftoken; }
-    if (profile.platform === 'facebook') { reqBody.fbCookie = HARDCODED_COOKIES.facebook.cookie; }
-    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify(reqBody) }).catch(function() { return null; });
+    var creds = getCookies();
+    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0, credentials: creds }) }).catch(function() { return null; });
     var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
     var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { if (!saved[i].messages) saved[i].messages = []; var dmOk = !!(sd && sd.dmSent); saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' }); if (saved[i].status === 'prospect' && dmOk) saved[i].status = 'contacted'; break; } }
     saveProfiles(saved); setMsg(''); onUpdate(); setSending(false);
@@ -483,9 +477,10 @@ function MessagesTab() {
     setSending(true);
 
     // Check which platforms have cookies
-    var igOk = !!(HARDCODED_COOKIES.instagram.sessionid && HARDCODED_COOKIES.instagram.csrftoken);
-    var ttOk = !!HARDCODED_COOKIES.tiktok.sessionid;
-    var fbOk = !!HARDCODED_COOKIES.facebook.cookie;
+    var cks = getCookies();
+    var igOk = !!(cks.instagram.sessionid && cks.instagram.csrftoken);
+    var ttOk = !!cks.tiktok.sessionid;
+    var fbOk = !!cks.facebook.cookie;
 
     if (igOk) addLog(true, 'Instagram: cookies prontos');
     else addLog(false, 'Instagram: sem cookies configurados');
@@ -538,18 +533,8 @@ function MessagesTab() {
       setProgress({ current: idx + 1, total: batch.length, username: p.username, platform: p.platform, sent: sent, failed: failed });
 
       // Build cookies for this platform
-      var body: any = { username: p.username, message: msgText, platform: p.platform, sentToday: dailySent + sent };
-      if (p.platform === 'instagram' && igOk) {
-        body.igSessionid = HARDCODED_COOKIES.instagram.sessionid;
-        body.igCsrf = HARDCODED_COOKIES.instagram.csrftoken;
-      }
-      if (p.platform === 'tiktok' && ttOk) {
-        body.ttSessionid = HARDCODED_COOKIES.tiktok.sessionid;
-        body.ttCsrf = HARDCODED_COOKIES.tiktok.csrftoken;
-      }
-      if (p.platform === 'facebook' && fbOk) {
-        body.fbCookie = HARDCODED_COOKIES.facebook.cookie;
-      }
+      var creds = getCookies();
+      var body: any = { username: p.username, message: msgText, platform: p.platform, sentToday: dailySent + sent, credentials: creds };
 
       // Try sending (up to 3 attempts)
       var dmOk = false;

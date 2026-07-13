@@ -289,9 +289,11 @@ export async function createCampaign(
   cookies: Campaign['cookies']
 ): Promise<{ success: boolean; campaign?: Campaign; error?: string }> {
   try {
+    // FB e TT usam login directo (nao precisam de cookies)
+    // IG precisa de cookies (sessionid + csrftoken)
     const hasIG = cookies.igSessionid && cookies.igCsrf;
-    const hasFB = cookies.fbCookie && cookies.fbDtsg;
-    const hasTT = cookies.ttSessionid && cookies.ttCsrf;
+    const hasFB = true; // Login directo com email/password
+    const hasTT = true; // Login directo com username/password
 
     const needed = platforms.filter(p => {
       if (p === 'instagram') return hasIG;
@@ -301,7 +303,7 @@ export async function createCampaign(
     });
 
     if (needed.length === 0) {
-      return { success: false, error: 'Nenhuma plataforma tem cookies configurados. Vai a /setup-cookies primeiro.' };
+      return { success: false, error: 'Nenhuma plataforma pronta. Para Instagram, configura cookies (sessionid + csrftoken) em /setup-cookies.' };
     }
 
     // Calcular máximo seguro baseado nas plataformas escolhidas
@@ -469,23 +471,18 @@ async function processQueue(campaignId: string): Promise<void> {
   lead.message = message;
 
   try {
+    // Envia DM via API directo — passa credenciais da campanha
+    const creds = campaign.cookies || {};
     const body: any = {
       platform: lead.platform,
       username: lead.username,
       message: message,
-      sentToday: getSentTodayCount(lead.platform, cookieKey),
+      credentials: {
+        instagram: (creds.igSessionid ? { sessionid: creds.igSessionid, csrftoken: creds.igCsrf, ds_user_id: '' } : undefined),
+        facebook: (creds.fbCookie ? { cookie: creds.fbCookie, dtsg: creds.fbDtsg } : undefined),
+        tiktok: (creds.ttSessionid ? { sessionid: creds.ttSessionid, csrf: creds.ttCsrf } : undefined),
+      },
     };
-
-    if (lead.platform === 'instagram') {
-      body.igSessionid = campaign.cookies.igSessionid;
-      body.igCsrf = campaign.cookies.igCsrf;
-    } else if (lead.platform === 'facebook') {
-      body.fbCookie = campaign.cookies.fbCookie;
-      body.fbDtsg = campaign.cookies.fbDtsg;
-    } else if (lead.platform === 'tiktok') {
-      body.ttSessionid = campaign.cookies.ttSessionid;
-      body.ttCsrf = campaign.cookies.ttCsrf;
-    }
 
     const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || ''}/api/send-message`, {
       method: 'POST',
@@ -503,10 +500,10 @@ async function processQueue(campaignId: string): Promise<void> {
       lead.status = 'failed';
       lead.error = data.deliveryMsg || data.error || 'Erro desconhecido';
 
-      if (data.needCookies ||
-          (data.deliveryMsg || '').includes('cookie') ||
-          (data.deliveryMsg || '').includes('limit') ||
+      // Pausar apenas em caso de limite ou block
+      if ((data.deliveryMsg || '').includes('limit') ||
           (data.deliveryMsg || '').includes('spam') ||
+          (data.deliveryMsg || '').includes('block') ||
           res.status === 429) {
         campaign.status = 'paused';
         return;
@@ -522,7 +519,7 @@ async function processQueue(campaignId: string): Promise<void> {
 
 function getSentTodayCount(platform: string, cookieKey: string): number {
   const today = getToday();
-  const stateKey = `${platform}_${cookieKey}_${today}`;
+  const stateKey = `${platform}_${today}`;
   return sendState[stateKey]?.dailyCount || 0;
 }
 

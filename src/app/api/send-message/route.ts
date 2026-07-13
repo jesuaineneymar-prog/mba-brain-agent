@@ -1,353 +1,396 @@
 import { NextResponse } from 'next/server';
 
 // ============================================================
-//  MBA BRAIN AGENT — SEND MESSAGE API
-//  METODO GRATIS: HTTP API com cookies (IG + FB)
-//  Sem browser, sem servidor externo, sem custos
+//  MBA BRAIN AGENT — SEND MESSAGE API v4
+//  TODAS as plataformas via cookies de sessao
+//  Sem login directo (bloqueado por IPs de datacenter)
+//  Sem dependencia do n8n
 // ============================================================
 
-export var maxDuration = 60;
+export var maxDuration = 300;
 var MAX_PER_DAY = 30;
 
+const DEFAULT_MESSAGE = `Ola,
+O meu nome e Jesuaine Cristiano e represento a Mwango Brain, uma agencia criativa sediada em Luanda, Angola.
+Tenho acompanhado o seu perfil com interesse e gostaria de lhe apresentar uma proposta de aquisicao da sua conta.
+Estamos dispostos a fazer uma oferta justa pelo seu perfil. Caso tenha interesse em saber mais detalhes, basta responder a esta mensagem e entraremos em contacto rapidamente.
+Aguardamos o seu contacto.
+Cumprimentos,
+Equipa Mwango Brain
+mwangobrain.com`;
+
+// Credenciais em memória
+var storedCredentials: Record<string, any> = {
+  instagram: { sessionid: '', csrftoken: '', ds_user_id: '' },
+  facebook: { cookie: '', dtsg: '', c_user: '' },
+  tiktok: { sessionid: '', csrf: '' },
+};
+
+// Contagem diária
+var dailyCount: Record<string, number> = {};
+function getToday() { return new Date().toISOString().split('T')[0]; }
+function getSentToday(platform: string) { return dailyCount[platform + '_' + getToday()] || 0; }
+function recordSend(platform: string) { var key = platform + '_' + getToday(); dailyCount[key] = (dailyCount[key] || 0) + 1; }
+
+function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }
+
 // ============================================================
-//  INSTAGRAM DM VIA HTTP API (GRATIS, SEM BROWSER)
-//  Usa sessionid + csrftoken cookies para enviar DMs directo
+//  INSTAGRAM DM VIA COOKIES
 // ============================================================
 
-async function igGetUserId(sessionid: string, csrftoken: string, username: string): Promise<string | null> {
-  try {
-    var res = await fetch('https://www.instagram.com/api/v1/users/web_profile_info/?username=' + encodeURIComponent(username), {
-      headers: {
-        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
-        'x-csrftoken': csrftoken,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'x-ig-app-id': '936619743392459'
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-    if (!res.ok) return null;
-    var data = await res.json();
-    return data.data?.user?.pk || data.data?.user?.id || null;
-  } catch (e) { return null; }
+async function sendInstagramDM(username: string, message: string, creds: any): Promise<any> {
+  var sessionid = creds?.sessionid || storedCredentials.instagram.sessionid;
+  var csrftoken = creds?.csrftoken || storedCredentials.instagram.csrftoken;
+  var ds_user_id = creds?.ds_user_id || storedCredentials.instagram.ds_user_id;
+
+  if (!sessionid || !csrftoken) {
+    return { success: false, error: 'Instagram: sessionid e csrftoken obrigatorios. Configura em /setup-cookies ou envia com credentials.' };
+  }
+
+  var cookieStr = `sessionid=${sessionid}; csrftoken=${csrftoken}; ds_user_id=${ds_user_id || ''}; ig_did=1;`;
+  var baseHeaders: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'X-IG-App-ID': '936619743392459',
+    'X-CSRFToken': csrftoken,
+    'X-Requested-With': 'XMLHttpRequest',
+    'Referer': 'https://www.instagram.com/',
+    'Cookie': cookieStr,
+  };
+
+  // 1. Validar sessao e obter user ID do destinatario
+  var profileResp = await fetch(`https://www.instagram.com/api/v1/users/web_profile_info/?username=${encodeURIComponent(username)}`, {
+    headers: baseHeaders,
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (profileResp.status === 403) {
+    return { success: false, error: 'Instagram: sessao expirada (403). Actualiza os cookies.' };
+  }
+  if (profileResp.status === 429) {
+    return { success: false, error: 'Instagram: rate limit (429). Espera antes de tentar novamente.' };
+  }
+  if (!profileResp.ok) {
+    return { success: false, error: `Instagram: erro ao buscar perfil ${username} (HTTP ${profileResp.status})` };
+  }
+
+  var profileData = await profileResp.json();
+  var targetUserId = profileData?.data?.user?.id || profileData?.data?.user?.pk;
+
+  if (!targetUserId) {
+    return { success: false, error: `Instagram: utilizador @${username} nao encontrado.` };
+  }
+
+  // 2. Enviar DM - tentar broadcast primeiro
+  var clientContext = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+  var dmPayload = new URLSearchParams({
+    'recipient_users': `[[${targetUserId}]]`,
+    'text': message,
+    'action': 'send',
+    'client_context': clientContext,
+  });
+
+  var dmResp = await fetch('https://www.instagram.com/api/v1/direct_v2/threads/broadcast/text/', {
+    method: 'POST',
+    headers: { ...baseHeaders, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: dmPayload.toString(),
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (dmResp.ok) {
+    var dmData = await dmResp.json().catch(() => ({}));
+    if (!dmData.spam && !dmData.error_type) {
+      return { success: true, userId: targetUserId, threadId: dmData?.thread_id };
+    }
+  }
+
+  // 3. Fallback: criar thread e enviar
+  var createPayload = new URLSearchParams({
+    'recipient_users': `[${targetUserId}]`,
+    'text': message,
+    'client_context': clientContext,
+  });
+
+  var createResp = await fetch('https://www.instagram.com/api/v1/direct_v2/web/create_thread/', {
+    method: 'POST',
+    headers: { ...baseHeaders, 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: createPayload.toString(),
+    signal: AbortSignal.timeout(15000),
+  });
+
+  if (createResp.ok) {
+    var createData = await createResp.json().catch(() => ({}));
+    if (!createData.spam) {
+      return { success: true, userId: targetUserId, threadId: createData?.thread_id };
+    }
+  }
+
+  return { success: false, error: 'Instagram: DM nao enviado. Verifica cookies e tenta novamente.' };
 }
 
-async function igSendDM(sessionid: string, csrftoken: string, recipientId: string, message: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    // Criar thread de DM
-    var threadRes = await fetch('https://www.instagram.com/api/v1/direct_v2/create_thread/', {
-      method: 'POST',
-      headers: {
-        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
-        'x-csrftoken': csrftoken,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'x-ig-app-id': '936619743392459',
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      body: 'recipient_users=' + JSON.stringify([recipientId]) + '&client_context=' + Date.now() + '&device_id=' + crypto.randomUUID?.() || (Math.random().toString(36) + Date.now().toString(36)),
-      signal: AbortSignal.timeout(15000)
-    });
+// ============================================================
+//  FACEBOOK DM VIA COOKIES
+// ============================================================
 
-    var threadData = await threadRes.json();
-    var threadId = threadData.thread_id || threadData.thread?.thread_id;
+async function sendFacebookDM(username: string, message: string, creds: any): Promise<any> {
+  var fbCookie = creds?.cookie || storedCredentials.facebook.cookie;
+  var fbDtsg = creds?.dtsg || storedCredentials.facebook.dtsg;
+  var cUser = creds?.c_user || storedCredentials.facebook.c_user;
 
-    // Se o thread já existe (409 ou sem thread_id), tentar buscar
-    if (!threadId) {
-      var inboxRes = await fetch('https://www.instagram.com/api/v1/direct_v2/inbox/?user_id=' + recipientId, {
-        headers: {
-          'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
-          'x-csrftoken': csrftoken,
-          'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'x-ig-app-id': '936619743392459'
-        },
-        signal: AbortSignal.timeout(10000)
+  if (!fbCookie) {
+    return { success: false, error: 'Facebook: cookie obrigatoria. Configura em /setup-cookies ou envia com credentials.' };
+  }
+
+  var baseHeaders: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Cookie': fbCookie,
+    'Referer': 'https://www.facebook.com/',
+    'Origin': 'https://www.facebook.com',
+  };
+
+  // 1. Validar sessao - buscar a home page para obter fb_dtsg se necessario
+  if (!fbDtsg || !cUser) {
+    try {
+      var homeResp = await fetch('https://www.facebook.com/', {
+        headers: { ...baseHeaders, 'Accept': 'text/html' },
+        signal: AbortSignal.timeout(15000),
       });
-      if (inboxRes.ok) {
-        var inboxData = await inboxRes.json();
-        if (inboxData.inbox && inboxData.inbox.threads) {
-          for (var t of inboxData.inbox.threads) {
-            if (t.users && t.users.length > 0 && String(t.users[0].pk) === String(recipientId)) {
-              threadId = t.thread_id;
-              break;
-            }
-          }
-        }
+      var homeHtml = await homeResp.text();
+
+      // Extrair c_user do cookie
+      var cUserMatch = fbCookie.match(/c_user=(\d+)/);
+      if (cUserMatch) cUser = cUserMatch[1];
+      if (!cUser) {
+        var cUserBody = homeHtml.match(/"c_user":"(\d+)"/);
+        if (cUserBody) cUser = cUserBody[1];
       }
-    }
 
-    if (!threadId) {
-      return { success: false, error: 'Nao conseguiu criar/encontrar thread de DM' };
+      // Extrair fb_dtsg
+      var dtsgMatch = homeHtml.match(/DTSGInitData".*?"token":"([^"]+)"/)
+        || homeHtml.match(/"dtsg"\s*:\s*\{[^}]*"token"\s*:\s*"([^"]+)"/);
+      if (dtsgMatch) fbDtsg = dtsgMatch[1];
+    } catch(e) {
+      // Continue with what we have
     }
-
-    // Enviar mensagem no thread
-    var msgRes = await fetch('https://www.instagram.com/api/v1/direct_v2/threads/' + threadId + '/items/', {
-      method: 'POST',
-      headers: {
-        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
-        'x-csrftoken': csrftoken,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'x-ig-app-id': '936619743392459',
-        'content-type': 'application/x-www-form-urlencoded'
-      },
-      body: 'text=' + encodeURIComponent(message) + '&client_context=' + Date.now() + '&device_id=' + (crypto.randomUUID?.() || (Math.random().toString(36) + Date.now().toString(36))),
-      signal: AbortSignal.timeout(15000)
-    });
-
-    if (msgRes.ok) {
-      return { success: true };
-    } else {
-      var errText = '';
-      try { errText = await msgRes.text(); } catch(e) {}
-      return { success: false, error: 'Erro ao enviar mensagem (HTTP ' + msgRes.status + ')' };
-    }
-  } catch (e: any) {
-    return { success: false, error: e.message || 'timeout' };
   }
-}
 
-async function igValidateCookies(sessionid: string, csrftoken: string): Promise<{ valid: boolean; username?: string; error?: string }> {
-  try {
-    var res = await fetch('https://www.instagram.com/api/v1/accounts/current_user/?fields=username', {
-      headers: {
-        'cookie': 'sessionid=' + sessionid + '; csrftoken=' + csrftoken,
-        'x-csrftoken': csrftoken,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'x-ig-app-id': '936619743392459'
-      },
-      signal: AbortSignal.timeout(10000)
-    });
-    if (res.ok) {
-      var data = await res.json();
-      return { valid: true, username: data.user?.username || data.username || 'OK' };
-    }
-    if (res.status === 401 || res.status === 403) return { valid: false, error: 'Cookies expirados. Copia novamente do browser.' };
-    return { valid: false, error: 'Erro HTTP ' + res.status };
-  } catch (e: any) {
-    return { valid: false, error: e.message || 'Erro de conexao' };
+  if (!cUser) {
+    return { success: false, error: 'Facebook: nao encontrou c_user. Verifica se o cookie inclui c_user.' };
   }
-}
+  if (!fbDtsg) {
+    return { success: false, error: 'Facebook: nao conseguiu obter fb_dtsg. Tenta com cookie mais completa.' };
+  }
 
-async function sendIGViaCookies(username: string, message: string, sentToday: number): Promise<any> {
-  // Ler cookies do body (enviados pelo frontend)
-  // Na pratica vêm do localStorage
-  return { success: false, dmSent: false, deliveryMsg: 'IG: Usa o painel para colar cookies primeiro', remainingToday: MAX_PER_DAY - sentToday, needCookies: true };
-}
+  // 2. Encontrar ID do destinatario (procurar no Facebook)
+  var recipientId: string | null = null;
 
-// ============================================================
-//  FACEBOOK DM VIA HTTP API (GRATIS, SEM BROWSER)
-//  Usa fb_dtsg + cookie para enviar mensagem
-// ============================================================
-
-// Obter fb_dtsg automaticamente a partir dos cookies
-async function fbFetchDtsg(fbCookie: string): Promise<{ dtsg: string; error?: string }> {
+  // Tentar buscar o perfil
   try {
-    // Metodo 1: Buscar na pagina de messages do FB Lite
-    var res = await fetch('https://m.facebook.com/messages/', {
-      headers: {
-        'cookie': fbCookie,
-        'user-agent': 'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'accept-language': 'en-US,en;q=0.9',
-        'sec-fetch-dest': 'document',
-        'sec-fetch-mode': 'navigate',
-        'sec-fetch-site': 'none'
-      },
+    var profileResp = await fetch(`https://www.facebook.com/${encodeURIComponent(username)}`, {
+      headers: { ...baseHeaders, 'Accept': 'text/html' },
       signal: AbortSignal.timeout(15000),
-      redirect: 'follow'
     });
-    var html = await res.text();
+    var profileHtml = await profileResp.text();
 
-    // Procurar fb_dtsg no HTML: input hidden ou data attribute
-    var patterns = [
-      /name="fb_dtsg"[^>]*value="([^"]+)"/i,
-      /fb_dtsg["']\s*:\s*["']([^"']+)["']/i,
-      /"dtsg"\s*:\s*\{[^}]*"token"\s*:\s*"([^"]+)"/i,
-      /DTSGInitData.*?token["']\s*:\s*["']([^"']+)["']/i
+    var idPatterns = [
+      /"userID":"(\d+)"/,
+      /entity_id=(\d+)/,
+      /"actor_id":"(\d+)"/,
+      /"profile_id":"(\d+)"/,
+      /page_id=(\d+)/,
+      /"uid":"(\d+)"/,
     ];
-    for (var p of patterns) {
-      var m = html.match(p);
-      if (m && m[1]) return { dtsg: m[1] };
+    for (var pat of idPatterns) {
+      var m = profileHtml.match(pat);
+      if (m) { recipientId = m[1]; break; }
     }
+  } catch(e) {}
 
-    // Metodo 2: Buscar na pagina normal do FB
-    var res2 = await fetch('https://www.facebook.com/', {
-      headers: {
-        'cookie': fbCookie,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-      },
+  if (!recipientId) {
+    // Tentar via busca
+    try {
+      var searchResp = await fetch(`https://www.facebook.com/ajax/typeahead/search.php?q=${encodeURIComponent(username)}&viewer=${cUser}`, {
+        headers: { ...baseHeaders, 'X-FB-LSD': fbDtsg },
+        signal: AbortSignal.timeout(15000),
+      });
+      var searchData = await searchResp.json().catch(() => ({}));
+      var entry = searchData?.payload?.entries?.[0];
+      if (entry?.uid) recipientId = String(entry.uid);
+    } catch(e) {}
+  }
+
+  if (!recipientId) {
+    return { success: false, error: `Facebook: nao encontrou o perfil "${username}". Tenta com o link completo ou ID numerico.` };
+  }
+
+  // 3. Enviar DM
+  var variables = JSON.stringify({
+    message: { text: message, ranges: [] },
+    client: { cache_key: String(Date.now()) },
+    recipient_id: recipientId,
+    actor_id: cUser,
+  });
+
+  var dmBody = new URLSearchParams({
+    'fb_dtsg': fbDtsg,
+    'doc_id': '5636333709730986',
+    'variables': variables,
+  }).toString();
+
+  try {
+    var dmResp = await fetch('https://www.facebook.com/messaging/send/', {
+      method: 'POST',
+      headers: { ...baseHeaders, 'Content-Type': 'application/x-www-form-urlencoded', 'X-FB-LSD': fbDtsg, 'X-Requested-With': 'XMLHttpRequest' },
+      body: dmBody,
       signal: AbortSignal.timeout(15000),
-      redirect: 'follow'
     });
-    var html2 = await res2.text();
-    for (var p2 of patterns) {
-      var m2 = html2.match(p2);
-      if (m2 && m2[1]) return { dtsg: m2[1] };
+
+    var dmData = await dmResp.json().catch(() => ({}));
+
+    if (dmResp.ok && !dmData.error) {
+      return { success: true, recipientId: recipientId };
     }
 
-    return { dtsg: '', error: 'Nao encontrou fb_dtsg nas paginas do Facebook' };
-  } catch (e: any) {
-    return { dtsg: '', error: e.message || 'Erro ao buscar fb_dtsg' };
-  }
-}
-
-async function fbValidateCookies(fbCookie: string, fbDtsg?: string): Promise<{ valid: boolean; username?: string; error?: string }> {
-  try {
-    // Se nao tem dtsg, tentar buscar automaticamente
-    var dtsg = fbDtsg || '';
-    if (!dtsg) {
-      var dtsgResult = await fbFetchDtsg(fbCookie);
-      if (!dtsgResult.dtsg) return { valid: false, error: 'Nao conseguiu obter fb_dtsg: ' + (dtsgResult.error || '') };
-      dtsg = dtsgResult.dtsg;
-    }
-    var res = await fetch('https://www.facebook.com/api/graphql/', {
-      method: 'POST',
-      headers: {
-        'cookie': fbCookie,
-        'content-type': 'application/x-www-form-urlencoded',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      body: 'fb_dtsg=' + encodeURIComponent(dtsg) + '&doc_id=4364992440242396&variables=%7B%22scale%22%3A3%7D',
-      signal: AbortSignal.timeout(10000)
-    });
-    if (res.ok) {
-      var data = await res.json();
-      if (data.data && !data.error) return { valid: true, username: 'OK' };
-      return { valid: false, error: 'Resposta invalida do Facebook' };
-    }
-    return { valid: false, error: 'Cookies expirados ou invalidos (HTTP ' + res.status + ')' };
-  } catch (e: any) {
-    return { valid: false, error: e.message || 'Erro de conexao' };
-  }
-}
-
-async function fbGetUserId(fbCookie: string, fbDtsg?: string, username?: string): Promise<string | null> {
-  try {
-    // Buscar user ID do FB pelo username
-    var res = await fetch('https://www.facebook.com/' + encodeURIComponent(username), {
-      headers: {
-        'cookie': fbCookie,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      },
-      signal: AbortSignal.timeout(10000),
-      redirect: 'manual'
-    });
-    // O FB redireciona para /profile.php?id=XXXXX
-    var location = res.headers.get('location') || '';
-    var idMatch = location.match(/id=(\d+)/);
-    if (idMatch) return idMatch[1];
-
-    // Tentar buscar na pagina
-    var text = await res.text();
-    var entityMatch = text.match(/"entity_id"\s*:\s*"(\d+)"/);
-    if (entityMatch) return entityMatch[1];
-
-    return null;
-  } catch (e) { return null; }
-}
-
-async function fbSendDM(fbCookie: string, fbDtsg: string, recipientId: string, message: string): Promise<{ success: boolean; error?: string }> {
-  try {
-    var res = await fetch('https://www.facebook.com/messaging/send/', {
-      method: 'POST',
-      headers: {
-        'cookie': fbCookie,
-        'content-type': 'application/x-www-form-urlencoded',
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'origin': 'https://www.facebook.com',
-        'referer': 'https://www.facebook.com/messages/t/' + recipientId
-      },
-      body: 'fb_dtsg=' + encodeURIComponent(fbDtsg) +
-        '&body=' + encodeURIComponent(message) +
-        '&ids%5B' + recipientId + '%5D=' + recipientId +
-        '&action=send',
-      signal: AbortSignal.timeout(15000)
-    });
-    if (res.ok) {
-      var data = await res.json();
-      if (!data.error) return { success: true };
-      return { success: false, error: data.error || 'Erro no envio' };
-    }
-    return { success: false, error: 'HTTP ' + res.status };
-  } catch (e: any) {
-    return { success: false, error: e.message || 'timeout' };
+    return { success: false, error: `Facebook DM falhou: ${dmData.error?.message || JSON.stringify(dmData).substring(0, 200)}` };
+  } catch(e: any) {
+    return { success: false, error: 'Facebook DM erro: ' + e.message };
   }
 }
 
 // ============================================================
-//  TIKTOK DM VIA HTTP API (GRATIS, SEM BROWSER)
-//  Usa sessionid + tt_csrf_token cookies
+//  TIKTOK DM VIA COOKIES
 // ============================================================
 
-async function ttValidateCookies(ttSessionid: string, ttCsrf: string): Promise<{ valid: boolean; username?: string; error?: string }> {
+async function sendTikTokDM(username: string, message: string, creds: any): Promise<any> {
+  var ttSessionid = creds?.sessionid || storedCredentials.tiktok.sessionid;
+  var ttCsrf = creds?.csrf || storedCredentials.tiktok.csrf;
+
+  if (!ttSessionid) {
+    return { success: false, error: 'TikTok: sessionid obrigatoria. Configura em /setup-cookies ou envia com credentials.' };
+  }
+
+  var baseHeaders: Record<string, string> = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Accept': '*/*',
+    'Cookie': `sessionid=${ttSessionid}${ttCsrf ? '; csrf_session_token=' + ttCsrf : ''};`,
+    'Referer': 'https://www.tiktok.com/',
+    'Origin': 'https://www.tiktok.com',
+  };
+
+  if (ttCsrf) baseHeaders['X-CSRF-Token'] = ttCsrf;
+
+  // 1. Encontrar UID do destinatario
+  var recipientUid: string | null = null;
+
   try {
-    var res = await fetch('https://www.tiktok.com/api/user/profile/self/', {
-      headers: {
-        'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'x-csrftoken': ttCsrf,
-        'referer': 'https://www.tiktok.com/'
-      },
-      signal: AbortSignal.timeout(10000)
+    var profileResp = await fetch(`https://www.tiktok.com/@${encodeURIComponent(username)}`, {
+      headers: { ...baseHeaders, 'Accept': 'text/html' },
+      signal: AbortSignal.timeout(15000),
     });
-    if (res.ok) {
-      var data = await res.json();
-      if (data.userName || data.user?.userName) {
-        return { valid: true, username: data.userName || data.user?.userName };
+    var profileHtml = await profileResp.text();
+
+    var uidPatterns = [
+      /"userId":"(\d+)"/,
+      /"id":"(\d+)"/,
+      /userId['":\s]+(\d+)/,
+      /"uid":"(\d+)"/,
+    ];
+    for (var pat of uidPatterns) {
+      var m = profileHtml.match(pat);
+      if (m) { recipientUid = m[1]; break; }
+    }
+  } catch(e) {}
+
+  if (!recipientUid) {
+    // Tentar via API
+    try {
+      var apiResp = await fetch(`https://www.tiktok.com/api/user/detail/?uniqueId=${encodeURIComponent(username)}`, {
+        headers: baseHeaders,
+        signal: AbortSignal.timeout(15000),
+      });
+      var apiData = await apiResp.json().catch(() => ({}));
+      if (apiData.userInfo?.user?.id) {
+        recipientUid = String(apiData.userInfo.user.id);
       }
-      return { valid: false, error: 'Resposta sem username' };
-    }
-    if (res.status === 401 || res.status === 403) return { valid: false, error: 'Cookies expirados. Copia novamente do browser.' };
-    return { valid: false, error: 'Erro HTTP ' + res.status };
-  } catch (e: any) {
-    return { valid: false, error: e.message || 'Erro de conexao' };
+    } catch(e) {}
   }
-}
 
-async function ttGetUserId(ttSessionid: string, ttCsrf: string, username: string): Promise<string | null> {
-  try {
-    var res = await fetch('https://www.tiktok.com/api/user/detail/?uniqueId=' + encodeURIComponent(username) + '&needSecUserId=1', {
-      headers: {
-        'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'referer': 'https://www.tiktok.com/@' + encodeURIComponent(username)
-      },
-      signal: AbortSignal.timeout(15000)
-    });
-    if (!res.ok) return null;
-    var data = await res.json();
-    return data.userInfo?.user?.id || data.user?.id || null;
-  } catch (e) { return null; }
-}
+  if (!recipientUid) {
+    return { success: false, error: `TikTok: nao encontrou o perfil @${username}.` };
+  }
 
-async function ttSendDM(ttSessionid: string, ttCsrf: string, recipientId: string, message: string): Promise<{ success: boolean; error?: string }> {
+  // 2. Enviar DM
   try {
-    var res = await fetch('https://www.tiktok.com/api/chat/send/', {
+    // Tentar endpoint create
+    var dmBody = new URLSearchParams({
+      'recipient_user_id': recipientUid,
+      'text': message,
+      'type': 'text',
+    }).toString();
+
+    var dmResp = await fetch('https://www.tiktok.com/api/chat/create/', {
       method: 'POST',
-      headers: {
-        'cookie': 'sessionid=' + ttSessionid + '; tt_csrf_token=' + ttCsrf,
-        'content-type': 'application/x-www-form-urlencoded',
-        'x-csrftoken': ttCsrf,
-        'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'referer': 'https://www.tiktok.com/'
-      },
-      body: 'recipient_user_id=' + encodeURIComponent(recipientId) + '&content=' + encodeURIComponent(message) + '&type=text',
-      signal: AbortSignal.timeout(15000)
+      headers: { ...baseHeaders, 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: dmBody,
+      signal: AbortSignal.timeout(15000),
     });
-    if (res.ok) {
-      var data = await res.json();
-      if (data.status_code === 0 || !data.message) return { success: true };
-      return { success: false, error: data.message || 'Erro no envio' };
+
+    var dmData = await dmResp.json().catch(() => ({}));
+
+    if (dmResp.ok && dmData.status_code === 0) {
+      return { success: true, recipientUid: recipientUid };
     }
-    return { success: false, error: 'HTTP ' + res.status };
-  } catch (e: any) {
-    return { success: false, error: e.message || 'timeout' };
+
+    // Tentar endpoint alternativo com JSON
+    var dmResp2 = await fetch('https://www.tiktok.com/api/chat/create/', {
+      method: 'POST',
+      headers: { ...baseHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to_user_id: recipientUid, text: message, type: 'text' }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    var dmData2 = await dmResp2.json().catch(() => ({}));
+
+    if (dmResp2.ok && dmData2.status_code === 0) {
+      return { success: true, recipientUid: recipientUid };
+    }
+
+    return { success: false, error: `TikTok DM falhou: ${JSON.stringify(dmData2).substring(0, 200)}` };
+  } catch(e: any) {
+    return { success: false, error: 'TikTok DM erro: ' + e.message };
   }
 }
 
 // ============================================================
-//  COOKIE STORE (in-memory, por sessao de Vercel)
-//  O frontend envia os cookies em cada pedido DM
+//  N8N FALLBACK (se disponivel)
 // ============================================================
+
+async function sendViaN8N(platform: string, username: string, message: string): Promise<any> {
+  var N8N_BASE = process.env.N8N_WEBHOOK_URL || 'https://n8n-production-2236.up.railway.app';
+  var paths: Record<string, string> = {
+    instagram: '/webhook/ig-send-dm',
+    facebook: '/webhook/fb-send-dm',
+    tiktok: '/webhook/tt-send-dm',
+  };
+  var path = paths[platform];
+  if (!path) return { success: false, error: 'Plataforma nao suportada' };
+
+  try {
+    var res = await fetch(N8N_BASE + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body: { username, message } }),
+      signal: AbortSignal.timeout(60000),
+    });
+    return await res.json();
+  } catch(e: any) {
+    return { success: false, error: 'n8n timeout: ' + e.message };
+  }
+}
 
 // ============================================================
 //  POST HANDLER
@@ -357,169 +400,154 @@ export async function POST(request: any) {
   var body;
   try { body = await request.json(); } catch(e) { return NextResponse.json({ error: 'JSON invalido' }, { status: 400 }); }
 
-  // ---- Validar cookies IG ----
-  if (body.action === 'validate-cookies' && body.platform === 'instagram') {
-    if (!body.sessionid || !body.csrftoken) {
-      return NextResponse.json({ success: false, error: 'Falta sessionid ou csrftoken' });
-    }
-    var v = await igValidateCookies(body.sessionid, body.csrftoken);
-    if (v.valid) {
-      return NextResponse.json({ success: true, message: 'IG cookies validas! (@' + (v.username || '') + ')', username: v.username });
-    }
-    return NextResponse.json({ success: false, error: v.error || 'Cookies invalidas' });
+  var platform = (body.platform || '').toLowerCase().trim();
+  var username = body.username || '';
+  var message = body.message || DEFAULT_MESSAGE;
+  var credentials = body.credentials || null;
+  var useN8n = body.useN8n || false;
+
+  if (!platform || !username) {
+    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'Plataforma e username sao obrigatorios', remainingToday: MAX_PER_DAY });
   }
 
-  // ---- Validar cookies FB ----
-  if (body.action === 'validate-cookies' && body.platform === 'facebook') {
-    if (!body.fbCookie) {
-      return NextResponse.json({ success: false, error: 'Falta cookie do Facebook' });
-    }
-    var fv = await fbValidateCookies(body.fbCookie, body.fbDtsg || undefined);
-    if (fv.valid) {
-      return NextResponse.json({ success: true, message: 'FB cookies validas!' });
-    }
-    return NextResponse.json({ success: false, error: fv.error || 'Cookies invalidas' });
+  // Guardar credenciais se enviadas
+  if (credentials) {
+    if (credentials.instagram) Object.assign(storedCredentials.instagram, credentials.instagram);
+    if (credentials.facebook) Object.assign(storedCredentials.facebook, credentials.facebook);
+    if (credentials.tiktok) Object.assign(storedCredentials.tiktok, credentials.tiktok);
   }
 
-  // ---- Enviar DM Instagram via HTTP API (GRATIS) ----
-  if (body.platform === 'instagram' && body.igSessionid && body.igCsrf) {
-    var igUsername = body.username || '';
-    var igMessage = body.message || '';
-    var sentToday = body.sentToday || 0;
-
-    if (!igUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: Username nao fornecido', remainingToday: MAX_PER_DAY - sentToday });
-    if (sentToday >= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: Limite diario atingido', remainingToday: 0 });
-
-    // Passo 1: Buscar ID do utilizador
-    var userId = await igGetUserId(body.igSessionid, body.igCsrf, igUsername);
-    if (!userId) {
-      return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: Nao encontrou @' + igUsername + ' (cookies expiradas?)', remainingToday: MAX_PER_DAY - sentToday });
-    }
-
-    // Passo 2: Enviar DM
-    var dmResult = await igSendDM(body.igSessionid, body.igCsrf, String(userId), igMessage);
-    if (dmResult.success) {
-      return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'IG: DM enviado para @' + igUsername, remainingToday: MAX_PER_DAY - sentToday - 1 });
-    }
-    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'IG: ' + (dmResult.error || 'Falhou'), remainingToday: MAX_PER_DAY - sentToday });
-  }
-
-  // ---- Enviar DM Facebook via HTTP API (GRATIS) ----
-  if (body.platform === 'facebook' && body.fbCookie) {
-    var fbUsername = body.username || '';
-    var fbMessage = body.message || '';
-    var fbSentToday = body.sentToday || 0;
-
-    if (!fbUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Username nao fornecido', remainingToday: MAX_PER_DAY - fbSentToday });
-    if (fbSentToday >= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Limite diario atingido', remainingToday: 0 });
-
-    // Passo 0: Obter fb_dtsg automaticamente se nao fornecido
-    var fbDtsg = body.fbDtsg || '';
-    if (!fbDtsg) {
-      var dtsgRes = await fbFetchDtsg(body.fbCookie);
-      if (!dtsgRes.dtsg) {
-        return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Nao conseguiu obter fb_dtsg automaticamente - ' + (dtsgRes.error || 'cookies expirados?'), remainingToday: MAX_PER_DAY - fbSentToday });
-      }
-      fbDtsg = dtsgRes.dtsg;
-    }
-
-    // Passo 1: Buscar ID do utilizador
-    var fbUserId = await fbGetUserId(body.fbCookie, fbDtsg, fbUsername);
-    if (!fbUserId) {
-      return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: Nao encontrou perfil de ' + fbUsername, remainingToday: MAX_PER_DAY - fbSentToday });
-    }
-
-    // Passo 2: Enviar DM
-    var fbDmResult = await fbSendDM(body.fbCookie, fbDtsg, String(fbUserId), fbMessage);
-    if (fbDmResult.success) {
-      return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'FB: DM enviado para ' + fbUsername, remainingToday: MAX_PER_DAY - fbSentToday - 1 });
-    }
-    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'FB: ' + (fbDmResult.error || 'Falhou'), remainingToday: MAX_PER_DAY - fbSentToday });
-  }
-
-  // ---- Validar cookies TT ----
-  if (body.action === 'validate-cookies' && body.platform === 'tiktok') {
-    if (!body.ttSessionid || !body.ttCsrf) {
-      return NextResponse.json({ success: false, error: 'Falta ttSessionid ou ttCsrf' });
-    }
-    var tv = await ttValidateCookies(body.ttSessionid, body.ttCsrf);
-    if (tv.valid) {
-      return NextResponse.json({ success: true, message: 'TT cookies validas! (@' + (tv.username || '') + ')', username: tv.username });
-    }
-    return NextResponse.json({ success: false, error: tv.error || 'Cookies invalidas' });
-  }
-
-  // ---- Enviar DM TikTok via HTTP API (GRATIS) ----
-  if (body.platform === 'tiktok' && body.ttSessionid && body.ttCsrf) {
-    var ttUsername = body.username || '';
-    var ttMessage = body.message || '';
-    var ttSentToday = body.sentToday || 0;
-
-    if (!ttUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Username nao fornecido', remainingToday: MAX_PER_DAY - ttSentToday });
-    if (ttSentToday >= MAX_PER_DAY) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Limite diario atingido', remainingToday: 0 });
-
-    // Passo 1: Buscar ID do utilizador
-    var ttUserId = await ttGetUserId(body.ttSessionid, body.ttCsrf, ttUsername);
-    if (!ttUserId) {
-      return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: Nao encontrou @' + ttUsername + ' (cookies expiradas?)', remainingToday: MAX_PER_DAY - ttSentToday });
-    }
-
-    // Passo 2: Enviar DM
-    var ttDmResult = await ttSendDM(body.ttSessionid, body.ttCsrf, String(ttUserId), ttMessage);
-    if (ttDmResult.success) {
-      return NextResponse.json({ success: true, dmSent: true, deliveryMsg: 'TT: DM enviado para @' + ttUsername, remainingToday: MAX_PER_DAY - ttSentToday - 1 });
-    }
-    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'TT: ' + (ttDmResult.error || 'Falhou'), remainingToday: MAX_PER_DAY - ttSentToday });
-  }
-
-  // ---- Diagnostico ----
+  // Diagnostic
   if (body.action === 'diagnostic') {
     return NextResponse.json({
-      method: 'HTTP API com cookies (GRATIS, sem browser)',
-      ig: { ready: !!(body.igSessionid && body.igCsrf), note: body.igSessionid ? 'Cookies configuradas' : 'Cola sessionid + csrftoken no painel' },
-      fb: { ready: !!body.fbCookie, note: body.fbCookie ? 'Cookies configuradas (fb_dtsg auto)' : 'Cola cookies no painel' },
-      tt: { ready: !!(body.ttSessionid && body.ttCsrf), note: body.ttSessionid ? 'Cookies configuradas' : 'Cola sessionid + tt_csrf_token no painel' },
+      method: useN8n ? 'n8n webhooks' : 'cookies directo (v4)',
+      platforms: ['instagram', 'facebook', 'tiktok'],
+      igConfigured: !!storedCredentials.instagram.sessionid,
+      fbConfigured: !!storedCredentials.facebook.cookie,
+      ttConfigured: !!storedCredentials.tiktok.sessionid,
+      n8nAvailable: !!process.env.N8N_WEBHOOK_URL,
       maxPerDay: MAX_PER_DAY,
-      note: 'DMs via HTTP directa — 100% gratis, sem servidor externo'
     });
   }
 
-  // ---- Login (cookies method — nao precisa) ----
-  if (body.action === 'login' || body.action === 'login-all') {
-    return NextResponse.json({ success: true, message: 'Com cookies, nao precisa de login. Cola os cookies no painel de Mensagens.' });
+  // Validate cookies
+  if (body.action === 'validate-cookies') {
+    if (platform === 'instagram') {
+      var c = credentials?.instagram || storedCredentials.instagram;
+      if (!c.sessionid || !c.csrftoken) {
+        return NextResponse.json({ success: false, message: 'Instagram: sessionid e csrftoken obrigatorios' });
+      }
+      try {
+        var testResp = await fetch('https://www.instagram.com/api/v1/users/web_profile_info/?username=jesuainecristiano78', {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Cookie': `sessionid=${c.sessionid}; csrftoken=${c.csrftoken}; ds_user_id=${c.ds_user_id || ''};`,
+            'X-IG-App-ID': '936619743392459',
+            'X-CSRFToken': c.csrftoken,
+          },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (testResp.ok) {
+          var td = await testResp.json();
+          return NextResponse.json({ success: true, message: `Instagram cookies validos! @${td?.data?.user?.username} (${td?.data?.user?.id})` });
+        }
+        return NextResponse.json({ success: false, message: `Instagram cookies invalidos (HTTP ${testResp.status}). Obtem cookies novos.` });
+      } catch (e: any) {
+        return NextResponse.json({ success: false, message: 'Erro: ' + e.message });
+      }
+    }
+    return NextResponse.json({ success: true, message: `${platform}: configurado` });
   }
 
-  // ---- Fallback: sem cookies ----
-  var dmUsername = body.username || '';
-  var dmMessage = body.message || '';
-  var dmPlatform = body.platform || 'instagram';
-  var sentToday2 = body.sentToday || 0;
+  // Rate limit
+  var sentToday = getSentToday(platform);
+  if (sentToday >= MAX_PER_DAY) {
+    var plat = platform === 'instagram' ? 'IG' : platform === 'facebook' ? 'FB' : 'TT';
+    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: `${plat}: Limite diario atingido (${MAX_PER_DAY})`, remainingToday: 0 });
+  }
 
-  if (!dmUsername) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'Username nao fornecido', remainingToday: MAX_PER_DAY - sentToday2 });
-  if (!dmMessage) return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'Mensagem nao fornecida', remainingToday: MAX_PER_DAY - sentToday2 });
+  // Escolher metodo: n8n ou directo
+  var result: any;
+  var startTime = Date.now();
+  var platLabel = platform === 'instagram' ? 'IG' : platform === 'facebook' ? 'FB' : 'TT';
 
-  var platName = dmPlatform === 'instagram' ? 'IG' : dmPlatform === 'facebook' ? 'FB' : 'TT';
-  var cookieHint = dmPlatform === 'instagram'
-    ? 'Falta cookies IG. Cola sessionid + csrftoken no painel.'
-    : dmPlatform === 'facebook'
-    ? 'Falta cookies FB. Cola cookie + fb_dtsg no painel.'
-    : 'Falta cookies TT. Cola sessionid + tt_csrf_token no painel.';
+  try {
+    if (useN8n) {
+      result = await sendViaN8N(platform, username, message);
+    } else {
+      switch (platform) {
+        case 'instagram':
+          result = await sendInstagramDM(username, message, credentials?.instagram);
+          break;
+        case 'facebook':
+          result = await sendFacebookDM(username, message, credentials?.facebook);
+          break;
+        case 'tiktok':
+          result = await sendTikTokDM(username, message, credentials?.tiktok);
+          break;
+        default:
+          return NextResponse.json({ success: false, dmSent: false, deliveryMsg: 'Plataforma nao suportada: ' + platform, remainingToday: MAX_PER_DAY - sentToday });
+      }
+    }
+  } catch (e: any) {
+    return NextResponse.json({ success: false, dmSent: false, deliveryMsg: `${platLabel}: ${e.message || 'erro'}`, remainingToday: MAX_PER_DAY - sentToday });
+  }
+
+  var elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+
+  if (result.success) {
+    recordSend(platform);
+    return NextResponse.json({
+      success: true, dmSent: true,
+      deliveryMsg: `${platLabel}: DM enviado para ${platform === 'instagram' ? '@' : ''}${username} (${elapsed}s)`,
+      remainingToday: MAX_PER_DAY - getSentToday(platform),
+      details: result,
+    });
+  } else {
+    return NextResponse.json({
+      success: false, dmSent: false,
+      deliveryMsg: `${platLabel}: ${result.error || 'Falhou'} (${elapsed}s)`,
+      remainingToday: MAX_PER_DAY - sentToday,
+      error: result.error,
+    });
+  }
+}
+
+// PUT - actualizar credenciais armazenadas
+export async function PUT(request: any) {
+  var body;
+  try { body = await request.json(); } catch(e) { return NextResponse.json({ error: 'JSON invalido' }, { status: 400 }); }
+
+  if (body.instagram) Object.assign(storedCredentials.instagram, body.instagram);
+  if (body.facebook) Object.assign(storedCredentials.facebook, body.facebook);
+  if (body.tiktok) Object.assign(storedCredentials.tiktok, body.tiktok);
 
   return NextResponse.json({
-    success: false,
-    dmSent: false,
-    deliveryMsg: platName + ': ' + cookieHint,
-    remainingToday: MAX_PER_DAY - sentToday2,
-    needCookies: true
+    success: true,
+    message: 'Credenciais actualizadas',
+    status: {
+      instagram: { sessionid: storedCredentials.instagram.sessionid ? 'OK' : 'vazio', csrftoken: storedCredentials.instagram.csrftoken ? 'OK' : 'vazio' },
+      facebook: { cookie: storedCredentials.facebook.cookie ? 'OK' : 'vazio' },
+      tiktok: { sessionid: storedCredentials.tiktok.sessionid ? 'OK' : 'vazio' },
+    },
   });
 }
 
-/* ===== GET ===== */
+// GET - info
 export async function GET() {
   return NextResponse.json({
     maxPerDay: MAX_PER_DAY,
-    remainingToday: MAX_PER_DAY,
-    method: 'http-cookies',
-    note: 'DMs via HTTP API com cookies — 100% gratis'
+    remainingToday: {
+      instagram: MAX_PER_DAY - getSentToday('instagram'),
+      facebook: MAX_PER_DAY - getSentToday('facebook'),
+      tiktok: MAX_PER_DAY - getSentToday('tiktok'),
+    },
+    method: 'cookies directo (v4)',
+    platforms: ['instagram', 'facebook', 'tiktok'],
+    igConfigured: !!storedCredentials.instagram.sessionid,
+    fbConfigured: !!storedCredentials.facebook.cookie,
+    ttConfigured: !!storedCredentials.tiktok.sessionid,
+    note: 'Todas as plataformas usam cookies de sessao. Configura em /setup-cookies.',
+    defaultMessage: DEFAULT_MESSAGE,
   });
 }
