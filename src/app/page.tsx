@@ -20,19 +20,8 @@ const PROPOSTA = 'Ola,\nO meu nome e Jesuaine Cristiano e represento a Mwango Br
 const FOLLOWUP_MSG_1 = 'Ola,\n\nEnviei-lhe uma mensagem ha alguns dias sobre uma proposta da Mwango Brain. Gostaria de saber se teve a oportunidade de a considerar.\n\nCaso tenha interesse, basta responder a esta mensagem.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 const FOLLOWUP_MSG_2 = 'Ola,\n\nEsta e a minha ultima mensagem. Entendo que pode nao ter interesse ou nao ter tido tempo.\n\nCaso mude de ideia, a Mwango Brain continua disponivel. Basta responder.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 
-/* ===== COOKIES (do localStorage) ===== */
-function getCookies() {
-  try {
-    var d = JSON.parse(localStorage.getItem('mba_cookies') || '{}');
-    return {
-      instagram: { sessionid: d.igSessionid || '', csrftoken: d.igCsrf || '', ds_user_id: d.igDsUserId || '' },
-      tiktok: { sessionid: d.ttSessionid || '', csrf: d.ttCsrf || '' },
-      facebook: { cookie: d.fbCookie || '', dtsg: '' },
-    };
-  } catch(e) {
-    return { instagram: { sessionid: '', csrftoken: '', ds_user_id: '' }, tiktok: { sessionid: '', csrf: '' }, facebook: { cookie: '', dtsg: '' } };
-  }
-}
+/* ===== COOKIES / CREDENCIAIS (n8n faz login automatico) ===== */
+// O n8n trata do login automaticamente. Nao precisa de cookies aqui.
 const TABS = [
   {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},{id:'followups',label:'FOLLOW-UPS'},{id:'agent',label:'AGENTE IA'},
 ];
@@ -341,8 +330,8 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
   const saveNotes = async function() { var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].notes = notes; saved[i].status = status; break; } } saveProfiles(saved); onUpdate(); };
   const sendMessage = async function() {
     if (!msg.trim()) return; setSending(true);
-    var creds = getCookies();
-    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0, credentials: creds }) }).catch(function() { return null; });
+    // Enviar via n8n (login automatico)
+    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
     var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
     var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { if (!saved[i].messages) saved[i].messages = []; var dmOk = !!(sd && sd.dmSent); saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' }); if (saved[i].status === 'prospect' && dmOk) saved[i].status = 'contacted'; break; } }
     saveProfiles(saved); setMsg(''); onUpdate(); setSending(false);
@@ -469,6 +458,26 @@ function MessagesTab() {
     setLog(function(prev) { return prev.concat([{ ok: ok, msg: msg, ts: new Date().toLocaleTimeString('pt-PT') }]); });
   };
 
+  const [proxyUrl, setProxyUrl] = useState(storeGet('mba_proxy_url'));
+  const [proxyStatus, setProxyStatus] = useState('');
+  const saveProxy = async function() {
+    if (!proxyUrl.trim()) return;
+    setProxyStatus('A testar...');
+    try {
+      var r = await fetch('/api/send-message', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-proxy', proxy: proxyUrl.trim() })
+      });
+      var d = await r.json();
+      if (d.success) {
+        storeSet('mba_proxy_url', proxyUrl.trim());
+        setProxyStatus('Proxy configurado com sucesso!');
+      } else {
+        setProxyStatus('Falhou: ' + (d.testMessage || d.error || 'Verifica URL'));
+      }
+    } catch(e: any) { setProxyStatus('Erro: ' + (e.message || '')); }
+  };
+
   const sendAutomaticDMs = async function() {
     if (!msgText.trim()) { addLog(false, 'Escreve uma mensagem primeiro'); return; }
     stopRef.current = false;
@@ -476,32 +485,14 @@ function MessagesTab() {
     setLog([]);
     setSending(true);
 
-    // Check which platforms have cookies
-    var cks = getCookies();
-    var igOk = !!(cks.instagram.sessionid && cks.instagram.csrftoken);
-    var ttOk = !!cks.tiktok.sessionid;
-    var fbOk = !!cks.facebook.cookie;
-
-    if (igOk) addLog(true, 'Instagram: cookies prontos');
-    else addLog(false, 'Instagram: sem cookies configurados');
-    if (ttOk) addLog(true, 'TikTok: sessionid pronto');
-    else addLog(false, 'TikTok: sem cookies configurados');
-    if (fbOk) addLog(true, 'Facebook: cookies prontos');
-    else addLog(false, 'Facebook: sem cookies configurados');
-
-    if (!igOk && !ttOk && !fbOk) {
-      addLog(false, 'Nenhuma plataforma com cookies. Impossivel enviar.');
-      setSending(false);
-      setDone(true);
-      return;
-    }
+    // n8n faz login automatico — todas as plataformas estao prontas
+    addLog(true, 'n8n workflows ativos. Login automatico com sessao cache.');
+    addLog(true, 'Nota: Se retornar "needsProxy" = IP bloqueado. Configure proxy residencial.');
+    addLog(true, 'Nota: Se retornar "needsCheckpoint" = Abre o app e aprova o acesso recente.');
 
     // Get uncontacted prospects
     var allProfiles = getProfiles();
-    var activePlats = new Set<string>();
-    if (igOk) activePlats.add('instagram');
-    if (ttOk) activePlats.add('tiktok');
-    if (fbOk) activePlats.add('facebook');
+    var activePlats = new Set<string>(['instagram', 'tiktok', 'facebook']);
 
     var prospects = allProfiles.filter(function(p: any) {
       if (!activePlats.has(p.platform)) return false;
@@ -532,9 +523,8 @@ function MessagesTab() {
       var p = batch[idx];
       setProgress({ current: idx + 1, total: batch.length, username: p.username, platform: p.platform, sent: sent, failed: failed });
 
-      // Build cookies for this platform
-      var creds = getCookies();
-      var body: any = { username: p.username, message: msgText, platform: p.platform, sentToday: dailySent + sent, credentials: creds };
+      // Enviar via n8n (login automatico)
+      var body: any = { username: p.username, message: msgText, platform: p.platform, sentToday: dailySent + sent };
 
       // Try sending (up to 3 attempts)
       var dmOk = false;
@@ -584,10 +574,24 @@ function MessagesTab() {
 
   return (
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
+      {/* Proxy Config */}
+      <Panel style={{ marginBottom:14, borderLeft: '3px solid ' + P.orange }}>
+        <div style={{ fontSize:11, fontWeight:700, color:P.orange, marginBottom:8, letterSpacing:'.5px' }}>PROXY RESIDENCIAL</div>
+        <div style={{ fontSize:10, color:P.textSec, marginBottom:8, lineHeight:'15px' }}>
+          Para contornar o bloqueio de IPs datacenter do IG/FB/TT, configura um proxy residencial. Sem proxy, os logins serao bloqueados.
+          <br/>Provedores: <b style={{color:P.text}}>Bright Data</b>, <b style={{color:P.text}}>Oxylabs</b>, <b style={{color:P.text}}>IPRoyal</b>, <b style={{color:P.text}}>Webshare</b>
+        </div>
+        <div style={{ display:'flex', gap:8 }}>
+          <input value={proxyUrl} onChange={function(e) { setProxyUrl(e.target.value); setProxyStatus(''); }} placeholder="http://user:pass@host:port" style={{ ...INP, flex:1, fontSize:11 }} />
+          <button onClick={saveProxy} style={{ padding:'8px 14px', borderRadius:6, border:'none', background:P.orange, color:'#fff', fontSize:11, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>TESTAR + GUARDAR</button>
+        </div>
+        {proxyStatus && <div style={{ marginTop:6, fontSize:10, color: proxyStatus.includes('sucesso') ? P.green : P.redB }}>{proxyStatus}</div>}
+      </Panel>
+
       <Panel style={{ marginBottom:14 }}>
         <STitle>Enviar Mensagem Automatica</STitle>
         <div style={{ fontSize:10, color:P.textSec, marginBottom:12, lineHeight:'16px' }}>
-          Escreve a mensagem e clica no botao. O sistema envia para todos os prospects nao contactados nas plataformas com cookies configurados.
+          O n8n faz login automatico nas 3 plataformas. Se os DMs falharem com "IP bloqueado", configura um proxy residencial abaixo.
         </div>
         <textarea value={msgText} onChange={function(e) { setMsgText(e.target.value); }} rows={6} placeholder="Escreve a mensagem aqui..." style={{ ...INP, resize:'vertical', marginBottom:12, minHeight:120 }} />
 
