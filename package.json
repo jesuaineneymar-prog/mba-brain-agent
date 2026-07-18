@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
-    "vercel-build": "rm -rf node_modules/.cache .next && npm install && next build",
+    "vercel-build": "next build",
     "start": "next start",
     "lint": "eslint ."
   },
@@ -59,12 +59,9 @@
     "zustand": "^5.0.6"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
-    "tailwindcss": "^4",
-    "tw-animate-css": "^1.3.5",
     "typescript": "^5"
   }
 }
