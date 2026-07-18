@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const authHeader = request?.headers?.get?.('authorization');
     const validCodes = [process.env.ACCESS_CODE || 'MBA2026'];
