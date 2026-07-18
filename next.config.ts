@@ -5,7 +5,6 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  output: "standalone",
 };
 
 export default nextConfig;
