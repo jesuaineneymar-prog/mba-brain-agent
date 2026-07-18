@@ -15,24 +15,10 @@ const P = {
 };
 const INP: React.CSSProperties = { width:'100%', padding:'9px 13px', background:P.surface2, border:'1px solid '+P.border, borderRadius:6, color:P.text, fontSize:13, outline:'none', fontFamily:"'JetBrains Mono',monospace" };
 const SEL: React.CSSProperties = { ...INP, appearance:'none' as any, cursor:'pointer' };
-const LIMIT_DIARIO = 30;
-const PROPOSTA = 'Ola,\nO meu nome e Jesuaine Cristiano e represento a Mwango Brain, uma agencia criativa sediada em Luanda, Angola.\nTenho acompanhado o seu perfil com interesse e gostaria de lhe apresentar uma proposta de aquisicao da sua conta.\n\nEstamos dispostos a fazer uma oferta justa pelo seu perfil. Caso tenha interesse em saber mais detalhes, basta responder a esta mensagem e entraremos em contacto rapidamente.\n\nAguardamos o seu contacto.\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
-const FOLLOWUP_MSG_1 = 'Ola,\n\nEnviei-lhe uma mensagem ha alguns dias sobre uma proposta da Mwango Brain. Gostaria de saber se teve a oportunidade de a considerar.\n\nCaso tenha interesse, basta responder a esta mensagem.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
-const FOLLOWUP_MSG_2 = 'Ola,\n\nEsta e a minha ultima mensagem. Entendo que pode nao ter interesse ou nao ter tido tempo.\n\nCaso mude de ideia, a Mwango Brain continua disponivel. Basta responder.\n\nCumprimentos,\nEquipa Mwango Brain\nmwangobrain.com';
 
-/* ===== COOKIES / CREDENCIAIS (n8n faz login automatico) ===== */
-// O n8n trata do login automaticamente. Nao precisa de cookies aqui.
 const TABS = [
-  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'messages',label:'MENSAGENS'},{id:'followups',label:'FOLLOW-UPS'},{id:'agent',label:'AGENTE IA'},
+  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'agent',label:'AGENTE IA'},
 ];
-const statusColors: Record<string, string> = { prospect: P.textSec, contacted: P.orange, replied: P.blue, accepted: P.green, rejected: '#ff6b6b', blacklisted: '#666' };
-const statusLabels: Record<string, string> = { prospect:'Prospecto', contacted:'Contactado', replied:'Respondeu', accepted:'Aceite', rejected:'Rejeitado', blacklisted:'Blacklist' };
-const fmtDt = function(d: string) { var dt = new Date(d); if (isNaN(dt.getTime())) return d; return dt.toLocaleString('pt-PT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); };
-
-/* ===== PLATFORM CONSTANTS ===== */
-var ALL_PLATFORMS = ['instagram', 'tiktok', 'facebook'];
-var PLAT_ICONS: Record<string,string> = { instagram: '📸', tiktok: '🎵', facebook: '👤' };
-var PLAT_NAMES: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
 
 function getProfiles(): any[] {
   if (typeof window === 'undefined' || !window.localStorage) return [];
@@ -43,108 +29,50 @@ function getProfiles(): any[] {
 function saveProfiles(profiles: any[]) {
   if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.setItem('mba_profiles', JSON.stringify(profiles)); }
 }
-function getStoredCredentials() {
-  return {
-    igSession: storeGet('mba_ig_session') || '',
-    igCsrf: storeGet('mba_ig_csrf') || '',
-    ttSession: storeGet('mba_tt_session') || '',
-    ttCsrf: storeGet('mba_tt_csrf') || ''
-  };
-}
 
-/* ===== AUTOMATION CONFIG (3 plataformas) ===== */
-function getAutoConfig() {
-  try {
-    var raw = storeGet('mba_auto_config', '');
-    if (raw) {
-      var parsed = JSON.parse(raw);
-      // Ensure all 3 platforms exist
-      if (!parsed.platforms) parsed.platforms = {};
-      for (var i = 0; i < ALL_PLATFORMS.length; i++) {
-        var pf = ALL_PLATFORMS[i];
-        if (!parsed.platforms[pf]) parsed.platforms[pf] = { username: '', password: '', enabled: false };
-      }
-      return parsed;
-    }
-  } catch(e) {}
-  return {
-    enabled: false,
-    platforms: {
-      instagram: { username: '', password: '', enabled: false },
-      tiktok: { username: '', password: '', enabled: false },
-      facebook: { username: '', password: '', enabled: false }
-    }
-  };
-}
-function saveAutoConfig(cfg: any) { storeSet('mba_auto_config', JSON.stringify(cfg)); }
-function setAutoTrigger() { storeSet('mba_auto_trigger', JSON.stringify({ ts: Date.now() })); }
-function consumeAutoTrigger(): boolean {
-  try {
-    var raw = storeGet('mba_auto_trigger', '');
-    if (!raw) return false;
-    var d = JSON.parse(raw);
-    if (Date.now() - d.ts > 60000) { storeSet('mba_auto_trigger', ''); return false; }
-    storeSet('mba_auto_trigger', '');
-    return true;
-  } catch(e) { return false; }
-}
+/* ===== PLATFORM CONSTANTS ===== */
+var ALL_PLATFORMS = ['instagram', 'tiktok', 'facebook'];
+var PLAT_ICONS: Record<string,string> = { instagram: '📸', tiktok: '🎵', facebook: '👤' };
+var PLAT_NAMES: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
+var PLAT_COLORS: Record<string,string> = { instagram: '#E1306C', tiktok: '#00f2ea', facebook: '#1877F2' };
 
 function computeDashboard() {
   var profiles = getProfiles();
-  var today = new Date().toISOString().slice(0, 10);
   var totalProfiles = profiles.length;
-  var contactedToday = 0; var repliedToday = 0;
-  var outboundMessages = 0; var inboundMessages = 0;
-  var statusBreakdown: any[] = []; var platformBreakdown: any[] = [];
-  var topProfiles: any[] = []; var dailyStats: any[] = []; var pendingFollowUps = 0;
   var statusCounts: Record<string, number> = {};
   var platCounts: Record<string, number> = {};
-  var dayMap: Record<string, {contacted:number; replied:number; accepted:number}> = {};
-  var now = Date.now(); var threeDays = 3 * 24 * 60 * 60 * 1000;
-  var dayNames = ['Dom','Seg','Ter','Qua','Qui','Sex','Sab'];
+  var topProfiles: any[] = [];
+  var locationCounts: Record<string, number> = {};
 
   for (var i = 0; i < profiles.length; i++) {
-    var p = profiles[i]; var st = p.status || 'prospect';
+    var p = profiles[i];
+    var st = p.status || 'prospect';
+    if (st === 'blacklisted') continue;
     statusCounts[st] = (statusCounts[st] || 0) + 1;
-    var pl = p.platform || 'unknown'; platCounts[pl] = (platCounts[pl] || 0) + 1;
-    if (p.firstContactedAt && p.firstContactedAt.slice(0, 10) === today) contactedToday++;
-    var hasReply = false; var msgs = p.messages || [];
-    for (var j = 0; j < msgs.length; j++) {
-      var m = msgs[j];
-      if (m.direction === 'outbound') {
-        outboundMessages++; var mDay = (m.sentAt || '').slice(0, 10);
-        if (!dayMap[mDay]) dayMap[mDay] = {contacted:0, replied:0, accepted:0};
-        if (m.type === 'initial' || m.type === 'follow-up' || m.type === 'auto') dayMap[mDay].contacted++;
-      }
-      if (m.direction === 'inbound') {
-        inboundMessages++; hasReply = true; var mDay2 = (m.sentAt || '').slice(0, 10);
-        if (mDay2 === today) repliedToday++;
-        if (!dayMap[mDay2]) dayMap[mDay2] = {contacted:0, replied:0, accepted:0};
-        dayMap[mDay2].replied++;
-      }
-    }
-    if (hasReply && st !== 'replied' && st !== 'accepted') st = 'replied';
-    var followUpCount = 0;
-    for (var fu = 0; fu < msgs.length; fu++) { if (msgs[fu].type === 'follow-up') followUpCount++; }
-    var lastOut = null;
-    for (var k = msgs.length - 1; k >= 0; k--) { if (msgs[k].direction === 'outbound' && msgs[k].type !== 'follow-up') { lastOut = msgs[k]; break; } }
-    if (lastOut && followUpCount < 2) {
-      var sentTime = new Date(lastOut.sentAt).getTime(); var hasReplyAfter = false;
-      for (var mm = 0; mm < msgs.length; mm++) { if (msgs[mm].direction === 'inbound' && new Date(msgs[mm].sentAt).getTime() > sentTime) { hasReplyAfter = true; break; } }
-      if (!hasReplyAfter && (now - sentTime) > threeDays) pendingFollowUps++;
-    }
+    var pl = p.platform || 'unknown';
+    platCounts[pl] = (platCounts[pl] || 0) + 1;
+    var loc = (p.location || p.country || 'Outro');
+    if (loc === 'AO') loc = 'Angola';
+    locationCounts[loc] = (locationCounts[loc] || 0) + 1;
   }
-  for (var sk in statusCounts) statusBreakdown.push({status: sk, count: statusCounts[sk]});
-  for (var pk in platCounts) platformBreakdown.push({platform: pk, count: platCounts[pk]});
-  var sorted = profiles.slice().sort(function(a, b) { return (b.followers || 0) - (a.followers || 0); });
+  for (var sk in statusCounts) { if (statusCounts.hasOwnProperty(sk)) statusBreakdown.push({status: sk, count: statusCounts[sk]}); }
+  var statusBreakdown: any[] = [];
+  for (var sk2 in statusCounts) { if (statusCounts.hasOwnProperty(sk2)) statusBreakdown.push({status: sk2, count: statusCounts[sk2]}); }
+  var platformBreakdown: any[] = [];
+  for (var pk in platCounts) { if (platCounts.hasOwnProperty(pk)) platformBreakdown.push({platform: pk, count: platCounts[pk]}); }
+  var locationBreakdown: any[] = [];
+  for (var lk in locationCounts) { if (locationCounts.hasOwnProperty(lk)) locationBreakdown.push({location: lk, count: locationCounts[lk]}); }
+  var sorted = profiles.filter(function(p) { return p.status !== 'blacklisted'; }).slice().sort(function(a, b) { return (b.followers || 0) - (a.followers || 0); });
   for (var ti = 0; ti < Math.min(10, sorted.length); ti++) topProfiles.push(sorted[ti]);
-  for (var di = 6; di >= 0; di--) {
-    var d2 = new Date(now - di * 86400000); var dk = d2.toISOString().slice(0, 10);
-    var dd = dayMap[dk] || {contacted:0, replied:0, accepted:0};
-    dailyStats.push({date: dk, dayName: dayNames[d2.getDay()], contacted: dd.contacted, replied: dd.replied, accepted: dd.accepted});
+
+  var avgFollowers = 0;
+  if (totalProfiles > 0) {
+    var sum = 0;
+    for (var ai = 0; ai < profiles.length; ai++) sum += (profiles[ai].followers || 0);
+    avgFollowers = Math.round(sum / totalProfiles);
   }
-  var responseRate = outboundMessages > 0 ? ((inboundMessages / outboundMessages) * 100) : 0;
-  return { overview: { totalProfiles, contactedToday, repliedToday, totalCampaigns:0, outboundMessages, inboundMessages, responseRate }, statusBreakdown, platformBreakdown, topProfiles, dailyStats, pendingFollowUps };
+
+  return { overview: { totalProfiles, avgFollowers }, statusBreakdown, platformBreakdown, locationBreakdown, topProfiles };
 }
 
 /* ===== UI COMPONENTS ===== */
@@ -221,13 +149,10 @@ function BarComp({ value, max, color = P.red, h = 8 }: { value:number; max:numbe
   return <div style={{ height:h, background:P.surface2, borderRadius:h/2, overflow:'hidden' }}><div style={{ height:'100%', width:pct+'%', background:'linear-gradient(90deg,'+color+','+P.redB+')', borderRadius:h/2, transition:'width .5s' }} /></div>;
 }
 function StatusBadge({ status }: { status: string }) {
-  const c = statusColors[status] || P.textDim; const l = statusLabels[status] || status;
+  const colors: Record<string,string> = { prospect: P.textSec, contacted: P.orange, replied: P.blue, accepted: P.green, rejected: '#ff6b6b', blacklisted: '#666' };
+  const labels: Record<string,string> = { prospect:'Prospecto', contacted:'Contactado', replied:'Respondeu', accepted:'Aceite', rejected:'Rejeitado', blacklisted:'Blacklist' };
+  const c = colors[status] || P.textDim; const l = labels[status] || status;
   return <span style={{ padding:'2px 8px', borderRadius:3, background:c+'18', border:'1px solid '+c+'44', color:c, fontSize:10, fontWeight:600, textTransform:'uppercase' }}>{l}</span>;
-}
-function DeliveryBadge({ msg }: { msg: any }) {
-  if (!msg.sendAttempted) return <span style={{ color:P.textDim, fontSize:9 }}>PENDENTE</span>;
-  if (msg.delivered) return <span style={{ color:P.green, fontSize:9, fontWeight:700 }}>ENVIADO</span>;
-  return <span style={{ color:'#ff4444', fontSize:9, fontWeight:700, title: msg.deliveryMsg || 'Falhou' }}>FALHOU</span>;
 }
 function EmptyState({ icon, title, sub }: { icon:string; title:string; sub:string }) {
   return <div style={{ textAlign:'center', padding:48, color:P.textDim }}><div style={{ fontSize:32, opacity:0.15, marginBottom:12 }}>{icon}</div><div style={{ color:P.text, fontSize:14, fontWeight:600 }}>{title}</div><div style={{ fontSize:12, marginTop:6 }}>{sub}</div></div>;
@@ -270,7 +195,7 @@ function LoginScreen() {
   );
 }
 
-/* ===== DASHBOARD TAB (Stats only) ===== */
+/* ===== DASHBOARD TAB ===== */
 function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh: () => void }) {
   const [dashData, setDashData] = useState<any>(null);
   const loadDash = function() { setDashData(computeDashboard()); };
@@ -284,31 +209,26 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
       <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:14 }}><STitle>Painel Geral</STitle><Btn variant="ghost" size="sm" onClick={onRefresh}>Actualizar</Btn></div>
       <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
         <StatCard label="Total de perfis" value={o.totalProfiles||0} sub="guardados" />
-        <StatCard label="Contactados hoje" value={o.contactedToday||0} sub="ultimas 24h" color={P.orange} />
-        <StatCard label="Mensagens enviadas" value={o.outboundMessages||0} sub="total DMs" color={P.blue} />
-        <StatCard label="Respostas recebidas" value={o.inboundMessages||0} sub="total" color={P.green} />
-        <StatCard label="Taxa de resposta" value={(o.responseRate||0).toFixed(1)+'%'} sub={(o.outboundMessages||0)+' enviadas / '+(o.inboundMessages||0)+' recebidas'} color={P.blue} />
-        <StatCard label="Follow-ups pendentes" value={d.pendingFollowUps||0} sub="3 dias sem resposta" color={P.orange} />
+        <StatCard label="Media seguidores" value={(o.avgFollowers||0).toLocaleString('pt-PT')} sub="por perfil" color={P.blue} />
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14, marginBottom:14 }}>
-        <Panel><STitle>Actividade ultimos 7 dias</STitle>
-          <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{(d.dailyStats || []).map(function(ds: any, i: number) {
-            var maxC = Math.max.apply(null, (d.dailyStats || []).map(function(x: any) { return x.contacted; }).concat([1]));
-            var maxR = Math.max.apply(null, (d.dailyStats || []).map(function(x: any) { return x.replied; }).concat([1]));
-            return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11 }}>{ds.dayName} {ds.date?ds.date.slice(5):''}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{ds.contacted}c / {ds.replied}r</span></div><div style={{ display:'flex', gap:3 }}><div style={{ flex:2 }}><BarComp value={ds.contacted} max={maxC} color={P.orange} h={6} /></div><div style={{ flex:2 }}><BarComp value={ds.replied} max={maxR} color={P.green} h={6} /></div></div></div>;
-          })}</div>
-        </Panel>
         <Panel><STitle>Por Plataforma</STitle>
           {(d.platformBreakdown || []).length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{d.platformBreakdown.map(function(p: any, i: number) {
             var colors = [P.red, P.orange, P.blue, P.green]; var maxP = Math.max.apply(null, d.platformBreakdown.map(function(x: any) { return x.count; }).concat([1]));
-            return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{p.platform}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span></div><BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} /></div>;
+            return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{PLAT_NAMES[p.platform] || p.platform}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span></div><BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} /></div>;
+          })}</div> : <EmptyState icon="\u25CE" title="Sem dados" sub="Aguardando prospeccao" />}
+        </Panel>
+        <Panel><STitle>Por Localizacao</STitle>
+          {(d.locationBreakdown || []).length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{d.locationBreakdown.map(function(l: any, i: number) {
+            var colors = [P.green, P.blue, P.orange, P.red]; var maxL = Math.max.apply(null, d.locationBreakdown.map(function(x: any) { return x.count; }).concat([1]));
+            return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11 }}>{l.location}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{l.count}</span></div><BarComp value={l.count} max={maxL} color={colors[i%4]} h={8} /></div>;
           })}</div> : <EmptyState icon="\u25CE" title="Sem dados" sub="Aguardando prospeccao" />}
         </Panel>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
         <Panel><STitle>Estado dos Perfis</STitle>
           <div style={{ display:'flex', flexDirection:'column', gap:8 }}>{(d.statusBreakdown || []).map(function(s: any, i: number) {
-            return <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><div style={{ width:8, height:8, borderRadius:2, background:statusColors[s.status]||P.textDim }} /><span style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{s.status}</span></div><span style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>{s.count}</span></div>;
+            return <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><div style={{ width:8, height:8, borderRadius:2, background:({ prospect: P.textSec, contacted: P.orange, replied: P.blue, accepted: P.green, rejected: '#ff6b6b' } as any)[s.status]||P.textDim }} /><span style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{s.status}</span></div><span style={{ color:P.text, fontFamily:"'JetBrains Mono',monospace", fontWeight:700 }}>{s.count}</span></div>;
           })}</div>
         </Panel>
         <Panel><STitle>Top 10 Perfis</STitle>
@@ -325,24 +245,15 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
 function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onClose:()=>void; onUpdate:()=>void }) {
   const [notes, setNotes] = useState(profile?.notes || '');
   const [status, setStatus] = useState(profile?.status || 'prospect');
-  const [msg, setMsg] = useState(''); const [sending, setSending] = useState(false);
   if (!profile) return null;
   const saveNotes = async function() { var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].notes = notes; saved[i].status = status; break; } } saveProfiles(saved); onUpdate(); };
-  const sendMessage = async function() {
-    if (!msg.trim()) return; setSending(true);
-    // Enviar via n8n (login automatico)
-    var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ username: profile.username, message: msg, platform: profile.platform, sentToday: 0 }) }).catch(function() { return null; });
-    var sd = null; if (sr) { sd = await sr.json().catch(function() { return null; }); }
-    var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { if (!saved[i].messages) saved[i].messages = []; var dmOk = !!(sd && sd.dmSent); saved[i].messages.push({ content: msg, direction: 'outbound', sentAt: new Date().toISOString(), type: 'manual', sendAttempted: true, delivered: dmOk, deliveryMsg: (sd && sd.deliveryMsg) ? sd.deliveryMsg : 'Erro ao enviar' }); if (saved[i].status === 'prospect' && dmOk) saved[i].status = 'contacted'; break; } }
-    saveProfiles(saved); setMsg(''); onUpdate(); setSending(false);
-  };
   const blacklist = function() { var saved = getProfiles(); for (var i = 0; i < saved.length; i++) { if (saved[i].id === profile.id) { saved[i].status = 'blacklisted'; break; } } saveProfiles(saved); onUpdate(); onClose(); };
-  var msgs = profile.messages || [];
+
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:999 }} onClick={onClose}>
       <div style={{ background:P.surface, border:'1px solid '+P.border, borderRadius:12, padding:20, width:'90%', maxWidth:560, maxHeight:'85vh', overflowY:'auto' }} onClick={function(e) { e.stopPropagation(); }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
-          <div style={{ display:'flex', alignItems:'center', gap:10 }}><div style={{ color:P.redB, fontSize:16, fontWeight:700 }}>{profile.username}</div><span style={{ color:P.textDim, fontSize:11 }}>{profile.platform}</span><StatusBadge status={status} /></div>
+          <div style={{ display:'flex', alignItems:'center', gap:10 }}><div style={{ color:P.redB, fontSize:16, fontWeight:700 }}>{profile.username}</div><span style={{ color:PLAT_COLORS[profile.platform]||P.textDim, fontSize:11 }}>{PLAT_NAMES[profile.platform]||profile.platform}</span><StatusBadge status={status} /></div>
           <button onClick={onClose} style={{ background:'none', border:'none', color:P.textSec, cursor:'pointer', fontSize:18 }}>&times;</button>
         </div>
         <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
@@ -352,22 +263,20 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
           {profile.profileUrl && <div style={{ alignSelf:'flex-end' }}><a href={profile.profileUrl} target="_blank" rel="noreferrer"><Btn variant="ghost" size="sm">Abrir perfil</Btn></a></div>}
         </div>
         {profile.bio && <div style={{ marginBottom:14 }}><Lbl>Biografia</Lbl><div style={{ color:P.textSec, fontSize:12, whiteSpace:'pre-wrap' }}>{profile.bio}</div></div>}
-        <div style={{ marginBottom:14 }}><Lbl>Estado</Lbl><div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>{['prospect','contacted','replied','accepted','rejected'].map(function(s) { return <button key={s} onClick={function() { setStatus(s); }} style={{ padding:'5px 10px', borderRadius:4, border:'1px solid '+(status===s?(statusColors[s]||P.red):P.border), background:status===s?(statusColors[s]||P.red)+'18':'transparent', color:status===s?(statusColors[s]||P.red):P.textSec, fontSize:11, cursor:'pointer' }}>{statusLabels[s]}</button>; })}</div></div>
-        <div style={{ marginBottom:14 }}><Lbl>Notas</Lbl><textarea value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={2} style={{ ...INP, resize:'vertical' }} /></div>
-        <div style={{ display:'flex', gap:8, marginBottom:14, flexWrap:'wrap' }}><Btn onClick={saveNotes}>Guardar</Btn><Btn variant="danger" onClick={blacklist}>Blacklist</Btn></div>
-        {msgs.length > 0 && <div style={{ marginBottom:14, borderTop:'1px solid '+P.border, paddingTop:14 }}><Lbl>Historico ({msgs.length})</Lbl><div style={{ maxHeight:200, overflowY:'auto' }}>{msgs.map(function(m: any, i: number) { return <div key={i} style={{ padding:'6px 0', borderBottom:'1px solid '+P.redDim, display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:8 }}><div style={{ flex:1, minWidth:0 }}><div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:2 }}><span style={{ color:m.direction==='outbound'?P.orange:P.green, fontSize:9, fontWeight:700 }}>{m.direction==='outbound'?'OUT':'IN'}</span><DeliveryBadge msg={m} />{m.type && <span style={{ color:P.textDim, fontSize:9 }}>({m.type})</span>}</div><div style={{ color:P.textSec, fontSize:11, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>{m.content}</div></div><span style={{ color:P.textDim, fontSize:9, flexShrink:0 }}>{fmtDt(m.sentAt)}</span></div>; })}</div></div>}
-        <div style={{ borderTop:'1px solid '+P.border, paddingTop:14 }}><Lbl>Enviar mensagem</Lbl><textarea value={msg} onChange={function(e) { setMsg(e.target.value); }} rows={3} placeholder="Escreva a mensagem..." style={{ ...INP, resize:'vertical', marginBottom:8 }} /><Btn onClick={sendMessage} disabled={sending || !msg.trim()}>{sending ? 'A enviar...' : 'Enviar DM real'}</Btn></div>
+        {profile.location && <div style={{ marginBottom:14 }}><Lbl>Localizacao</Lbl><div style={{ color:P.text, fontSize:12 }}>{profile.location}</div></div>}
+        <div style={{ marginBottom:14 }}><Lbl>Estado</Lbl><div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>{['prospect','contacted','replied','accepted','rejected'].map(function(s) { return <button key={s} onClick={function() { setStatus(s); }} style={{ padding:'5px 10px', borderRadius:4, border:'1px solid '+(status===s?(P.red):P.border), background:status===s?P.red+'18':'transparent', color:status===s?P.red:P.textSec, fontSize:11, cursor:'pointer' }}>{s}</button>; })}</div></div>
+        <div style={{ marginBottom:14 }}><Lbl>Notas</Lbl><textarea value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={3} style={{ ...INP, resize:'vertical' }} /></div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}><Btn onClick={saveNotes}>Guardar</Btn><Btn variant="danger" onClick={blacklist}>Blacklist</Btn></div>
       </div>
     </div>
   );
 }
 
-/* ===== PROSPECTING TAB (with auto-trigger) ===== */
+/* ===== PROSPECTING TAB ===== */
 function ProspectingTab() {
   const [form, setForm] = useState({ platform:'all', minFollowers:500, maxFollowers:100000, location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filterPlat, setFilterPlat] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [search, setSearch] = useState('');
@@ -385,7 +294,7 @@ function ProspectingTab() {
     setTotal(all.length); var start = (page - 1) * 50; setProfiles(all.slice(start, start + 50));
   };
   useEffect(function() { loadProfiles(); }, [page, filterPlat, filterStatus, search]);
-  const deleteAllProfiles = function() { if (!confirm('Apagar TODOS os ' + total + ' perfis?')) return; if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.removeItem('mba_profiles'); } setProfiles([]); setTotal(0); setResults([]); setSelected(new Set()); setPage(1); };
+  const deleteAllProfiles = function() { if (!confirm('Apagar TODOS os ' + total + ' perfis?')) return; if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.removeItem('mba_profiles'); } setProfiles([]); setTotal(0); setResults([]); setPage(1); };
 
   const runProspect = async function() {
     setLoading(true); setResults([]); setProspectMsg('A procurar perfis angolanos...');
@@ -402,9 +311,10 @@ function ProspectingTab() {
       var savedIds = new Set(saved.map(function(s: any) { return s.username + ':' + s.platform; }));
       var newOnes = d.profiles.filter(function(p: any) { return !savedIds.has(p.username + ':' + p.platform); });
       var merged = saved.concat(newOnes);
-      saveProfiles(merged); setProfiles(merged); setTotal(merged.length); setSelected(new Set());
+      saveProfiles(merged); setProfiles(merged); setTotal(merged.length); setPage(1);
 
-      setProspectMsg('Prospeccao feita! ' + newOnes.length + ' novos perfis (' + (newOnes.length > 0 ? newOnes.map(function(p: any) { return p.platform; }).filter(function(v: string, i: number, a: string[]) { return a.indexOf(v) === i; }).map(function(p: string) { return PLAT_NAMES[p] || p; }).join(', ') : 'nenhuma') + '). Vai a MENSAGENS para enviar.');
+      var platNames = newOnes.map(function(p: any) { return p.platform; }).filter(function(v: string, i: number, a: string[]) { return a.indexOf(v) === i; }).map(function(p: string) { return PLAT_NAMES[p] || p; });
+      setProspectMsg('Prospeccao feita! ' + newOnes.length + ' novos perfis (' + platNames.join(', ') + ').');
     }
     setLoading(false);
   };
@@ -429,7 +339,7 @@ function ProspectingTab() {
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             <input value={search} onChange={function(e) { setSearch(e.target.value); setPage(1); }} placeholder="Pesquisar..." style={{ ...INP, width:140 }} />
             <select value={filterPlat} onChange={function(e) { setFilterPlat(e.target.value); setPage(1); }} style={{ ...SEL as any, width:100 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option></select>
-            <select value={filterStatus} onChange={function(e) { setFilterStatus(e.target.value); setPage(1); }} style={{ ...SEL as any, width:120 }}><option value="all">Todos</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option></select>
+            <select value={filterStatus} onChange={function(e) { setFilterStatus(e.target.value); setPage(1); }} style={{ ...SEL as any, width:120 }}><option value="all">Todos</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option></select>
             {total > 0 && <Btn variant="danger" size="sm" onClick={deleteAllProfiles}>Apagar todos</Btn>}
           </div>
         </div>
@@ -445,204 +355,6 @@ function ProspectingTab() {
   );
 }
 
-/* ===== MESSAGES TAB (Simplificado - Enviar Mensagem Automatica) ===== */
-function MessagesTab() {
-  const [msgText, setMsgText] = useState(PROPOSTA);
-  const [sending, setSending] = useState(false);
-  const [log, setLog] = useState<any[]>([]);
-  const [done, setDone] = useState(false);
-  const [progress, setProgress] = useState<any>(null);
-  const stopRef = useRef(false);
-
-  const addLog = function(ok: boolean, msg: string) {
-    setLog(function(prev) { return prev.concat([{ ok: ok, msg: msg, ts: new Date().toLocaleTimeString('pt-PT') }]); });
-  };
-
-  const [proxyUrl, setProxyUrl] = useState(storeGet('mba_proxy_url'));
-  const [proxyStatus, setProxyStatus] = useState('');
-  const saveProxy = async function() {
-    if (!proxyUrl.trim()) return;
-    setProxyStatus('A testar...');
-    try {
-      var r = await fetch('/api/send-message', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'set-proxy', proxy: proxyUrl.trim() })
-      });
-      var d = await r.json();
-      if (d.success) {
-        storeSet('mba_proxy_url', proxyUrl.trim());
-        setProxyStatus('Proxy configurado com sucesso!');
-      } else {
-        setProxyStatus('Falhou: ' + (d.testMessage || d.error || 'Verifica URL'));
-      }
-    } catch(e: any) { setProxyStatus('Erro: ' + (e.message || '')); }
-  };
-
-  const sendAutomaticDMs = async function() {
-    if (!msgText.trim()) { addLog(false, 'Escreve uma mensagem primeiro'); return; }
-    stopRef.current = false;
-    setDone(false);
-    setLog([]);
-    setSending(true);
-
-    // n8n faz login automatico — todas as plataformas estao prontas
-    addLog(true, 'n8n workflows ativos. Login automatico com sessao cache.');
-    addLog(true, 'Nota: Se retornar "needsProxy" = IP bloqueado. Configure proxy residencial.');
-    addLog(true, 'Nota: Se retornar "needsCheckpoint" = Abre o app e aprova o acesso recente.');
-
-    // Get uncontacted prospects
-    var allProfiles = getProfiles();
-    var activePlats = new Set<string>(['instagram', 'tiktok', 'facebook']);
-
-    var prospects = allProfiles.filter(function(p: any) {
-      if (!activePlats.has(p.platform)) return false;
-      if (p.status === 'contacted' || p.status === 'replied' || p.status === 'accepted') return false;
-      var msgs = p.messages || [];
-      for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].direction === 'outbound' && msgs[mi].sendAttempted) return false; }
-      return true;
-    });
-
-    prospects.sort(function(a: any, b: any) { return (b.angolaScore || 0) - (a.angolaScore || 0); });
-
-    if (prospects.length === 0) {
-      addLog(false, 'Sem prospects por contactar. Faz prospeccao primeiro.');
-      setSending(false);
-      setDone(true);
-      return;
-    }
-
-    var todayKey = 'mba_daily_' + new Date().toISOString().slice(0, 10);
-    var dailySent = parseInt(storeGet(todayKey, '0') || '0') || 0;
-    var batch = prospects.slice(0, LIMIT_DIARIO - dailySent);
-    var sent = 0; var failed = 0;
-
-    addLog(true, batch.length + ' perfis para contactar (' + dailySent + '/' + LIMIT_DIARIO + ' hoje)');
-
-    for (var idx = 0; idx < batch.length; idx++) {
-      if (stopRef.current) { addLog(false, 'Parado pelo utilizador'); break; }
-      var p = batch[idx];
-      setProgress({ current: idx + 1, total: batch.length, username: p.username, platform: p.platform, sent: sent, failed: failed });
-
-      // Enviar via n8n (login automatico)
-      var body: any = { username: p.username, message: msgText, platform: p.platform, sentToday: dailySent + sent };
-
-      // Try sending (up to 3 attempts)
-      var dmOk = false;
-      var errMsg = '';
-      for (var attempt = 1; attempt <= 3; attempt++) {
-        if (stopRef.current) break;
-        try {
-          var sr = await fetch('/api/send-message', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
-          var sd = await sr.json().catch(function() { return null; });
-          if (sd && sd.dmSent) { dmOk = true; break; }
-          errMsg = (sd && sd.deliveryMsg) || 'Erro desconhecido';
-          if (attempt < 3) {
-            addLog(false, '@' + p.username + ' tentativa ' + attempt + '/3 falhou. A tentar...');
-            await new Promise(function(r) { setTimeout(r, 3000); });
-          }
-        } catch(e) {
-          errMsg = 'Erro de conexao';
-          if (attempt < 3) await new Promise(function(r) { setTimeout(r, 3000); });
-        }
-      }
-
-      // Update profile
-      var saved = getProfiles(); var target = null;
-      for (var j = 0; j < saved.length; j++) { if (saved[j].id === p.id) { target = saved[j]; break; } }
-      if (target) {
-        if (!target.messages) target.messages = [];
-        target.messages.push({ content: msgText, direction: 'outbound', sentAt: new Date().toISOString(), type: 'auto', sendAttempted: true, delivered: dmOk, deliveryMsg: dmOk ? 'DM enviado' : errMsg });
-        if (dmOk && target.status === 'prospect') target.status = 'contacted';
-        saveProfiles(saved);
-      }
-
-      if (dmOk) {
-        sent++; dailySent++;
-        addLog(true, PLAT_ICONS[p.platform] + ' @' + p.username + ' - DM enviado!');
-      } else {
-        failed++;
-        addLog(false, PLAT_ICONS[p.platform] + ' @' + p.username + ' - FALHOU: ' + errMsg.substring(0, 60));
-      }
-      storeSet(todayKey, String(dailySent));
-      if (idx < batch.length - 1) await new Promise(function(r) { setTimeout(r, 2500); });
-    }
-
-    setProgress({ current: batch.length, total: batch.length, sent: sent, failed: failed });
-    setSending(false);
-    setDone(true);
-  };
-
-  return (
-    <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      {/* Proxy Config */}
-      <Panel style={{ marginBottom:14, borderLeft: '3px solid ' + P.orange }}>
-        <div style={{ fontSize:11, fontWeight:700, color:P.orange, marginBottom:8, letterSpacing:'.5px' }}>PROXY RESIDENCIAL</div>
-        <div style={{ fontSize:10, color:P.textSec, marginBottom:8, lineHeight:'15px' }}>
-          Para contornar o bloqueio de IPs datacenter do IG/FB/TT, configura um proxy residencial. Sem proxy, os logins serao bloqueados.
-          <br/>Provedores: <b style={{color:P.text}}>Bright Data</b>, <b style={{color:P.text}}>Oxylabs</b>, <b style={{color:P.text}}>IPRoyal</b>, <b style={{color:P.text}}>Webshare</b>
-        </div>
-        <div style={{ display:'flex', gap:8 }}>
-          <input value={proxyUrl} onChange={function(e) { setProxyUrl(e.target.value); setProxyStatus(''); }} placeholder="http://user:pass@host:port" style={{ ...INP, flex:1, fontSize:11 }} />
-          <button onClick={saveProxy} style={{ padding:'8px 14px', borderRadius:6, border:'none', background:P.orange, color:'#fff', fontSize:11, fontWeight:700, cursor:'pointer', whiteSpace:'nowrap' }}>TESTAR + GUARDAR</button>
-        </div>
-        {proxyStatus && <div style={{ marginTop:6, fontSize:10, color: proxyStatus.includes('sucesso') ? P.green : P.redB }}>{proxyStatus}</div>}
-      </Panel>
-
-      <Panel style={{ marginBottom:14 }}>
-        <STitle>Enviar Mensagem Automatica</STitle>
-        <div style={{ fontSize:10, color:P.textSec, marginBottom:12, lineHeight:'16px' }}>
-          O n8n faz login automatico nas 3 plataformas. Se os DMs falharem com "IP bloqueado", configura um proxy residencial abaixo.
-        </div>
-        <textarea value={msgText} onChange={function(e) { setMsgText(e.target.value); }} rows={6} placeholder="Escreve a mensagem aqui..." style={{ ...INP, resize:'vertical', marginBottom:12, minHeight:120 }} />
-
-        {!sending && !done && (
-          <Btn onClick={sendAutomaticDMs} style={{ width:'100%', background:'linear-gradient(135deg, '+P.red+', #800010)', padding:'12px', fontSize:14, fontWeight:700 }}>
-            Enviar Mensagem Automatica
-          </Btn>
-        )}
-        {sending && (
-          <button onClick={function() { stopRef.current = true; setSending(false); addLog(false, 'Parado pelo utilizador'); }} style={{ width:'100%', padding:'12px', borderRadius:6, border:'1px solid #ff4444', background:'transparent', color:'#ff4444', fontSize:13, fontWeight:700, cursor:'pointer' }}>
-            Parar Envio
-          </button>
-        )}
-        {done && (
-          <button onClick={function() { setDone(false); setLog([]); setProgress(null); }} style={{ width:'100%', padding:'12px', borderRadius:6, border:'1px solid '+P.border, background:'transparent', color:P.textSec, fontSize:13, cursor:'pointer', marginTop:8 }}>
-            Enviar Novamente
-          </button>
-        )}
-      </Panel>
-
-      {/* Progress */}
-      {progress && progress.total && (
-        <div style={{ marginBottom:14, padding:'10px 14px', borderRadius:8, background:P.surface2, border:'1px solid '+P.border }}>
-          <div style={{ display:'flex', justifyContent:'space-between', fontSize:11, color:P.textSec, marginBottom:6 }}>
-            <span>{PLAT_ICONS[progress.platform] || ''} @{progress.username || ''}</span>
-            <span>{progress.current}/{progress.total} ({(progress.sent||0)} ok, {(progress.failed||0)} falhou)</span>
-          </div>
-          <div style={{ height:6, borderRadius:3, background:P.bg, overflow:'hidden' }}>
-            <div style={{ height:'100%', borderRadius:3, background:'linear-gradient(90deg, '+P.red+', '+P.redB+')', width: ((progress.current / progress.total) * 100) + '%', transition:'width 0.3s' }} />
-          </div>
-        </div>
-      )}
-
-      {/* Log */}
-      {log.length > 0 && (
-        <Panel>
-          <STitle>Log de Envio</STitle>
-          <div style={{ maxHeight:300, overflowY:'auto', padding:8, borderRadius:6, background:'rgba(0,0,0,0.3)', fontSize:10, fontFamily:"'JetBrains Mono',monospace" }}>
-            {log.map(function(l: any, i: number) {
-              return <div key={i} style={{ color: l.ok ? P.green : '#ff6b6b', padding:'3px 0', borderBottom: i < log.length - 1 ? '1px solid rgba(255,255,255,0.03)' : 'none' }}>
-                <span style={{ color:P.textDim, marginRight:8 }}>{l.ts}</span>
-                {l.ok ? '\u2713' : '\u2717'} {l.msg}
-              </div>;
-            })}
-          </div>
-        </Panel>
-      )}
-    </div>
-  );
-}
-
 /* ===== AGENT CHAT ===== */
 function AgentChat() {
   const [chatHistory, setChatHistory] = useState<{role:string; content:string}[]>([]);
@@ -652,12 +364,13 @@ function AgentChat() {
   const send = async function() {
     if (!input.trim() || loading) return; var userMsg = input.trim(); setInput('');
     setChatHistory(function(h) { return h.concat([{ role:'user', content:userMsg }]); }); setLoading(true);
-    var profiles = getProfiles(); var systemContext = 'ESTADO ACTUAL DO SISTEMA:\n';
+    var profiles = getProfiles();
+    var systemContext = 'ESTADO ACTUAL DO SISTEMA:\n';
     systemContext += '- Total de perfis guardados: ' + profiles.length + '\n';
-    var platCount: Record<string,number> = {}; var statusCount: Record<string,number> = {};
-    var totalSent = 0; var totalDelivered = 0; var totalFailed = 0;
-    for (var i = 0; i < profiles.length; i++) { var pl = profiles[i].platform || 'unknown'; platCount[pl] = (platCount[pl] || 0) + 1; var st = profiles[i].status || 'prospect'; statusCount[st] = (statusCount[st] || 0) + 1; var ms = profiles[i].messages || []; for (var j = 0; j < ms.length; j++) { if (ms[j].direction === 'outbound') { totalSent++; if (ms[j].delivered) totalDelivered++; else if (ms[j].sendAttempted) totalFailed++; } } }
-    systemContext += '- Por plataforma: ' + JSON.stringify(platCount) + '\n- Por estado: ' + JSON.stringify(statusCount) + '\n- DMs: ' + totalSent + ' enviados, ' + totalDelivered + ' entregues, ' + totalFailed + ' falhados\n- Limite diario: 30 DMs\n';
+    var platCount: Record<string,number> = {};
+    for (var i = 0; i < profiles.length; i++) { platCount[profiles[i].platform || 'unknown'] = (platCount[profiles[i].platform || 'unknown'] || 0) + 1; }
+    systemContext += '- Por plataforma: ' + JSON.stringify(platCount) + '\n';
+    systemContext += '- Este sistema e apenas para prospeccao (nao envia DMs)\n';
     const res = await fetch('/api/respond', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body: JSON.stringify({ message: userMsg, conversationHistory: chatHistory.slice(-10), systemContext: systemContext }) }).catch(function() { return null; });
     if (res && res.ok) { const d = await res.json().catch(function() { return null; }); if (d && d.reply) setChatHistory(function(h) { return h.concat([{ role:'assistant', content:d.reply }]); }); else setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro ao gerar resposta.' }]); }); } else setChatHistory(function(h) { return h.concat([{ role:'assistant', content:'Erro de ligacao.' }]); });
     setLoading(false);
@@ -666,7 +379,7 @@ function AgentChat() {
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
       <div style={{ padding:'10px 16px', borderBottom:'1px solid '+P.border }}><STitle>Agente IA</STitle></div>
       <div style={{ flex:1, overflowY:'auto', padding:16 }}>
-        {chatHistory.length === 0 && <EmptyState icon="\u2609" title="Agente Mwango Brain" sub="Pergunte sobre prospeccao, perfis, DMs, ou qualquer coisa sobre o sistema." />}
+        {chatHistory.length === 0 && <EmptyState icon="\u2609" title="Agente Mwango Brain" sub="Pergunte sobre prospeccao, perfis, ou qualquer coisa sobre o sistema." />}
         {chatHistory.map(function(m, i) { return <div key={i} style={{ display:'flex', justifyContent:m.role==='user'?'flex-end':'flex-start', marginBottom:10 }}><div style={{ maxWidth:'80%', padding:'10px 14px', borderRadius:8, background:m.role==='user'?'rgba(192,0,28,0.12)':'rgba(255,255,255,0.04)', border:'1px solid '+(m.role==='user'?P.border:'rgba(255,255,255,0.06)'), color:P.text, fontSize:13, lineHeight:1.5 }}>{m.role === 'assistant' && <div style={{ color:P.redB, fontSize:10, fontWeight:700, marginBottom:4 }}>MBA AGENTE</div>}<div style={{ whiteSpace:'pre-wrap' }}>{m.content}</div></div></div>; })}
         {loading && <div style={{ display:'flex', justifyContent:'flex-start' }}><div style={{ padding:'10px 14px', borderRadius:8, background:'rgba(255,255,255,0.04)', color:P.textDim, fontSize:12, animation:'blink 1.5s infinite' }}>A pensar...</div></div>}
         <div ref={chatEnd} />
@@ -675,33 +388,6 @@ function AgentChat() {
         <input value={input} onChange={function(e) { setInput(e.target.value); }} onKeyDown={function(e) { if(e.key==='Enter' && !e.shiftKey) send(); }} placeholder="Escreva a sua mensagem..." style={{ ...INP, flex:1 }} />
         <Btn onClick={send} disabled={loading || !input.trim()}>Enviar</Btn>
       </div>
-    </div>
-  );
-}
-
-/* ===== FOLLOW-UPS TAB ===== */
-function FollowUpsTab() {
-  var profiles = getProfiles(); var now = Date.now();
-  var pendingDue: any[] = []; var pendingWait: any[] = []; var sentList: any[] = []; var doneList: any[] = [];
-  for (var i = 0; i < profiles.length; i++) {
-    var p = profiles[i]; var msgs = p.messages || []; var fuCount = 0; var lastOut = null;
-    for (var mi = 0; mi < msgs.length; mi++) { if (msgs[mi].type === 'follow-up') { fuCount++; var entry: any = { username: p.username, platform: p.platform, followers: p.followers || 0, sentAt: msgs[mi].sentAt, delivered: msgs[mi].delivered, fuNum: fuCount, replied: false }; var fuT = new Date(msgs[mi].sentAt).getTime(); for (var ri = 0; ri < msgs.length; ri++) { if (msgs[ri].direction === 'inbound' && new Date(msgs[ri].sentAt).getTime() > fuT) { entry.replied = true; break; } } if (entry.replied || fuCount >= 2) doneList.push(entry); else sentList.push(entry); } if (msgs[mi].direction === 'outbound' && msgs[mi].type !== 'follow-up' && msgs[mi].type !== 'auto-reply') lastOut = msgs[mi]; }
-    if (fuCount < 2 && lastOut) { var sT = new Date(lastOut.sentAt).getTime(); var hasR = false; for (var hr = 0; hr < msgs.length; hr++) { if (msgs[hr].direction === 'inbound' && new Date(msgs[hr].sentAt).getTime() > sT) { hasR = true; break; } } if (!hasR) { var days = Math.floor((now - sT) / 86400000); var item: any = { username: p.username, platform: p.platform, followers: p.followers || 0, days: days, fuNum: fuCount, nextFu: fuCount + 1, due: days >= 3, dueIn: 3 - days }; if (days >= 3) pendingDue.push(item); else pendingWait.push(item); } }
-  }
-  pendingDue.sort(function(a: any, b: any) { return b.days - a.days; }); pendingWait.sort(function(a: any, b: any) { return b.days - a.days; });
-  var nDue = pendingDue.length; var nWait = pendingWait.length; var nSent = sentList.length; var nDone = doneList.length;
-  return (
-    <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
-      <STitle>Follow-Ups Automaticos</STitle>
-      <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
-        <StatCard label="Pendentes (prontos)" value={nDue} sub="3 dias sem resposta" color={P.orange} />
-        <StatCard label="A aguardar" value={nWait} sub="menos de 3 dias" color={P.textSec} />
-        <StatCard label="Enviados" value={nSent} sub="aguardando resposta" color={P.blue} />
-        <StatCard label="Concluidos" value={nDone} sub="respondeu ou max 2" color={P.green} />
-      </div>
-      {nDue > 0 && (<Panel style={{ marginBottom:14 }}><STitle>Prontos para Follow-Up ({nDue})</STitle>{pendingDue.map(function(fu: any, idx: number) { return <div key={'d'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}><div style={{ flex:2, color:P.redB, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div><div style={{ width:70, textAlign:'right', color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.followers.toLocaleString('pt-PT')}</div><div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div><div style={{ width:60, color:P.orange, fontSize:11, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.days}d</div><div style={{ width:60 }}><span style={{ padding:'2px 8px', borderRadius:3, background:P.orange+'18', border:'1px solid '+P.orange+'44', color:P.orange, fontSize:10, fontWeight:600 }}>F{fu.nextFu}</span></div></div>; })}</Panel>)}
-      {nWait > 0 && (<Panel style={{ marginBottom:14 }}><STitle>A Aguardar ({nWait})</STitle>{pendingWait.map(function(fu: any, idx: number) { return <div key={'w'+idx} style={{ display:'flex', gap:8, padding:'8px 0', borderBottom:'1px solid '+P.redDim, alignItems:'center' }}><div style={{ flex:2, color:P.textSec, fontSize:12, fontWeight:600, fontFamily:"'JetBrains Mono',monospace" }}>{fu.username}</div><div style={{ width:70, textAlign:'right', color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.followers.toLocaleString('pt-PT')}</div><div style={{ width:70 }}><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{fu.platform}</span></div><div style={{ width:60, color:P.textDim, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.days}d</div><div style={{ width:60, color:P.textSec, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{fu.dueIn}d</div></div>; })}</Panel>)}
-      {nDue === 0 && nWait === 0 && nSent === 0 && nDone === 0 && (<EmptyState icon="\u21BB" title="Sem follow-ups" sub="Os follow-ups aparecerao aqui 3 dias apos o primeiro contacto sem resposta." />)}
     </div>
   );
 }
@@ -740,8 +426,6 @@ export default function MBAApp() {
       <div style={{ flex:1, overflow:'hidden' }}>
         {activeTab === 'dashboard' && <DashboardTab key={dashKey} refreshKey={dashKey} onRefresh={function() { setDashKey(dashKey + 1); }} />}
         {activeTab === 'prospecting' && <ProspectingTab />}
-        {activeTab === 'messages' && <MessagesTab />}
-        {activeTab === 'followups' && <FollowUpsTab />}
         {activeTab === 'agent' && <AgentChat />}
       </div>
     </div>

@@ -1,6 +1,0 @@
-# MBA Brain - DM Service
-node_modules/
-.env
-*.png
-*.log
-tmp/
