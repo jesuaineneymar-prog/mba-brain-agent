@@ -43,9 +43,6 @@ upload/
 tool-results/
 *.log
 
-# Lock files - let Vercel generate fresh
-package-lock.json
-
 # Database
 *.db
 *.db-journal

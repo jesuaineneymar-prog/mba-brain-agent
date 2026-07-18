@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
-    "build": "next build --debug",
+    "build": "next build",
+    "vercel-build": "rm -rf node_modules/.cache .next && npm install && next build",
     "start": "next start",
     "lint": "eslint ."
   },
