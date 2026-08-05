@@ -17,7 +17,7 @@ const INP: React.CSSProperties = { width:'100%', padding:'9px 13px', background:
 const SEL: React.CSSProperties = { ...INP, appearance:'none' as any, cursor:'pointer' };
 
 const TABS = [
-  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'agent',label:'AGENTE IA'},
+  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},
 ];
 
 function getProfiles(): any[] {
@@ -264,9 +264,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
         </div>
         {profile.bio && <div style={{ marginBottom:14 }}><Lbl>Biografia</Lbl><div style={{ color:P.textSec, fontSize:12, whiteSpace:'pre-wrap' }}>{profile.bio}</div></div>}
         {profile.location && <div style={{ marginBottom:14 }}><Lbl>Localizacao</Lbl><div style={{ color:P.text, fontSize:12 }}>{profile.location}</div></div>}
-        <div style={{ marginBottom:14 }}><Lbl>Estado</Lbl><div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>{['prospect','contacted','replied','accepted','rejected'].map(function(s) { return <button key={s} onClick={function() { setStatus(s); }} style={{ padding:'5px 10px', borderRadius:4, border:'1px solid '+(status===s?(P.red):P.border), background:status===s?P.red+'18':'transparent', color:status===s?P.red:P.textSec, fontSize:11, cursor:'pointer' }}>{s}</button>; })}</div></div>
-        <div style={{ marginBottom:14 }}><Lbl>Notas</Lbl><textarea value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={3} style={{ ...INP, resize:'vertical' }} /></div>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}><Btn onClick={saveNotes}>Guardar</Btn><Btn variant="danger" onClick={blacklist}>Blacklist</Btn></div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:10 }}><Btn onClick={saveNotes}>Guardar</Btn></div>
       </div>
     </div>
   );
@@ -340,6 +338,20 @@ function ProspectingTab() {
             <input value={search} onChange={function(e) { setSearch(e.target.value); setPage(1); }} placeholder="Pesquisar..." style={{ ...INP, width:140 }} />
             <select value={filterPlat} onChange={function(e) { setFilterPlat(e.target.value); setPage(1); }} style={{ ...SEL as any, width:100 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option></select>
             <select value={filterStatus} onChange={function(e) { setFilterStatus(e.target.value); setPage(1); }} style={{ ...SEL as any, width:120 }}><option value="all">Todos</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option></select>
+            {total > 0 && <Btn variant="ghost" size="sm" onClick={function() {
+              var all = getProfiles();
+              if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; });
+              if (filterStatus !== 'all') all = all.filter(function(p: any) { return p.status === filterStatus; });
+              if (search) { var s = search.toLowerCase(); all = all.filter(function(p: any) { return (p.username || '').toLowerCase().indexOf(s) >= 0 || (p.displayName || '').toLowerCase().indexOf(s) >= 0; }); }
+              var csv = 'HANDLE,NOME,SEGUIDORES,PLATAFORMA,SCORE,LOCALIZACAO,ESTADO,NOTAS\n';
+              for (var i = 0; i < all.length; i++) {
+                var p = all[i];
+                csv += '"' + (p.username||'') + '","' + (p.displayName||'').replace(/"/g,'""') + '",' + (p.followers||0) + ',"' + (p.platform||'') + '",' + (p.score||0).toFixed(1) + ',"' + (p.location||'').replace(/"/g,'""') + '","' + (p.status||'prospect') + '","' + (p.notes||'').replace(/"/g,'""') + '"\n';
+              }
+              var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+              var url = URL.createObjectURL(blob);
+              var a = document.createElement('a'); a.href = url; a.download = 'mba_prospects_' + new Date().toISOString().slice(0,10) + '.csv'; a.click(); URL.revokeObjectURL(url);
+            }}>Exportar CSV</Btn>}
             {total > 0 && <Btn variant="danger" size="sm" onClick={deleteAllProfiles}>Apagar todos</Btn>}
           </div>
         </div>
@@ -426,7 +438,6 @@ export default function MBAApp() {
       <div style={{ flex:1, overflow:'hidden' }}>
         {activeTab === 'dashboard' && <DashboardTab key={dashKey} refreshKey={dashKey} onRefresh={function() { setDashKey(dashKey + 1); }} />}
         {activeTab === 'prospecting' && <ProspectingTab />}
-        {activeTab === 'agent' && <AgentChat />}
       </div>
     </div>
   );
