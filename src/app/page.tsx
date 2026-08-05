@@ -264,7 +264,9 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
         </div>
         {profile.bio && <div style={{ marginBottom:14 }}><Lbl>Biografia</Lbl><div style={{ color:P.textSec, fontSize:12, whiteSpace:'pre-wrap' }}>{profile.bio}</div></div>}
         {profile.location && <div style={{ marginBottom:14 }}><Lbl>Localizacao</Lbl><div style={{ color:P.text, fontSize:12 }}>{profile.location}</div></div>}
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginTop:10 }}><Btn onClick={saveNotes}>Guardar</Btn></div>
+        <div style={{ marginBottom:14 }}><Lbl>Estado</Lbl><div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>{['prospect','contacted','replied','accepted','rejected'].map(function(s) { return <button key={s} onClick={function() { setStatus(s); }} style={{ padding:'5px 10px', borderRadius:4, border:'1px solid '+(status===s?(P.red):P.border), background:status===s?P.red+'18':'transparent', color:status===s?P.red:P.textSec, fontSize:11, cursor:'pointer' }}>{s}</button>; })}</div></div>
+        <div style={{ marginBottom:14 }}><Lbl>Notas</Lbl><textarea value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={3} style={{ ...INP, resize:'vertical' }} /></div>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}><Btn onClick={saveNotes}>Guardar</Btn><Btn variant="danger" onClick={blacklist}>Blacklist</Btn></div>
       </div>
     </div>
   );
