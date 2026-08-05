@@ -55,9 +55,8 @@ function computeDashboard() {
     if (loc === 'AO') loc = 'Angola';
     locationCounts[loc] = (locationCounts[loc] || 0) + 1;
   }
-  for (var sk in statusCounts) { if (statusCounts.hasOwnProperty(sk)) statusBreakdown.push({status: sk, count: statusCounts[sk]}); }
   var statusBreakdown: any[] = [];
-  for (var sk2 in statusCounts) { if (statusCounts.hasOwnProperty(sk2)) statusBreakdown.push({status: sk2, count: statusCounts[sk2]}); }
+  for (var sk in statusCounts) { if (statusCounts.hasOwnProperty(sk)) statusBreakdown.push({status: sk, count: statusCounts[sk]}); }
   var platformBreakdown: any[] = [];
   for (var pk in platCounts) { if (platCounts.hasOwnProperty(pk)) platformBreakdown.push({platform: pk, count: platCounts[pk]}); }
   var locationBreakdown: any[] = [];
