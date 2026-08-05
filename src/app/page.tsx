@@ -17,7 +17,7 @@ const INP: React.CSSProperties = { width:'100%', padding:'9px 13px', background:
 const SEL: React.CSSProperties = { ...INP, appearance:'none' as any, cursor:'pointer' };
 
 const TABS = [
-  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},
+  {id:'dashboard',label:'DASHBOARD'},{id:'prospecting',label:'PROSPECCAO'},{id:'agent',label:'AGENTE IA'},
 ];
 
 function getProfiles(): any[] {
@@ -337,7 +337,6 @@ function ProspectingTab() {
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             <input value={search} onChange={function(e) { setSearch(e.target.value); setPage(1); }} placeholder="Pesquisar..." style={{ ...INP, width:140 }} />
             <select value={filterPlat} onChange={function(e) { setFilterPlat(e.target.value); setPage(1); }} style={{ ...SEL as any, width:100 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option></select>
-            <select value={filterStatus} onChange={function(e) { setFilterStatus(e.target.value); setPage(1); }} style={{ ...SEL as any, width:120 }}><option value="all">Todos</option><option value="prospect">Prospecto</option><option value="contacted">Contactado</option><option value="replied">Respondeu</option></select>
             {total > 0 && <Btn variant="ghost" size="sm" onClick={function() {
               var all = getProfiles();
               if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; });
@@ -438,6 +437,7 @@ export default function MBAApp() {
       <div style={{ flex:1, overflow:'hidden' }}>
         {activeTab === 'dashboard' && <DashboardTab key={dashKey} refreshKey={dashKey} onRefresh={function() { setDashKey(dashKey + 1); }} />}
         {activeTab === 'prospecting' && <ProspectingTab />}
+        {activeTab === 'agent' && <AgentChat />}
       </div>
     </div>
   );
