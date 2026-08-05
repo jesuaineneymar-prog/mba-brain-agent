@@ -168,7 +168,7 @@ function DashboardTab(props: { refreshKey: number; onRefresh: () => void }) {
     <div style={{ padding:16, overflowY:'auto', height:'100%' }}>
       <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
         <StatCard label="Total perfis" value={o.totalProfiles} sub="guardados" color={P.red} />
-        <StatCard label="Media seguidores" value={(o.avgFollowers||0).toLocaleString('pt-PT')} sub="por perfil" color={P.blue} />
+        <StatCard label="Media seguidores" value={(o.avgFollowers||0).toLocaleString('pt-PT')} sub="por perfil" color={P.orange} />
       </div>
       <Panel style={{ marginBottom:14 }}><STitle>Plataformas</STitle>
         {(d.platformBreakdown || []).map(function(item: any, i: number) { return <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 0', borderBottom:i<(d.platformBreakdown||[]).length-1?'1px solid '+P.border:'none' }}><span style={{ color:P.textSec, fontSize:12, textTransform:'capitalize' }}>{PLAT_NAMES[item.platform]||item.platform}</span><span style={{ color:P.text, fontSize:12, fontFamily:"'JetBrains Mono',monospace" }}>{item.count}</span></div>; })}
@@ -225,9 +225,8 @@ function ProfileDetailModal(props: { profile: any; onClose:()=>void; onUpdate:()
         </div>
         {profile.bio && <div style={{ marginBottom:14 }}><Lbl>Biografia</Lbl><div style={{ color:P.textSec, fontSize:12, whiteSpace:'pre-wrap' }}>{profile.bio}</div></div>}
         {profile.location && <div style={{ marginBottom:14 }}><Lbl>Localizacao</Lbl><div style={{ color:P.text, fontSize:12 }}>{profile.location}</div></div>}
-        <div style={{ marginBottom:14 }}><Lbl>Estado</Lbl><div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>{['prospect','contacted','replied','accepted','rejected'].map(function(s) { return <button key={s} onClick={function() { setStatus(s); }} style={{ padding:'5px 10px', borderRadius:4, border:'1px solid '+(status===s?(P.red):P.border), background:status===s?P.red+'18':'transparent', color:status===s?P.red:P.textSec, fontSize:11, cursor:'pointer' }}>{s}</button>; })}</div></div>
         <div style={{ marginBottom:14 }}><Lbl>Notas</Lbl><textarea value={notes} onChange={function(e) { setNotes(e.target.value); }} rows={3} style={{ ...INP, resize:'vertical' }} /></div>
-        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}><Btn onClick={saveNotes}>Guardar</Btn><Btn variant="danger" onClick={blacklist}>Blacklist</Btn></div>
+        <Btn onClick={saveNotes}>Guardar</Btn>
       </div>
     </div>
   );
@@ -239,7 +238,6 @@ function ProspectingTab() {
   const [results, setResults] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [filterPlat, setFilterPlat] = useState('all');
-  const [filterStatus, setFilterStatus] = useState('all');
   const [search, setSearch] = useState('');
   const [profiles, setProfiles] = useState<any[]>([]);
   const [page, setPage] = useState(1);
@@ -253,12 +251,11 @@ function ProspectingTab() {
   function loadProfiles() {
     var all = getProfiles();
     if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; });
-    if (filterStatus !== 'all') all = all.filter(function(p: any) { return p.status === filterStatus; });
     if (search) { var s = search.toLowerCase(); all = all.filter(function(p: any) { return (p.username || '').toLowerCase().indexOf(s) >= 0 || (p.displayName || '').toLowerCase().indexOf(s) >= 0; }); }
     setTotal(all.length); var start = (page - 1) * 50; setProfiles(all.slice(start, start + 50));
   }
 
-  useEffect(function() { if (mounted) loadProfiles(); }, [mounted, page, filterPlat, filterStatus, search]);
+  useEffect(function() { if (mounted) loadProfiles(); }, [mounted, page, filterPlat, search]);
 
   function deleteAllProfiles() {
     if (!confirm('Apagar TODOS os ' + total + ' perfis?')) return;
@@ -292,7 +289,6 @@ function ProspectingTab() {
   function exportCSV() {
     var all = getProfiles();
     if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; });
-    if (filterStatus !== 'all') all = all.filter(function(p: any) { return p.status === filterStatus; });
     if (search) { var s = search.toLowerCase(); all = all.filter(function(p: any) { return (p.username || '').toLowerCase().indexOf(s) >= 0 || (p.displayName || '').toLowerCase().indexOf(s) >= 0; }); }
     var csv = 'HANDLE,NOME,SEGUIDORES,PLATAFORMA,SCORE,LOCALIZACAO,ESTADO,NOTAS\n';
     for (var i = 0; i < all.length; i++) {
