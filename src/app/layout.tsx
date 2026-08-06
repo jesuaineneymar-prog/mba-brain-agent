@@ -22,6 +22,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-PT" suppressHydrationWarning>
+      <head>
+        <meta httpEquiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+        <meta httpEquiv="Pragma" content="no-cache" />
+        <meta httpEquiv="Expires" content="0" />
+      </head>
       <body
         className={`${geistMono.variable} antialiased`}
         style={{ background: '#0a0a0f', color: '#e8e8ef' }}
