@@ -106,13 +106,6 @@ function isValidFB(name: string): boolean {
   if (/^\d+$/.test(name)) return false;
   return true;
 }
-function isValidTT(un: string): boolean {
-  if (!un || un.length < 2 || un.length > 24) return false;
-  if (/^user\d+/i.test(un)) return false;
-  if (/\d{5,}/.test(un)) return false;
-  return true;
-}
-
 /* ===== FETCH com multi-fallback ===== */
 async function fetchHtml(url: string, timeoutMs: number): Promise<string | null> {
   // Metodo 1: ScrapingAnt proxy
@@ -165,8 +158,7 @@ function extractUsernamesFromUrls(urls: string[], plat: string): string[] {
   var re: RegExp;
   if (plat === 'instagram') re = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'<>?])/;
   else if (plat === 'facebook') re = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})(?:\/|$|[\s"'<>?])/;
-  else re = /tiktok\.com\/@([a-zA-Z0-9_.]{2,24})(?:\/|$|[\s"'<>?])/;
-  var validFn = plat === 'instagram' ? isValidIG : plat === 'facebook' ? isValidFB : isValidTT;
+  var validFn = plat === 'instagram' ? isValidIG : isValidFB;
   for (var i = 0; i < urls.length; i++) {
     var m = urls[i].match(re);
     if (m && validFn(m[1]) && found.indexOf(m[1]) < 0) found.push(m[1]);
@@ -195,20 +187,6 @@ function extractUsernames(html: string, re: RegExp): string[] {
 }
 
 /* ===== ENRICH FUNCTIONS ===== */
-async function enrichTTProfile(username: string): Promise<any> {
-  var html = await fetchHtml('https://www.tiktok.com/@' + username, 8000);
-  if (!html) return null;
-  var nickname = (html.match(/"nickname":"([^"]*)"/) || [])[1] || '';
-  var signature = (html.match(/"signature":"([^"]*)"/) || [])[1] || '';
-  var followers = parseInt((html.match(/"followerCount":(\d+)/) || [])[1]) || 0;
-  var following = parseInt((html.match(/"followingCount":(\d+)/) || [])[1]) || 0;
-  var videoCount = parseInt((html.match(/"videoCount":(\d+)/) || [])[1]) || 0;
-  var avatar = (html.match(/"avatarMedium":"([^"]*)"/) || [])[1] || '';
-  var verified = html.indexOf('"verified":true') >= 0;
-  if (!nickname && !signature && followers === 0) return null;
-  return { nickname, signature, followers, following, videoCount, avatar, verified };
-}
-
 async function enrichIGProfile(username: string): Promise<any> {
   var html = await fetchHtml('https://www.instagram.com/' + username + '/', 8000);
   if (!html) return null;
@@ -264,18 +242,7 @@ async function enrichFBPage(name: string): Promise<any> {
 function shuffle(arr: string[]): string[] {
   var a = arr.slice(); for (var i = a.length - 1; i > 0; i--) { var j = Math.floor(Math.random() * (i + 1)); var t = a[i]; a[i] = a[j]; a[j] = t; } return a;
 }
-function getTTQueries(): string[] {
-  return shuffle([
-    'angola influencer tiktok', 'angolano creator tiktok',
-    'luanda influencer tiktok', 'angola kizomba tiktok',
-    'angola lifestyle tiktok', 'angola musica tiktok',
-    'influenciador angolano tiktok', 'angola dance tiktok',
-    'angola comedy tiktok', 'benguela angola tiktok',
-    'angola moda tiktok', 'angola fitness tiktok',
-    'angola vlog tiktok', 'angola food blogger tiktok',
-    'angola photography tiktok'
-  ]);
-}
+// TikTok removed - Instagram and Facebook only
 function getIGQueries(): string[] {
   return shuffle([
     'angola influencer instagram', 'angolano creator instagram',
@@ -347,7 +314,7 @@ export async function POST(request: any) {
         raw.push({
           platform: plat, username: u, fullName: '',
           followers: 0, following: 0, postsCount: 0, bio: '',
-          profileUrl: 'https://' + (plat === 'tiktok' ? 'tiktok.com/@' : plat + '.com/') + u,
+          profileUrl: 'https://' + plat + '.com/' + u,
           avatarUrl: '', isVerified: false, category: '', _angolaQuery: source === 'search'
         });
       }
@@ -435,14 +402,14 @@ export async function POST(request: any) {
   // PHASE 2: ENRICHMENT — batches paralelos de 6
   // =============================================
   var enrichQueue: { profile: any; type: string }[] = [];
-  // Interleaved enrichment: IG > FB > TT
+  // Interleaved enrichment: IG > FB
   var maxLen = Math.max(doIG ? igRaw.length : 0, doFB ? fbRaw.length : 0);
   for (var ri = 0; ri < maxLen; ri++) {
     if (doIG && ri < igRaw.length && igRaw[ri].followers === 0) enrichQueue.push({ profile: igRaw[ri], type: 'ig' });
     if (doFB && ri < fbRaw.length && fbRaw[ri].followers === 0) enrichQueue.push({ profile: fbRaw[ri], type: 'fb' });
   }
 
-  var enriched = { ig: 0, fb: 0, tt: 0 };
+  var enriched = { ig: 0, fb: 0 };
   for (var bi = 0; bi < enrichQueue.length && timeLeft(t0, 56000); bi += 6) {
     var batch = enrichQueue.slice(bi, bi + 6);
     await Promise.all(batch.map(function(item) {
@@ -492,7 +459,7 @@ export async function POST(request: any) {
   logs.push('Qualified: IG=' + igQual.length + ' FB=' + fbQual.length);
 
   // =============================================
-  // PHASE 4: Interleave — IG > FB > TT, score priority
+  // PHASE 4: Interleave — IG > FB, score priority
   // =============================================
   var buckets: any[][] = [[], [], []];
   [igQual, fbQual].forEach(function(qual) {
