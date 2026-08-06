@@ -273,7 +273,7 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
 
 /* ===== PROSPECTING TAB ===== */
 function ProspectingTab() {
-  const [form, setForm] = useState({ platform:'instagram', location:'Angola' });
+  const [form, setForm] = useState({ platform:'all', location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
   const loadingRef = useRef(false);
   const [loading, setLoading] = useState(false);
@@ -343,7 +343,7 @@ function ProspectingTab() {
       <Panel style={{ marginBottom:14 }}>
         <STitle>Nova Prospeccao</STitle>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
-          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={function(e) { setForm({...form, platform: e.target.value}); }} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option></select></div>
+          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={function(e) { setForm({...form, platform: e.target.value}); }} style={SEL as any}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option></select></div>
           <div><Lbl>Localizacao</Lbl><input value={form.location} onChange={function(e) { setForm({...form, location: e.target.value}); }} style={INP} /></div>
         </div>
         <div style={{ color:P.textDim, fontSize:10, marginBottom:10 }}>Apenas perfis com 500-100.000 seguidores. Maioria Angolana.</div>
