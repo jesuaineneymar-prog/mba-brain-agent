@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-var GROQ_KEY = process.env.GROQ_API_KEY || '';
+var OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || '';
 
 export async function POST(req: Request) {
   try {
@@ -9,8 +9,8 @@ export async function POST(req: Request) {
     var conversationHistory = body.conversationHistory || [];
     var systemContext = body.systemContext || '';
 
-    if (!GROQ_KEY) {
-      return NextResponse.json({ reply: 'API key nao configurada. Define GROQ_API_KEY nas variaveis de ambiente.' });
+    if (!OPENROUTER_KEY) {
+      return NextResponse.json({ reply: 'API key nao configurada.' });
     }
 
     var messages: any[] = [
@@ -21,10 +21,10 @@ export async function POST(req: Request) {
     }
     messages.push({ role: 'user', content: message });
 
-    var r = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+    var r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + GROQ_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'llama-3.3-70b-versatile', messages: messages, max_tokens: 500, temperature: 0.7 })
+      headers: { 'Authorization': 'Bearer ' + OPENROUTER_KEY, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://mba-brain-agent.vercel.app', 'X-Title': 'MBA Brain Agent' },
+      body: JSON.stringify({ model: 'google/gemini-2.0-flash-001', messages: messages, max_tokens: 500, temperature: 0.7 })
     });
     var data = await r.json();
     var reply = data?.choices?.[0]?.message?.content || 'Sem resposta.';

@@ -328,20 +328,16 @@ export async function POST(request: any) {
   var target = Math.max(body.targetCount || 50, 50);
   var loc = (body.location || 'Angola').trim();
   var logs: string[] = [];
-  var doTT = platform === 'all' || platform === 'tiktok';
   var doIG = platform === 'all' || platform === 'instagram';
   var doFB = platform === 'all' || platform === 'facebook';
-  logs.push('Platform:' + platform + ' TT:' + doTT + ' IG:' + doIG + ' FB:' + doFB + ' target:' + target + ' minF:' + minF);
+  logs.push('Platform:' + platform + ' IG:' + doIG + ' FB:' + doFB + ' target:' + target + ' minF:' + minF);
 
-  var ttRaw: any[] = [], ttSeen = new Set<string>();
   var igRaw: any[] = [], igSeen = new Set<string>();
   var fbRaw: any[] = [], fbSeen = new Set<string>();
 
   var igUrlRe = /instagram\.com\/([a-zA-Z0-9_.]{3,30})(?:\/|$|[\s"'<>])/g;
   var fbUrlRe = /facebook\.com\/([a-zA-Z][a-zA-Z0-9._-]{2,59})(?:\/|$|[\s"'<>])/g;
-  var ttUrlRe = /tiktok\.com\/@([a-zA-Z0-9_.]{2,24})(?:\/|$|[\s"'<>])/g;
   var igJsonRe = /"username":"([a-zA-Z0-9_.]{3,30})"/g;
-  var ttJsonRe = /"uniqueId":"([a-zA-Z0-9_.]{2,24})"/g;
 
   function addUsers(users: string[], seen: Set<string>, raw: any[], plat: string, validator: Function, source: string) {
     for (var i = 0; i < users.length; i++) {
@@ -363,7 +359,7 @@ export async function POST(request: any) {
   // =============================================
   var allPromises: Promise<void>[] = [];
 
-  var igQ = getIGQueries(), fbQ = getFBQueries(), ttQ = getTTQueries();
+  var igQ = getIGQueries(), fbQ = getFBQueries();
 
   // --- 1A: Google Serper API (mais fiavel) ---
   if (SERPER_KEY) {
@@ -386,16 +382,6 @@ export async function POST(request: any) {
           }).catch(function() {})
         );
       })(fbQ[qi]);
-    }
-    // TT: 6 queries via Serper
-    for (var qi = 0; qi < Math.min(ttQ.length, 6); qi++) {
-      (function(query) {
-        allPromises.push(
-          serperSearch(query, 20).then(function(urls) {
-            if (urls.length > 0) addUsers(extractUsernamesFromUrls(urls, 'tiktok'), ttSeen, ttRaw, 'tiktok', isValidTT, 'serper');
-          }).catch(function() {})
-        );
-      })(ttQ[qi]);
     }
   }
 
@@ -424,44 +410,9 @@ export async function POST(request: any) {
       );
     })(fbQ[qi + (SERPER_KEY ? 8 : 0)] || fbQ[qi % fbQ.length]);
   }
-  // TT: 3 queries DDG
-  for (var qi = 0; qi < Math.min(ttQ.length, 3); qi++) {
-    (function(query) {
-      allPromises.push(
-        fetchHtml(makeDDGUrl(query), 6000).then(function(html) {
-          if (html) addUsers(extractUsernames(html, ttUrlRe), ttSeen, ttRaw, 'tiktok', isValidTT, 'ddg');
-        }).catch(function() {})
-      );
-    })(ttQ[qi + (SERPER_KEY ? 6 : 0)] || ttQ[qi % ttQ.length]);
-  }
 
   // --- 1C: Hashtag scraping directo (muito fiavel para usernames) ---
   var igHashtags = ['angola', 'luanda', 'kizomba', 'benguela', 'cabinda', 'huambo', 'angolano', 'lobito', 'luandaangola', 'angolainfluencer'];
-  var ttHashtags = ['angola', 'luanda', 'kizomba', 'benguela', 'cabinda', 'huambo', 'foryou', 'angolafrica'];
-
-  if (doIG) {
-    for (var hi = 0; hi < igHashtags.length; hi++) {
-      (function(tag) {
-        allPromises.push(
-          fetchHtml('https://www.instagram.com/explore/tags/' + tag + '/', 8000).then(function(html) {
-            if (html) addUsers(extractUsernames(html, igJsonRe), igSeen, igRaw, 'instagram', isValidIG, 'hashtag');
-          }).catch(function() {})
-        );
-      })(igHashtags[hi]);
-    }
-  }
-
-  if (doTT) {
-    for (var hi = 0; hi < ttHashtags.length; hi++) {
-      (function(tag) {
-        allPromises.push(
-          fetchHtml('https://www.tiktok.com/tag/' + tag, 8000).then(function(html) {
-            if (html) addUsers(extractUsernames(html, ttJsonRe), ttSeen, ttRaw, 'tiktok', isValidTT, 'hashtag');
-          }).catch(function() {})
-        );
-      })(ttHashtags[hi]);
-    }
-  }
 
   // --- 1D: Buscar em paginas de hashtag/search do IG para mais usernames ---
   if (doIG) {
@@ -478,18 +429,17 @@ export async function POST(request: any) {
   }
 
   await Promise.all(allPromises);
-  logs.push('Discovery (' + Math.round(Date.now() - t0) + 'ms): TT=' + ttRaw.length + ' IG=' + igRaw.length + ' FB=' + fbRaw.length);
+  logs.push('Discovery (' + Math.round(Date.now() - t0) + 'ms): IG=' + igRaw.length + ' FB=' + fbRaw.length);
 
   // =============================================
   // PHASE 2: ENRICHMENT — batches paralelos de 6
   // =============================================
   var enrichQueue: { profile: any; type: string }[] = [];
   // Interleaved enrichment: IG > FB > TT
-  var maxLen = Math.max(doIG ? igRaw.length : 0, doFB ? fbRaw.length : 0, doTT ? ttRaw.length : 0);
+  var maxLen = Math.max(doIG ? igRaw.length : 0, doFB ? fbRaw.length : 0);
   for (var ri = 0; ri < maxLen; ri++) {
     if (doIG && ri < igRaw.length && igRaw[ri].followers === 0) enrichQueue.push({ profile: igRaw[ri], type: 'ig' });
     if (doFB && ri < fbRaw.length && fbRaw[ri].followers === 0) enrichQueue.push({ profile: fbRaw[ri], type: 'fb' });
-    if (doTT && ri < ttRaw.length && ttRaw[ri].followers === 0) enrichQueue.push({ profile: ttRaw[ri], type: 'tt' });
   }
 
   var enriched = { ig: 0, fb: 0, tt: 0 };
@@ -500,7 +450,6 @@ export async function POST(request: any) {
         var data;
         if (item.type === 'ig') data = await enrichIGProfile(item.profile.username);
         else if (item.type === 'fb') data = await enrichFBPage(item.profile.username);
-        else data = await enrichTTProfile(item.profile.username);
         if (data) {
           item.profile.fullName = data.fullName || data.nickname || item.profile.fullName;
           item.profile.followers = data.followers || 0;
@@ -515,7 +464,7 @@ export async function POST(request: any) {
       })();
     }));
   }
-  logs.push('Enriched: TT=' + enriched.tt + '/' + ttRaw.length + ' IG=' + enriched.ig + '/' + igRaw.length + ' FB=' + enriched.fb + '/' + fbRaw.length);
+  logs.push('Enriched: IG=' + enriched.ig + '/' + igRaw.length + ' FB=' + enriched.fb + '/' + fbRaw.length);
 
   // =============================================
   // PHASE 3: Score + Filter
@@ -538,16 +487,15 @@ export async function POST(request: any) {
     return result;
   }
 
-  var ttQual = doTT ? scoreAndFilter(ttRaw) : [];
   var igQual = doIG ? scoreAndFilter(igRaw) : [];
   var fbQual = doFB ? scoreAndFilter(fbRaw) : [];
-  logs.push('Qualified: TT=' + ttQual.length + ' IG=' + igQual.length + ' FB=' + fbQual.length);
+  logs.push('Qualified: IG=' + igQual.length + ' FB=' + fbQual.length);
 
   // =============================================
   // PHASE 4: Interleave — IG > FB > TT, score priority
   // =============================================
   var buckets: any[][] = [[], [], []];
-  [igQual, fbQual, ttQual].forEach(function(qual) {
+  [igQual, fbQual].forEach(function(qual) {
     for (var i = 0; i < qual.length; i++) {
       var s = qual[i]._lusoScore || 0;
       if (s >= 50) buckets[0].push(qual[i]);
@@ -555,7 +503,7 @@ export async function POST(request: any) {
       else buckets[2].push(qual[i]);
     }
   });
-  var platOrder: Record<string, number> = { instagram: 0, facebook: 1, tiktok: 2 };
+  var platOrder: Record<string, number> = { instagram: 0, facebook: 1 };
   var qualified: any[] = [];
   for (var b = 0; b < 3; b++) {
     if (qualified.length >= target) break;
@@ -567,7 +515,7 @@ export async function POST(request: any) {
   // PHASE 5: Backfill — nao enriquecidos tambem contam
   // =============================================
   if (qualified.length < target) {
-    var allRaw = (doIG ? igRaw : []).concat(doFB ? fbRaw : []).concat(doTT ? ttRaw : []);
+    var allRaw = (doIG ? igRaw : []).concat(doFB ? fbRaw : []);
     var seenIds = new Set(qualified.map(function(p: any) { return (p.platform + ':' + p.username).toLowerCase(); }));
     for (var ri = 0; ri < allRaw.length && qualified.length < target; ri++) {
       var rp = allRaw[ri];
@@ -588,11 +536,11 @@ export async function POST(request: any) {
 
   var elapsed = Math.round((Date.now() - t0) / 1000);
   var finalProfiles = qualified.slice(0, target);
-  var totalRawAll = ttRaw.length + igRaw.length + fbRaw.length;
+  var totalRawAll = igRaw.length + fbRaw.length;
   var campaignName = body.campaignName || 'Campanha ' + new Date().toLocaleDateString('pt-PT');
   var message = finalProfiles.length === 0
     ? '0 perfis. Diminui o minimo de seguidores. ' + logs.join(' | ')
-    : igQual.length + ' IG + ' + fbQual.length + ' FB + ' + ttQual.length + ' TT = ' + finalProfiles.length + ' perfis em ' + elapsed + 's';
+    : igQual.length + ' IG + ' + fbQual.length + ' FB = ' + finalProfiles.length + ' perfis em ' + elapsed + 's';
 
   return NextResponse.json({
     success: true, status: 'completed',

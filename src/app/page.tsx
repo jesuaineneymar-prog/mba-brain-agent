@@ -31,10 +31,10 @@ function saveProfiles(profiles: any[]) {
 }
 
 /* ===== PLATFORM CONSTANTS ===== */
-var ALL_PLATFORMS = ['instagram', 'tiktok', 'facebook'];
-var PLAT_ICONS: Record<string,string> = { instagram: '📸', tiktok: '🎵', facebook: '👤' };
-var PLAT_NAMES: Record<string,string> = { instagram: 'Instagram', tiktok: 'TikTok', facebook: 'Facebook' };
-var PLAT_COLORS: Record<string,string> = { instagram: '#E1306C', tiktok: '#00f2ea', facebook: '#1877F2' };
+var ALL_PLATFORMS = ['instagram', 'facebook'];
+var PLAT_ICONS: Record<string,string> = { instagram: '📸', facebook: '👤' };
+var PLAT_NAMES: Record<string,string> = { instagram: 'Instagram', facebook: 'Facebook' };
+var PLAT_COLORS: Record<string,string> = { instagram: '#E1306C', facebook: '#1877F2' };
 
 function computeDashboard() {
   var profiles = getProfiles();
@@ -201,7 +201,7 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
   const loadDash = function() { setDashData(computeDashboard()); };
   useEffect(function() { loadDash(); }, [refreshKey]);
 
-  if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="\u25CE" title="Sem dados" sub="Execute uma prospeccao para ver resultados." /></Panel></div>;
+  if (!dashData) return <div style={{ padding:16 }}><Panel><EmptyState icon="" title="Sem dados" sub="Execute uma prospeccao para ver resultados." /></Panel></div>;
   var d = dashData; var o = d.overview || {};
 
   return (
@@ -216,13 +216,13 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
           {(d.platformBreakdown || []).length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{d.platformBreakdown.map(function(p: any, i: number) {
             var colors = [P.red, P.orange, P.blue, P.green]; var maxP = Math.max.apply(null, d.platformBreakdown.map(function(x: any) { return x.count; }).concat([1]));
             return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11, textTransform:'capitalize' }}>{PLAT_NAMES[p.platform] || p.platform}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.count}</span></div><BarComp value={p.count} max={maxP} color={colors[i%4]} h={8} /></div>;
-          })}</div> : <EmptyState icon="\u25CE" title="Sem dados" sub="Aguardando prospeccao" />}
+          })}</div> : <EmptyState icon="" title="Sem dados" sub="Aguardando prospeccao" />}
         </Panel>
         <Panel><STitle>Por Localizacao</STitle>
           {(d.locationBreakdown || []).length > 0 ? <div style={{ display:'flex', flexDirection:'column', gap:10 }}>{d.locationBreakdown.map(function(l: any, i: number) {
             var colors = [P.green, P.blue, P.orange, P.red]; var maxL = Math.max.apply(null, d.locationBreakdown.map(function(x: any) { return x.count; }).concat([1]));
             return <div key={i}><div style={{ display:'flex', justifyContent:'space-between', marginBottom:3 }}><span style={{ color:P.textSec, fontSize:11 }}>{l.location}</span><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{l.count}</span></div><BarComp value={l.count} max={maxL} color={colors[i%4]} h={8} /></div>;
-          })}</div> : <EmptyState icon="\u25CE" title="Sem dados" sub="Aguardando prospeccao" />}
+          })}</div> : <EmptyState icon="" title="Sem dados" sub="Aguardando prospeccao" />}
         </Panel>
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
@@ -234,7 +234,7 @@ function DashboardTab({ refreshKey, onRefresh }: { refreshKey: number; onRefresh
         <Panel><STitle>Top 10 Perfis</STitle>
           {(d.topProfiles || []).length > 0 ? d.topProfiles.map(function(p: any, i: number) {
             return <div key={i} style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 0', borderBottom:i<9?'1px solid '+P.border:'none' }}><div style={{ display:'flex', alignItems:'center', gap:8 }}><span style={{ color:P.textDim, fontSize:10, width:18, fontFamily:"'JetBrains Mono',monospace" }}>{i+1}.</span><span style={{ color:P.redB, fontSize:12, fontWeight:600 }}>{p.username}</span><span style={{ color:P.textDim, fontSize:10, textTransform:'capitalize' }}>{p.platform}</span></div><span style={{ color:P.text, fontSize:11, fontFamily:"'JetBrains Mono',monospace" }}>{p.followers > 0 ? p.followers.toLocaleString('pt-PT') : '\u2014'}</span></div>;
-          }) : <EmptyState icon="\u25CE" title="Sem perfis" sub="Aguardando prospeccao" />}
+          }) : <EmptyState icon="" title="Sem perfis" sub="Aguardando prospeccao" />}
         </Panel>
       </div>
     </div>
@@ -322,10 +322,8 @@ function ProspectingTab() {
       <Panel style={{ marginBottom:14 }}>
         <STitle>Nova Prospeccao</STitle>
         <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:10 }}>
-          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={function(e) { setForm({...form, platform: e.target.value}); }} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option><option value="all">Todas</option></select></div>
+          <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={function(e) { setForm({...form, platform: e.target.value}); }} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option></select></div>
           <div><Lbl>Localizacao</Lbl><input value={form.location} onChange={function(e) { setForm({...form, location: e.target.value}); }} style={INP} /></div>
-          <div><Lbl>Min. Seguidores</Lbl><input type="number" value={form.minFollowers} onChange={function(e) { setForm({...form, minFollowers: Number(e.target.value)}); }} style={INP} /></div>
-          <div><Lbl>Max. Seguidores</Lbl><input type="number" value={form.maxFollowers} onChange={function(e) { setForm({...form, maxFollowers: Number(e.target.value)}); }} style={INP} /></div>
         </div>
         <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar...' : 'Iniciar Prospeccao'}</Btn>
         {prospectMsg && <div style={{ color: prospectMsg.indexOf('LIMITE') >= 0 ? '#ff4444' : P.textSec, fontSize:11, marginTop:8, fontWeight: prospectMsg.indexOf('LIMITE') >= 0 ? 700 : 400 }}>{prospectMsg}</div>}
@@ -335,8 +333,8 @@ function ProspectingTab() {
           <STitle>Perfis ({total})</STitle>
           <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
             <input value={search} onChange={function(e) { setSearch(e.target.value); setPage(1); }} placeholder="Pesquisar..." style={{ ...INP, width:140 }} />
-            <select value={filterPlat} onChange={function(e) { setFilterPlat(e.target.value); setPage(1); }} style={{ ...SEL as any, width:100 }}><option value="all">Todas</option><option value="instagram">Instagram</option><option value="facebook">Facebook</option><option value="tiktok">TikTok</option></select>
-            {total > 0 && <Btn variant="ghost" size="sm" onClick={function() { var all = getProfiles(); if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; }); if (search) { var s = search.toLowerCase(); all = all.filter(function(p: any) { return (p.username || '' || '').toLowerCase().indexOf(s) >= 0 || (p.displayName || '').toLowerCase().indexOf(s) >= 0; }); } var csv = 'HANDLE,NOME,SEGUIDORES,PLATAFORMA,SCORE,LOCALIZACAO,ESTADO,NOTAS\n'; for (var ci = 0; ci < all.length; ci++) { var cp = all[ci]; csv += '"' + (cp.username||'') + '","' + (cp.displayName||'').replace(/"/g,'""') + '",' + (cp.followers||0) + ',"' + (cp.platform||'') + '",' + (cp.score||0).toFixed(1) + ',"' + (cp.location||'').replace(/"/g,'""') + '","' + (cp.status||'prospect') + '","' + (cp.notes||'').replace(/"/g,'""') + '"\n'; } var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = 'mba_prospects_' + new Date().toISOString().slice(0,10) + '.csv'; a.click(); URL.revokeObjectURL(url); }}>Exportar CSV</Btn>}
+            
+            {total > 0 && <Btn variant="ghost" size="sm" onClick={function() { var all = getProfiles(); if (filterPlat !== 'all') all = all.filter(function(p: any) { return p.platform === filterPlat; }); if (search) { var s = search.toLowerCase(); all = all.filter(function(p: any) { return (p.username || '').toLowerCase().indexOf(s) >= 0 || (p.displayName || '').toLowerCase().indexOf(s) >= 0; }); } var csv = 'HANDLE,NOME,SEGUIDORES,PLATAFORMA,SCORE,LOCALIZACAO,NOTAS\n'; for (var ci = 0; ci < all.length; ci++) { var cp = all[ci]; csv += '"' + (cp.username||'') + '","' + (cp.displayName||'').replace(/"/g,'""') + '",' + (cp.followers||0) + ',"' + (cp.platform||'') + '",' + (cp.score||0).toFixed(1) + ',"' + (cp.location||'').replace(/"/g,'""') + '","' + (cp.notes||'').replace(/"/g,'""') + '"\n'; } var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); var url = URL.createObjectURL(blob); var a = document.createElement('a'); a.href = url; a.download = 'mba_prospects_' + new Date().toISOString().slice(0,10) + '.csv'; a.click(); URL.revokeObjectURL(url); }}>Exportar CSV</Btn>}
             {total > 0 && <Btn variant="danger" size="sm" onClick={deleteAllProfiles}>Apagar todos</Btn>}
           </div>
         </div>
