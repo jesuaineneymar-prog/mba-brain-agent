@@ -20,8 +20,7 @@ export default function SetupCookies() {
   const [igCsrf, setIgCsrf] = useState('');
   const [igDsUserId, setIgDsUserId] = useState('');
   const [fbCookie, setFbCookie] = useState('');
-  const [ttSessionid, setTtSessionid] = useState('');
-  const [ttCsrf, setTtCsrf] = useState('');
+
   const [statuses, setStatuses] = useState<Record<string, CookieStatus>>({});
   const [saved, setSaved] = useState(false);
   const [showHelp, setShowHelp] = useState<string | null>(null);
@@ -36,8 +35,6 @@ export default function SetupCookies() {
       if (d.igCsrf) setIgCsrf(d.igCsrf);
       if (d.igDsUserId) setIgDsUserId(d.igDsUserId);
       if (d.fbCookie) setFbCookie(d.fbCookie);
-      if (d.ttSessionid) setTtSessionid(d.ttSessionid);
-      if (d.ttCsrf) setTtCsrf(d.ttCsrf);
       if (Object.keys(d).length > 0) setSaved(true);
     } catch(e) {}
 
@@ -48,8 +45,6 @@ export default function SetupCookies() {
       else parts.push('IG --');
       if (d.fbConfigured) parts.push('FB OK');
       else parts.push('FB --');
-      if (d.ttConfigured) parts.push('TT OK');
-      else parts.push('TT --');
       setGlobalStatus(parts.join(' | '));
     }).catch(() => {});
   }, []);
@@ -66,7 +61,7 @@ export default function SetupCookies() {
     return {
       instagram: { sessionid: igSessionid.trim(), csrftoken: igCsrf.trim(), ds_user_id: igDsUserId.trim() },
       facebook: { cookie: fbCookie.trim() },
-      tiktok: { sessionid: ttSessionid.trim(), csrf: ttCsrf.trim() },
+
     };
   }
 
@@ -82,10 +77,7 @@ export default function SetupCookies() {
       setStatuses(prev => ({ ...prev, [platform]: { platform, valid: false, error: 'Preenche a cookie do Facebook', loading: false } }));
       return;
     }
-    if (platform === 'tiktok' && !creds.tiktok.sessionid) {
-      setStatuses(prev => ({ ...prev, [platform]: { platform, valid: false, error: 'Preenche o sessionid do TikTok', loading: false } }));
-      return;
-    }
+
 
     try {
       const res = await fetch(API, {
@@ -112,8 +104,7 @@ export default function SetupCookies() {
       igCsrf: igCsrf.trim(),
       igDsUserId: igDsUserId.trim(),
       fbCookie: fbCookie.trim(),
-      ttSessionid: ttSessionid.trim(),
-      ttCsrf: ttCsrf.trim(),
+
     };
     localStorage.setItem('mba_cookies', JSON.stringify(data));
 
@@ -131,7 +122,7 @@ export default function SetupCookies() {
   }
 
   function testDm(platform: string) {
-    const usernames: Record<string, string> = { instagram: 'meta', facebook: 'zuck', tiktok: 'tiktok' };
+    const usernames: Record<string, string> = { instagram: 'meta', facebook: 'zuck' };
     const testUser = usernames[platform] || 'test';
     if (confirm('Enviar DM de teste para ' + (platform === 'instagram' ? '@' : '') + testUser + '?')) {
       const creds = getCredentials();
@@ -161,13 +152,7 @@ export default function SetupCookies() {
         { label: 'cookie completa (tudo)', value: fbCookie, set: setFbCookie, placeholder: 'Cole TODOS os cookies do facebook.com (document.cookie)', big: true },
       ]
     },
-    {
-      id: 'tiktok', name: 'TikTok', icon: 'TT', color: '#25F4EE',
-      fields: [
-        { label: 'sessionid', value: ttSessionid, set: setTtSessionid, placeholder: 'Texto longo depois de sessionid=' },
-        { label: 'csrf_session_token (opcional)', value: ttCsrf, set: setTtCsrf, placeholder: 'Depois de csrf_session_token=' },
-      ]
-    }
+
   ];
 
   const helpContent: Record<string, string> = {
@@ -211,24 +196,6 @@ NO TELEFONE (Chrome):
 6. Copia TUDO e cola aqui
 
 O campo "cookie completa" recebe TODOS os cookies de uma vez.`,
-
-    tiktok: `COMO TIRAR COOKIES DO TIKTOK:
-
-NO COMPUTADOR:
-1. Abre chrome e vai a tiktok.com
-2. Faz login
-3. Pressiona F12 (DevTools)
-4. Vai a Application > Cookies > tiktok.com
-5. Copia: sessionid, csrf_session_token
-
-NO TELEFONE (Chrome):
-1. Abre tiktok.com no Chrome
-2. Faz login
-3. Toca nos 3 pontinhos > "Site para computador"
-4. 3 pontinhos > "Ferramentas de desenvolvedor"
-5. Console > escreve: document.cookie
-6. Procura sessionid=...
-7. Copia para o campo certo`,
 
     bookmarklet: `METODO FACIL - BOOKMARKLET:
 
@@ -284,7 +251,7 @@ javascript:void((function(){var c=document.cookie;var r='';var pairs=c.split(';'
                 <div style={{
                   width: '44px', height: '44px', borderRadius: '12px',
                   background: platform.color, display: 'flex', alignItems: 'center',
-                  justifyContent: 'center', color: platform.id === 'tiktok' ? '#000' : '#fff',
+                  justifyContent: 'center', color: '#fff',
                   fontWeight: 700, fontSize: '16px'
                 }}>{platform.icon}</div>
                 <div>

@@ -181,7 +181,7 @@ function LoginScreen() {
       </div>
       {booting ? (
         <div style={{ position:'absolute', bottom:'20%', fontFamily:"'JetBrains Mono',monospace", fontSize:11, textAlign:'center' }}>
-          {lines.map(function(l, i) { return <div key={i} style={{ color: i<=bootStep ? P.green : P.textDim, marginBottom:4 }}>{i<=bootStep?'\u2713':'\u25CB'} {l}</div>; })}
+          {lines.map(function(l, i) { return <div key={i} style={{ color: i<=bootStep ? P.green : P.textDim, marginBottom:4 }}>{i<=bootStep?'\u2713':'-'} {l}</div>; })}
         </div>
       ) : (
         <div style={{ position:'absolute', bottom:'18%', display:'flex', flexDirection:'column', alignItems:'center', gap:10 }}>
@@ -273,8 +273,9 @@ function ProfileDetailModal({ profile, onClose, onUpdate }: { profile: any; onCl
 
 /* ===== PROSPECTING TAB ===== */
 function ProspectingTab() {
-  const [form, setForm] = useState({ platform:'all', minFollowers:500, maxFollowers:100000, location:'Angola' });
+  const [form, setForm] = useState({ platform:'instagram', location:'Angola' });
   const [results, setResults] = useState<any[]>([]);
+  const loadingRef = useRef(false);
   const [loading, setLoading] = useState(false);
   const [filterPlat, setFilterPlat] = useState('all');
   const [search, setSearch] = useState('');
@@ -293,28 +294,48 @@ function ProspectingTab() {
   useEffect(function() { loadProfiles(); }, [page, filterPlat, search]);
   const deleteAllProfiles = function() { if (!confirm('Apagar TODOS os ' + total + ' perfis?')) return; if (typeof window !== 'undefined' && window.localStorage) { window.localStorage.removeItem('mba_profiles'); } setProfiles([]); setTotal(0); setResults([]); setPage(1); };
 
-  const runProspect = async function() {
+  const runProspect = useCallback(async function() {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
     setLoading(true); setResults([]); setProspectMsg('A procurar perfis angolanos...');
-    var prospectBody: any = { ...form, targetCount: 50 };
+    var prospectBody: any = { platform: form.platform, minFollowers: 500, maxFollowers: 100000, location: form.location, targetCount: 50 };
     const res = await fetch('/api/prospect', { method:'POST', headers:{'Content-Type':'application/json','x-mba-session':'active'}, body:JSON.stringify(prospectBody) }).catch(function() { return null; });
-    if (!res) { setProspectMsg('Erro de conexao'); setLoading(false); return; }
-    if (!res.ok) { const errData = await res.json().catch(function() { return null; }); setProspectMsg((errData && errData.error) ? errData.error : ('Erro HTTP ' + res.status)); setLoading(false); return; }
+    if (!res) { setProspectMsg('Erro de conexao'); setLoading(false); loadingRef.current = false; return; }
+    if (!res.ok) { const errData = await res.json().catch(function() { return null; }); setProspectMsg((errData && errData.error) ? errData.error : ('Erro HTTP ' + res.status)); setLoading(false); loadingRef.current = false; return; }
     const d = await res.json().catch(function() { return null; });
-    if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); return; }
+    if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); loadingRef.current = false; return; }
     setProspectMsg(d.message || '');
     if (d.profiles && d.profiles.length > 0) {
-      setResults(d.profiles);
+      // Strict platform filter: only keep profiles matching selected platform
+      var filtered = d.profiles.filter(function(p: any) { return p.platform === form.platform; });
+      setResults(filtered);
       var saved = getProfiles();
-      var savedIds = new Set(saved.map(function(s: any) { return s.username + ':' + s.platform; }));
-      var newOnes = d.profiles.filter(function(p: any) { return !savedIds.has(p.username + ':' + p.platform); });
-      var merged = saved.concat(newOnes);
+      // Dedup: never add a profile that already exists
+      var seenKeys: string[] = [];
+      if (typeof window !== 'undefined') { try { seenKeys = JSON.parse(window.localStorage.getItem('mba_seen_ids') || '[]'); } catch(e) { seenKeys = []; } }
+      var seenSet = new Set(seenKeys);
+      var newOnes: any[] = [];
+      for (var ni = 0; ni < filtered.length; ni++) {
+        var p = filtered[ni];
+        var key = (p.username + ':' + p.platform).toLowerCase();
+        if (!seenSet.has(key)) {
+          seenSet.add(key);
+          newOnes.push(p);
+        }
+      }
+      // Save seen IDs permanently
+      if (typeof window !== 'undefined') { window.localStorage.setItem('mba_seen_ids', JSON.stringify(Array.from(seenSet))); }
+      var savedIds = new Set(saved.map(function(s: any) { return (s.username + ':' + s.platform).toLowerCase(); }));
+      var trulyNew = newOnes.filter(function(p: any) { return !savedIds.has((p.username + ':' + p.platform).toLowerCase()); });
+      var merged = saved.concat(trulyNew);
       saveProfiles(merged); setProfiles(merged); setTotal(merged.length); setPage(1);
 
-      var platNames = newOnes.map(function(p: any) { return p.platform; }).filter(function(v: string, i: number, a: string[]) { return a.indexOf(v) === i; }).map(function(p: string) { return PLAT_NAMES[p] || p; });
-      setProspectMsg('Prospeccao feita! ' + newOnes.length + ' novos perfis (' + platNames.join(', ') + ').');
+      var platNames = trulyNew.map(function(p: any) { return p.platform; }).filter(function(v: string, i: number, a: string[]) { return a.indexOf(v) === i; }).map(function(p: string) { return PLAT_NAMES[p] || p; });
+      setProspectMsg('Prospeccao feita! ' + trulyNew.length + ' novos perfis (' + platNames.join(', ') + ').');
     }
     setLoading(false);
-  };
+    loadingRef.current = false;
+  }, [form]);
 
   var filtered = results.length > 0 ? results : profiles;
   return (
@@ -325,6 +346,7 @@ function ProspectingTab() {
           <div><Lbl>Plataforma</Lbl><select value={form.platform} onChange={function(e) { setForm({...form, platform: e.target.value}); }} style={SEL as any}><option value="instagram">Instagram</option><option value="facebook">Facebook</option></select></div>
           <div><Lbl>Localizacao</Lbl><input value={form.location} onChange={function(e) { setForm({...form, location: e.target.value}); }} style={INP} /></div>
         </div>
+        <div style={{ color:P.textDim, fontSize:10, marginBottom:10 }}>Apenas perfis com 500-100.000 seguidores. Maioria Angolana.</div>
         <Btn onClick={runProspect} disabled={loading}>{loading ? 'A procurar...' : 'Iniciar Prospeccao'}</Btn>
         {prospectMsg && <div style={{ color: prospectMsg.indexOf('LIMITE') >= 0 ? '#ff4444' : P.textSec, fontSize:11, marginTop:8, fontWeight: prospectMsg.indexOf('LIMITE') >= 0 ? 700 : 400 }}>{prospectMsg}</div>}
       </Panel>
@@ -418,9 +440,12 @@ export default function MBAApp() {
       <div style={{ display:'flex', borderBottom:'1px solid '+P.border, overflowX:'auto', flexShrink:0, background:P.surface }}>
         {TABS.map(function(t) { return <button key={t.id} onClick={function() { setActiveTab(t.id); }} style={{ padding:'10px 16px', border:'none', borderBottom:activeTab===t.id?'2px solid '+P.red:'2px solid transparent', background:'transparent', color:activeTab===t.id?P.redB:P.textDim, fontSize:11, fontWeight:activeTab===t.id?700:500, cursor:'pointer', whiteSpace:'nowrap', letterSpacing:'.5px', transition:'all .15s' }}>{t.label}</button>; })}
       </div>
-      <div style={{ flex:1, overflow:'hidden' }}>
+      <div style={{ flex:1, overflow:'hidden', position:'relative' }}>
+        {/* ProspectingTab always mounted (hidden with CSS) so background prospection continues */}
+        <div style={{ position:'absolute', inset:0, visibility:activeTab==='prospecting'?'visible':'hidden', pointerEvents:activeTab==='prospecting'?'auto':'none' }}>
+          <ProspectingTab />
+        </div>
         {activeTab === 'dashboard' && <DashboardTab key={dashKey} refreshKey={dashKey} onRefresh={function() { setDashKey(dashKey + 1); }} />}
-        {activeTab === 'prospecting' && <ProspectingTab />}
         {activeTab === 'agent' && <AgentChat />}
       </div>
     </div>
