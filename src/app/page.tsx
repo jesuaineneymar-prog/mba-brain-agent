@@ -306,8 +306,8 @@ function ProspectingTab() {
     if (!d) { setProspectMsg('Erro ao processar resposta'); setLoading(false); loadingRef.current = false; return; }
     setProspectMsg(d.message || '');
     if (d.profiles && d.profiles.length > 0) {
-      // Strict platform filter: only keep profiles matching selected platform
-      var filtered = d.profiles.filter(function(p: any) { return p.platform === form.platform; });
+      // Strict platform filter: only keep profiles matching selected platform (when not 'all')
+      var filtered = form.platform === 'all' ? d.profiles : d.profiles.filter(function(p: any) { return p.platform === form.platform; });
       setResults(filtered);
       var saved = getProfiles();
       // Dedup: never add a profile that already exists
