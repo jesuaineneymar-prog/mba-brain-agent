@@ -92,7 +92,7 @@ ARQUITECTURA TECNICA:
 - Autenticacao: Codigo de acesso local (MBA2026)
 - Dados: Guardados em localStorage do navegador (perfis, cookies, sessoes)
 - API Routes: /api/prospect (prospeccao), /api/respond (agente IA), /api/scrape (scraping)
-- Deploy: Vercel (https://mba-brain-agent-jesuaineneymar-3622s-projects.vercel.app)
+- Deploy: Vercel (https://mwango-brain-agent.vercel.app)
 - Repositorio: GitHub (jesuaineneymar-prog/mba-brain-agent)
 
 CONFIGURACAO DE COOKIES:

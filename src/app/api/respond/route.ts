@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { MWANGO_KNOWLEDGE } from '@/lib/mwango-knowledge';
 
-var OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || '';
-var GEMINI_KEY = process.env.GEMINI_API_KEY || '';
+var NVIDIA_KEY = process.env.NVIDIA_API_KEY || '';
 
 export async function POST(req: Request) {
   try {
@@ -15,11 +14,11 @@ export async function POST(req: Request) {
       'Este assistente esta integrado no MBA Brain Agent, um sistema interno de prospeccao inteligente. ' +
       'O sistema NAO envia mensagens directas - serve apenas para encontrar e analisar perfis. ' +
       'Responde sempre em portugues. Seja conciso mas completo. ' +
-      'Conhece tudo sobre a empresa Mwango Brain e o sistema MBA Brain Agent.\n\n' +
+      'Conhece tudo sobre a empresa Mwango Brain, seus servicos, projectos, redes sociais, historia, valores e o sistema MBA Brain Agent.\n\n' +
       '=== CONHECIMENTO DA EMPRESA E SISTEMA ===\n' + MWANGO_KNOWLEDGE + '\n\n' +
       '=== ESTADO ACTUAL DO SISTEMA ===\n' + systemContext;
 
-    // Build messages array
+    // Build messages array (OpenAI-compatible format)
     var messages: any[] = [
       { role: 'system', content: systemText }
     ];
@@ -30,39 +29,54 @@ export async function POST(req: Request) {
 
     var reply = '';
 
-    // Try Gemini first
-    if (GEMINI_KEY) {
+    // Use NVIDIA NIM API (OpenAI-compatible)
+    if (NVIDIA_KEY) {
       try {
-        var contents: any[] = [];
-        for (var i = 0; i < messages.length; i++) {
-          if (messages[i].role === 'system') continue;
-          contents.push({ role: messages[i].role === 'assistant' ? 'model' : 'user', parts: [{ text: messages[i].content }] });
-        }
-        var r = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=' + GEMINI_KEY, {
+        var r = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ systemInstruction: { parts: [{ text: systemText }] }, contents: contents, generationConfig: { maxOutputTokens: 800, temperature: 0.7 } })
+          headers: {
+            'Authorization': 'Bearer ' + NVIDIA_KEY,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            model: 'meta/llama-3.1-405b-instruct',
+            messages: messages,
+            max_tokens: 1024,
+            temperature: 0.7,
+            top_p: 0.9
+          })
         });
         if (r.ok) {
           var data = await r.json();
-          reply = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+          reply = data?.choices?.[0]?.message?.content || '';
+        } else {
+          var errText = await r.text();
+          console.error('NVIDIA API error:', r.status, errText);
+          // Fallback to smaller model if 405b fails
+          try {
+            var r2 = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': 'Bearer ' + NVIDIA_KEY,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                model: 'meta/llama-3.1-70b-instruct',
+                messages: messages,
+                max_tokens: 1024,
+                temperature: 0.7,
+                top_p: 0.9
+              })
+            });
+            if (r2.ok) {
+              var data2 = await r2.json();
+              reply = data2?.choices?.[0]?.message?.content || '';
+            }
+          } catch(e2) {}
         }
-      } catch(e) {}
-    }
-
-    // Fallback to OpenRouter with free model
-    if (!reply && OPENROUTER_KEY) {
-      try {
-        var r2 = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-          method: 'POST',
-          headers: { 'Authorization': 'Bearer ' + OPENROUTER_KEY, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://mba-brain-agent.vercel.app', 'X-Title': 'MBA Brain Agent' },
-          body: JSON.stringify({ model: 'nvidia/nemotron-3-nano-30b-a3b:free', messages: messages, max_tokens: 800, temperature: 0.7 })
-        });
-        if (r2.ok) {
-          var data2 = await r2.json();
-          reply = data2?.choices?.[0]?.message?.content || '';
-        }
-      } catch(e) {}
+      } catch(e) {
+        console.error('NVIDIA API exception:', e);
+      }
     }
 
     if (!reply) reply = 'Sem resposta no momento. Tente novamente em alguns segundos.';
