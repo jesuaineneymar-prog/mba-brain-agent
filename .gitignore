@@ -50,3 +50,4 @@ db/
 
 # Bun
 bun.lock
+.env*
